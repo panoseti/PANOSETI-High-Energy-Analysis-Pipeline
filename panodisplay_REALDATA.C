@@ -6,6 +6,7 @@
 * living or dead, is purely coincidence.
 *
 * Author: Nik Korzoun
+* Jamie is awesome
 */
 
 #include "TCanvas.h"
