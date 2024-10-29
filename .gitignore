@@ -1,0 +1,6 @@
+*.vscode
+*.ipynb_checkpoints
+# compiled C code
+*.d
+*.so
+*.pcm
