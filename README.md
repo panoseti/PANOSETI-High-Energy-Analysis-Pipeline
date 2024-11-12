@@ -20,8 +20,5 @@ Tools to analyze images of air showers captured by [PANOSETI](https://panoseti.u
 ### Installation
 * Install dependencies and be sure to compile corsikaIOreader with `make corsikaIOreader`
 
-### Example
-
-
-### SLURM
-Scripts for submitting jobs and analyzing data can be found [here](https://github.com/nkorzoun/panoseti-simulation/tree/main)
+### Examples
+Examples can be found on the [repo wiki](https://github.com/nkorzoun/PANOSETI-High-Energy-Analysis-Pipeline/wiki)
