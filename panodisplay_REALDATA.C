@@ -54,12 +54,17 @@ TRandom3 *r = new TRandom3(seed);
 const char *prefix;
 TFile *f;
 TTree *t;
-int Ntel=3; //hard-coded for now
+const int Ntel=3; //hard-coded for now
 
 Int_t           array_event_num;
-Int_t           array_tel_event[3];
-UShort_t        array_scope_id[3];
-Short_t        array_pix_data[3][32][32];
+Int_t           array_tel_event[Ntel];
+UShort_t        array_scope_id[Ntel];
+Short_t         array_pix_data[Ntel][32][32];
+Double_t        array_pcap_time[Ntel];
+
+// pointing offset correction
+bool            applyCorrections=false;
+Double_t        corrections[Ntel][6];
 
 // Reconstructed params
 float fShower_Xoffset = -99999.;
@@ -85,6 +90,7 @@ void readFile(const char *infile_prefix){
     t->SetBranchAddress("array_tel_event",array_tel_event);
     t->SetBranchAddress("array_scope_id",array_scope_id);
     t->SetBranchAddress("array_pix_data",array_pix_data);
+    t->SetBranchAddress("array_pcap_time",array_pcap_time);
 }
 
 //! reduce large angle to intervall 0, 2*pi
@@ -494,101 +500,66 @@ TH2I* clean(TH2I* image){
 
     */
 }
+/*
+* prepares the code for correction of pointing offsets
+* telNumber starting at 1
+*/
+void setCorrections(int telNumber, double t_initial, double x_initial, double y_initial, double vx, double vy, double rotation_angle){
+    corrections[telNumber-1][0] = t_initial;
+    corrections[telNumber-1][1] = x_initial;
+    corrections[telNumber-1][2] = y_initial;
+    corrections[telNumber-1][3] = vx;
+    corrections[telNumber-1][4] = vy;
+    corrections[telNumber-1][5] = rotation_angle;
+    applyCorrections=true;
+}
 
 /*
 * Calculate offset based on approximated field drift velocity
 * assumes drift velocity is linear with time
-* times are obtained from file name
-* times used in units of minutes
+* times are obtained from pcap timestamp 
+* times used in units of seconds (unix time)
 * arrays in function arguments are structured so elements are ordered like {before flip, after flip}
 */
 //std::tuple<int,int> calcOffset(double pix_start[4], double pix_end[4], int time_start[2], int time_end[2]){
-std::tuple<int,int> calcOffset(int initial_offset_x[2], int initial_offset_y[2], double drift_velocity_x[2], double drift_velocity_y[2]){
+std::tuple<double,double> calcOffset(double time, double t_initial, int initial_offset_x, int initial_offset_y, double drift_velocity_x, double drift_velocity_y){
 
-    // get time (approximate)
-    // cout<<f->GetName()<<endl;
-    int h = 60 * std::stoi( std::string(f->GetName()).substr(45,2));
-    int m = std::stoi( std::string(f->GetName()).substr(47,2));
-    int s = std::stoi( std::string(f->GetName()).substr(49,2)) / 60;
-    int t = h+m+s;
-    const int t0 = 310;
+    // get delta t
+    time=time-t_initial;
 
-    // check meridian flip
-    const int meridian = 441; // ~7:41 pm
-    int x = 0;
-    int y = 0;
+    double x = 0;
+    double y = 0;
 
-    int x0 = initial_offset_x[0];
-    int y0 = initial_offset_y[0];
-    double vx = drift_velocity_x[0];
-    double vy = drift_velocity_y[0];
+    double x0 = initial_offset_x;
+    double y0 = initial_offset_y;
+    double vx = drift_velocity_x;
+    double vy = drift_velocity_y;
 
-    if(t>meridian){
-        x0 = initial_offset_x[1];
-        y0 = initial_offset_y[1];
-        vx = drift_velocity_x[1];
-        vy = drift_velocity_y[1];
-    }
-
-    x = x0+vx*(t-t0);
-    y = y0+vx*(t-t0);
+    x = x0+vx*time;
+    y = y0+vy*time;
 
     return std::make_tuple(x,y);
-
-
-    /*
-    // get time (approximate)
-    // cout<<f->GetName()<<endl;
-    int h = 60 * std::stoi( std::string(f->GetName()).substr(45,2));
-    int m = std::stoi( std::string(f->GetName()).substr(47,2));
-    int s = std::stoi( std::string(f->GetName()).substr(49,2)) / 60;
-    int t = h+m+s;
-
-    // check meridian flip
-    const int meridian = 441; // ~7:41 pm
-
-    double vx = 0;
-    double vy = 0;
-    int x = 0;
-    int y = 0;
-    // calc velocity
-    if(t<meridian){
-        vx = (pix_end[0]-pix_start[0])/(time_end[0]-time_start[0]);
-        vy = (pix_end[1]-pix_start[1])/(time_end[0]-time_start[0]);
-        x = ((t-time_start[0])*vx)+pix_start[0];
-        y = ((t-time_start[0])*vy)+pix_start[1];
-    }else{
-        vx = (pix_end[2]-pix_start[2])/(time_end[1]-time_start[1]);
-        vy = (pix_end[3]-pix_start[3])/(time_end[1]-time_start[1]);
-        x = ((t-time_start[1])*vx)+pix_start[2];
-        y = ((t-time_start[1])*vy)+pix_start[3];
-    }
-
-    return std::make_tuple(x,y);
-    */
 }
 
 /*
 * Shift each pixel in an image by x,y
 */
-TH2I* shift(TH2I* image, int x, int y){
+// TH2I* shift(TH2I* image, int x, int y){
 
-    // clone image
-    TH2I *newImage = (TH2I*)image->Clone();
-    newImage->Reset();
+//     // clone image
+//     TH2I *newImage = (TH2I*)image->Clone();
+//     newImage->Reset();
 
-    // loop over all bins
-    int bins = image->GetNbinsX();
-	for(int i=1; i<=bins; i++){
-		for(int j=1; j<=bins; j++){
-            if(i+x<bins && i-x>0 && j+y<bins && j-y>0){
-                newImage->SetBinContent(i-x,j-y,image->GetBinContent(i,j));
-            }
-        }
-    }
-    image->Delete();
-    return newImage;
-}
+//     // loop over all bins
+//     int bins = image->GetNbinsX();
+// 	for(int i=1; i<=bins; i++){
+// 		for(int j=1; j<=bins; j++){
+//             newImage->SetBinContent(i+x,j+y,image->GetBinContent(i,j));
+//         }
+//     }
+//     image->Delete();
+//     return newImage;
+// }
 
 /*
 * Attempt image parameterization
@@ -596,9 +567,27 @@ TH2I* shift(TH2I* image, int x, int y){
 * meanx, sigmax, meany, sigmay, angle, size, length, width
 */
 
-std::tuple<double, double, double, double, double, double, double, double, double, double, double, double> parameterize(TH2I* image){
-	//	Begin moment analysis
+std::tuple<double, double, double, double, double, double, double, double, double, double, double, double> parameterize(TH2I* image,int telNumber){
+    // if pointing needs to be corrected
+    // set with setCorrection
+    double deltax = 0;
+    double deltay = 0;
+    double rotation_angle = 0;
+    if(applyCorrections){
+        double time = array_pcap_time[telNumber-1];
+        double time_initial = corrections[telNumber-1][0];
+        double x_initial=corrections[telNumber-1][1];
+        double y_initial=corrections[telNumber-1][2];
+        double vx=corrections[telNumber-1][3];
+        double vy=corrections[telNumber-1][4];
+        rotation_angle=TMath::DegToRad()*corrections[telNumber-1][5];
+        std::tuple<int,int> offset = calcOffset(time,time_initial,x_initial,y_initial,vx,vy);
+        deltax = deltax + std::get<0>(offset);
+        deltay = deltay + std::get<1>(offset);
+        
+    }
 
+	//	Begin moment analysis
 	double sumsig = 0;
 	double sumxsig = 0;
 	double sumysig = 0;
@@ -627,6 +616,18 @@ std::tuple<double, double, double, double, double, double, double, double, doubl
 
 			double xi = image->GetXaxis()->GetBinCenter(j);
 			double yi = image->GetYaxis()->GetBinCenter(k);
+
+            if(applyCorrections){
+                //rotate first!
+                double xibuff = xi;
+                double yibuff = yi;
+                
+                xi = xibuff*cos(rotation_angle)-yibuff*sin(rotation_angle);
+                yi = xibuff*sin(rotation_angle)+yibuff*cos(rotation_angle);
+
+                xi = xi - deltax*image->GetXaxis()->GetBinWidth(0);
+                yi = yi - deltay*image->GetYaxis()->GetBinWidth(0);
+            }
 
 			const double si = image->GetBinContent(image->GetBin(j,k));
 			sumsig+=si;
@@ -1541,7 +1542,7 @@ TH2I* telEvent(int telNumber, int eventNumber){
                 pixval=array_pix_data[telNumber-1][i][j]-peds_2D_hist->GetBinContent(i+1,j+1);
                 //pixval=array_pix_data[telNumber][i][j];
                 //pixval=(array_pix_data[telNumber][i][j]-peds_2D_hist->GetBinContent(i+1,j+1))/pedvars_2D_hist->GetBinContent(i+1,j+1);
-                pixval=pixval;
+                //pixval=pixval;
                 image->SetBinContent(i+1,j+1,pixval);
             }
         }
@@ -1549,37 +1550,7 @@ TH2I* telEvent(int telNumber, int eventNumber){
     //image[jtel]->Draw("COLZ");
 
     image = clean(image);
-    int x = 0;
-    int y = 0;
-    if(telNumber==1){// kron
-        // no shift
-    }else if(telNumber==2){ // dorm
-        int x_initial[2] = {-3,9};
-        int y_initial[2] = {-2,2};
-        double vx_initial[2] = {0,0};
-        double vy_initial[2] = {0,0};
-        std::tuple<int,int> offset = calcOffset(x_initial,y_initial,vx_initial,vy_initial);
-        x = std::get<0>(offset);
-        y = std::get<1>(offset);
-        // image = shift(image,x,y);
-    }else if(telNumber==3){ //crocker
-        // int x_initial[2] = {a,0};
-        // int y_initial[2] = {b,0};
-        // double vx_initial[2] = {0,0};
-        // double vy_initial[2] = {0,0};
-        int x_initial[2] = {-13,-16};
-        int y_initial[2] = {-18,9};
-        double vx_initial[2] = {-0.069,0.069};
-        // double vx_initial[2] = {0,0};
-        double vy_initial[2] = {0,-0.046};
-        std::tuple<int,int> offset = calcOffset(x_initial,y_initial,vx_initial,vy_initial);
-        x = std::get<0>(offset);
-        y = std::get<1>(offset);
-        // image = shift(image,x,y);
-    }else{
-        //error
-        cout<<"telNumber "<<telNumber<< " is unknown!";
-    }
+    
     image->Draw("COLZ");
     
 
@@ -1699,7 +1670,7 @@ void paramCircumcircle(){
         for(int i=0; i<Ntel; i++){
             //TH2I* image = telEvent(i+1, eventNumber,a,b);
             TH2I* image = telEvent(i+1, eventNumber);
-            auto params = parameterize(image);
+            auto params = parameterize(image,i+1);
             image->Delete();
 
             meanx[i] = std::get<0>(params);
@@ -1740,12 +1711,12 @@ void paramCSV(bool reconstruct=false){
     // openfile
     std::ofstream datafile;
     std::string output = prefix;
-    datafile.open(output + ".csv");
+    datafile.open(output + ".corrected.csv");
 
     if(!reconstruct){
-        datafile << "Event,Telescope,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha,TrueAz,TrueZe,TrueXcore,TrueYcore,TrueEnergy" << std::endl;
+        datafile << "Event,Telescope,Timestamp,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha" << std::endl;
     }else{
-        datafile << "Event,Telescope,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha,Az,Ze,Xcore,Ycore,stdP,TrueAz,TrueZe,TrueXcore,TrueYcore,TrueEnergy" << std::endl;
+        datafile << "Event,Telescope,Timestamp,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha,Az,Ze,Xcore,Ycore,stdP" << std::endl;
     }
 
     // make images and paramaterize every event in each telescope
@@ -1773,9 +1744,12 @@ void paramCSV(bool reconstruct=false){
         double* TelY = new double[Ntel]{53.59,-107.18,53.59};
         double* TelZ = new double[Ntel]{0.,0.,0.};
 
+        double* timestamp = new double[Ntel];
+        t->GetEntry(eventNumber);
+    
         for(int i=0; i<Ntel; i++){
             TH2I* image = telEvent(i+1, eventNumber);
-            auto params = parameterize(image);
+            auto params = parameterize(image, i+1);
             image->Delete();
 
             meanx[i] = std::get<0>(params);
@@ -1791,7 +1765,8 @@ void paramCSV(bool reconstruct=false){
             dist[i] = std::get<9>(params);
             azwidth[i] = std::get<10>(params);
             alpha[i] = std::get<11>(params);
-      
+
+            timestamp[i] = array_pcap_time[i];
         }
 
         //auto condition = Form("eventNumber==%d", eventNumber);
@@ -1808,7 +1783,7 @@ void paramCSV(bool reconstruct=false){
         if(!reconstruct){
             // write data to file
             for(int i = 0; i<Ntel; i++){
-                datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<"," << size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
+                datafile << std::fixed << eventNumber << "," << i+1 << "," << timestamp[i] << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<"," << size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
                     << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] /*<< "," << az << "," << ze << "," << xCore 
                     << "," << yCore << "," << energy */<< std::endl;   
             }
@@ -1820,7 +1795,7 @@ void paramCSV(bool reconstruct=false){
 
             //         // write data to file
             //         for(int i = 0; i<Ntel; i++){
-            //             datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," stdy[i] << "," << phi[i] << "," << size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
+            //             datafile << eventNumber << "," << i+1 << "," << timestamp[i] << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," stdy[i] << "," << phi[i] << "," << size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
             //                 << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << fShower_Az << "," 
             //                 << fShower_Ze << "," << fShower_Xcore << "," << fShower_Ycore << "," << fShower_stdP /*<< "," 
             //                 << az << "," << ze << "," << xCore << "," << yCore << "," << energy */<< std::endl;   
@@ -1829,7 +1804,7 @@ void paramCSV(bool reconstruct=false){
             // }else{
             //     // write data to file
             //     for(int i = 0; i<Ntel; i++){
-            //             datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," stdy[i] << "," << phi[i] << "," << size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
+            //             datafile << eventNumber << "," << i+1 << "," << timestamp[i] << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," stdy[i] << "," << phi[i] << "," << size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
             //                 << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << "nan" << "," 
             //                 << "nan" << "," << "nan" << "," << "nan" << "," << "nan" /*<< "," 
             //                 << az << "," << ze << "," << xCore << "," << yCore << "," << energy */<< std::endl;   
@@ -1895,7 +1870,7 @@ void arraydisplay(int eventNumber){
             }
         }
         // parameterization
-        auto params = parameterize(image);
+        auto params = parameterize(image, i+1);
         image->Delete();
 
         meanx[i]=std::get<0>(params);
@@ -2081,7 +2056,7 @@ void panodisplay(int eventNumber){
         TH2I* image = telEvent(i+1, eventNumber);
         image->DrawCopy("COLZ1","");
         // parameterization
-        auto params = parameterize(image);
+        auto params = parameterize(image, i+1);
         image->Delete();
 
         TEllipse *e = new TEllipse(std::get<0>(params), std::get<2>(params), std::get<6>(params), std::get<7>(params), 0, 360, std::get<4>(params));
