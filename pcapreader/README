@@ -1,0 +1,35 @@
+% compile the data reader
+source make_pcapreader.sh
+
+% convert pcap data to root
+pcapreader Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng
+
+% clean out the rate spikes
+root:
+> .L clean_ratespikes.C
+> clean_ratespikes("Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",25);
+
+% move the output file to its own directory
+mkdir cleaned
+mv Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.cleaned cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root
+
+% merge the four quabos to make camera events for each telescope
+root:
+> .L makeevents.C
+> makeevents_timehistomatch("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",12);
+> makeevents_timehistomatch("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",1016);
+> makeevents_timehistomatch("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",760);
+
+% calculate the peds and pedvars 
+root: 
+> gROOT->LoadMacro("processcamevents.C");
+> calcPedestals("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.T12");
+> calcPedestals("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.T760");
+> calcPedestals("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.T1016");
+
+% build array events
+root:
+> gROOT->LoadMacro("makearrayevents.C");
+> makearrayevents("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root");
+
+
