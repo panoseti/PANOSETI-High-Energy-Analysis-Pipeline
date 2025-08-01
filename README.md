@@ -2,7 +2,7 @@
 Tools to analyze images of air showers captured by [PANOSETI](https://panoseti.ucsd.edu/) telescopes.
 
 ## Data Pipeline (WIP)
-![data pipeline](datapipeline.png)
+![data pipeline](datapipeline.drawio.png)
 
 ## simulation-tools
 ### Dependencies
