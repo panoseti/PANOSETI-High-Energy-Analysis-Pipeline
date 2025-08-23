@@ -1,4 +1,4 @@
-#include "./processcamevents.h"
+-9 #include "./processcamevents.h"
 
 void calcPedestals(const char *infile, bool do_fit=0)
 {
@@ -21,9 +21,9 @@ void calcPedestals(const char *infile, bool do_fit=0)
     hbins=20000;
   } else {
     //pulse height data
-    hmin=-100;
-    hmax=100;
-    hbins=200;
+    hmin=-500;
+    hmax=500;
+    hbins=1000;
   }
   TH1D *h1=new TH1D("h1","h1",hbins,hmin,hmax);
 
