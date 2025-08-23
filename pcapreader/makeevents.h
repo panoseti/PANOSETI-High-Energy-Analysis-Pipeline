@@ -287,10 +287,10 @@ TH2D * makequabohist(TTree * pdata, bool rotate, int zmin, int zmax)
   }
   
   hq_transformed->SetName("hq_transformed");
-  //delete hq;
-  return hq_transformed;
-
-  
+  TH2D *hq_transformed_return = (TH2D*)hq_transformed->Clone("hq_transformed_return"); //Hack to allow deleting hq
+  delete hq;  //Now delete to avoid a memory leak
+  return hq_transformed_return;
+  //return hq_transformed;  
 }
 
 void initializeCamera()
