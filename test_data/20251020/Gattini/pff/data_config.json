@@ -1,0 +1,15 @@
+{
+    "run_type": "obs-test",
+    "detector_overvoltage": 2,
+    "gain": 60,
+    "pulse_height": {
+	    "any_trigger":
+	    {
+		"group_ph_frames": 1
+	    },
+            "pe_threshold": 8.5,
+            "two_pixel_trigger": 1,
+            "three_pixel_trigger": 0
+    },
+    "max_file_size_mb": 100
+}

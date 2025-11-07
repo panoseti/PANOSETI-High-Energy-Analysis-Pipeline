@@ -2,7 +2,20 @@
 Tools to analyze images of air showers captured by [PANOSETI](https://panoseti.ucsd.edu/) telescopes.
 
 ## Data Pipeline (WIP)
-![data pipeline](datapipeline.drawio.png)
+### Dependencies
+* [pypff](https://github.com/panoseti/pypff.git) 
+
+### Installation
+Clone this repo and install with:
+```
+pip install .
+```
+
+For development, you may want to install an editable version with:
+```
+pip install -e .
+```
+This will let you run jupyter notebooks after making changes to the package without needing to reinstall. You will still need to restart your kernel.
 
 ## simulation-tools
 ### Dependencies

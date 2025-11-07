@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61", "setuptools_scm[toml]"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "heap/__version__.py"
+
+[project]
+name = "heap"
+dynamic = ["version"]
+description = "PANOSETI High Energy Analysis Pipeline (heap) package"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy",
+  "matplotlib",
+  "pypff",
+]
+
+[tool.setuptools]
+packages = ["heap"]

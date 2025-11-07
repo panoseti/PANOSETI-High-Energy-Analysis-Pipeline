@@ -1,0 +1,8 @@
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+panoseti 2638533 12.9  0.0  20664 11776 ?        Ss   23:50   0:00 /usr/lib/systemd/systemd --user
+panoseti 2638534  0.0  0.0  21184  3528 ?        S    23:50   0:00 (sd-pam)
+panoseti 2638552  4.0  0.0 244464 12800 ?        Ssl  23:50   0:00 /usr/bin/pulseaudio --daemonize=no --log-target=journal
+panoseti 2638588  0.0  0.0   9292  4992 ?        Ss   23:50   0:00 /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+panoseti 2638688  0.0  0.0  15000  6956 ?        S    23:50   0:00 sshd: panoseti@notty
+panoseti 2638689  0.0  0.0   7340  3584 ?        Ss   23:50   0:00 bash -c mkdir /mnt/panoseti/obs_Palomar.start_2025-10-20T06:50:44Z.runtype_obs-test.pffd;mkdir -p /mnt/panoseti/module_254/obs_Palomar.start_2025-10-20T06:50:44Z.runtype_obs-test.pffd;cd /mnt/panoseti/obs_Palomar.start_2025-10-20T06:50:44Z.runtype_obs-test.pffd; ps -ux > pss_192.168.0.4.log
+panoseti 2638692  100  0.0  12316  5120 ?        R    23:50   0:00 ps -ux
