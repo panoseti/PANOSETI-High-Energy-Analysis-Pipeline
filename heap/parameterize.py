@@ -1,0 +1,119 @@
+"""parameterize
+
+Functions for calculating the Hillas parameters of an image
+"""
+import numpy as np
+
+def calc_params(
+        image: np.ndarray, 
+        x: float=0., 
+        y: float=0.
+    ):
+    """
+    Calculate the Hillas parameters
+
+    Parameters:
+        image: 2D camera image. numpy array with shape (32, 32)
+        x, y: test position (pixels) from which to calculate e.g. distance. Default value is camera center.
+    Returns dict with:
+        - N_pix: the total number of pixels in the shower image
+        - size: total intensity
+        - x_c, y_c: centroid coordinates (pixels)
+        - s_xx, s_yy, s_xy: second central moments 
+        - length, width: rms major/minor axis (pixels)
+        - miss: perpendicular distance to major axis (pixels)
+        - distance: distance to test position x,y (pixels)
+        - alpha: angle between image axis and distance (degrees)
+        - phi: orientation angle (degrees), CCW from +x
+    """
+
+    image = np.asarray(image, dtype=float)
+    N_pix = float(np.sum(np.isfinite(image)))
+    size = float(np.nansum(image))
+
+    if N_pix == 0:
+        return {
+            "N_pix": 0.0,
+            "size": 0.0,
+            "x_c": float("nan"),
+            "y_c": float("nan"),
+            "s_xx": float("nan"),
+            "s_yy": float("nan"),
+            "s_xy": float("nan"),
+            "length": float("nan"),
+            "width": float("nan"),
+            "miss": float("nan"),
+            "distance": float("nan"),
+            "alpha": float("nan"),
+            "phi": float("nan"),
+        }
+
+    H, W = image.shape
+    cols = np.arange(W)
+    rows = np.arange(H)
+    col_sums = np.nansum(image, axis=0)
+    row_sums = np.nansum(image, axis=1)
+
+    # centroid (pixel coordinates, origin at camera center)
+    x_c = float(np.sum(col_sums * cols) / size)
+    y_c = float(np.sum(row_sums * rows) / size)
+
+    # second central moments
+    dx = (cols - x_c)[None, :].astype(float)   
+    dx = np.repeat(dx, H, axis=0)              
+    dy = (rows - y_c)[:, None].astype(float)   
+    dy = np.repeat(dy, W, axis=1) 
+
+    weights = np.nan_to_num(image, nan=0.0)
+
+    s_xx = float(np.sum(weights * dx * dx) / size)
+    s_yy = float(np.sum(weights * dy * dy) / size)
+    s_xy = float(np.sum(weights * dx * dy) / size)
+
+    # length and width
+    d = s_yy - s_xx
+    z = np.sqrt(d*d + 4*s_xy*s_xy)
+
+    length = float(np.sqrt( (s_xx + s_yy + z) / 2))
+    width = float(np.sqrt( (s_xx + s_yy - z) / 2))
+
+    # orientation (phi)
+    ac = (d+z)*(y_c-y) + 2.0*s_xy*(x_c-x);
+    bc = 2.0*s_xy*(y_c-y) - (d-z)*(x_c-x);
+    cc = np.sqrt(ac*ac + bc*bc);
+    cosphi = bc/cc;
+    sinphi = ac/cc;
+    tanphi = ((d+z)*(y_c-y) + 2.0*s_xy*(x_c-x)) / (2.0*s_xy*(y_c-y) - (d-z)*(x_c-x));
+
+    phi = np.arctan(tanphi)
+    phi = float(phi % (2.0 * np.pi))
+
+    # distance: distance from centroid to position x,y
+    distance = float(np.hypot(x_c-x,y_c-y))
+
+    # miss: perpendicular distance from point to major axis
+    miss = float(abs(-sinphi*(x_c-x) + cosphi*(y_c-y)))
+    if miss > distance:
+        miss = distance
+    
+    # alpha: angle between image axis and test position x,y
+    if distance == 0:
+        alpha = float("nan")
+    else:
+        alpha = float(abs(np.arcsin(miss/distance)))
+
+    return {
+        "N_pix": N_pix,
+        "size": size,
+        "x_c": x_c,
+        "y_c": y_c,
+        "s_xx": s_xx,
+        "s_yy": s_yy,
+        "s_xy": s_xy,
+        "length": length,
+        "width": width,
+        "miss": miss,
+        "distance": distance,
+        "alpha": float(np.rad2deg(alpha)),
+        "phi": float(np.rad2deg(phi)),
+    }

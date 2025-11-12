@@ -32,9 +32,10 @@ def threshold_clean(
     Clean an image by defining a threshold for "image pixels" and some lower threshold for "border pixels"
 
     Parameters:
-        data:
-        image_threshold: 
-        border_threshold:
+        data: data array
+        pedvars: pedvar array
+        image_threshold: threshold for labeling a pixel as an image pixel in units of pedvar
+        border_threshold: threshold for labeling a pixel as a border pixel in units of pedvar
         
     Returns:
         cleaned: the cleaned image
@@ -54,6 +55,16 @@ def threshold_clean(
     # create masks
     image_mask = arr >= image_threshold
     border_mask = (arr >= border_threshold) & (~image_mask)
+
+    # border pixel must be next to image pixel
+    p = np.pad(image_mask, 1, constant_values=0)
+    neighbor_count = (
+        p[:-2, :-2] + p[:-2, 1:-1] + p[:-2, 2:] +
+        p[1:-1, :-2]               + p[1:-1, 2:] +
+        p[2:  , :-2] + p[2:, 1:-1] + p[2:  , 2:]
+    )
+    border_mask = border_mask & (neighbor_count > 0)
+    
     combined_mask = image_mask | border_mask
     combined_mask = _remove_islands(combined_mask)
 
