@@ -69,7 +69,7 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
         ax[1].set_ylabel("Trigger Rate [Hz]")
         ax[1].set_title("After Cut")
         fig.tight_layout()
-        plt.savefig(path+"spike_cut.png",dpi=300)
+        plt.savefig(path+"_spike_cut.png",dpi=300)
         plt.show()
     timestamps_pd=pd.to_datetime(timestamps, unit='s', utc=True).tz_convert('America/Los_Angeles')
     print("Rate spikes at: ",time[rate>2])
@@ -78,7 +78,7 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
 
 def read_pff_hk(filename="hk.pff"):
     #Read in housekeeping pff file and return data, default called hk.pff, gonna need to adjust path
-    hkpff = pypff.io.hkpff('hk.pff')
+    hkpff = pypff.io.hkpff(filename)
     hk = hkpff.readhk()
     return(hk)
 
@@ -130,7 +130,7 @@ def cut_meridian_flip(data,timestamps,hk, time_after=60, plotting=False,path=Non
         fig.legend(loc=1)
         fig.autofmt_xdate()
         fig.tight_layout()
-        plt.savefig(path+"meridian_flip.png",dpi=300)
+        plt.savefig(path+"_meridian_flip.png",dpi=300)
         plt.show()
     return(data_cut,timestamps_cut,time[no_track[0]],time[no_track[-1]])
 
