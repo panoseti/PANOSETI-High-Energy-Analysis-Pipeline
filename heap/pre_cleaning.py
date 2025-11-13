@@ -55,9 +55,9 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
     mask = ~bad_bins[bin_indices]
     timestamps_filtered = timestamps[mask]
     data_filtered=data[mask]
+    bin_centers = bins[:-1] + bin_width/2
+    time = pd.to_datetime(bin_centers, unit='s', utc=True).tz_convert('America/Los_Angeles')
     if plotting:
-        bin_centers = bins[:-1] + bin_width/2
-        time = pd.to_datetime(bin_centers, unit='s', utc=True).tz_convert('America/Los_Angeles')
         counts, _ = np.histogram(timestamps_filtered, bins=bins)
         rate_filtered = counts / bin_width
         fig,ax=plt.subplots(2,1,sharex=True)
