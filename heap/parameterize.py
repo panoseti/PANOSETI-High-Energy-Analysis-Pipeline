@@ -28,12 +28,12 @@ def calc_params(
     """
 
     image = np.asarray(image, dtype=float)
-    N_pix = float(np.sum(np.isfinite(image)))
+    N_pix = int(np.sum(np.isfinite(image)))
     size = float(np.nansum(image))
 
     if N_pix == 0:
         return {
-            "N_pix": 0.0,
+            "N_pix": 0,
             "size": 0.0,
             "x_c": float("nan"),
             "y_c": float("nan"),
@@ -71,22 +71,26 @@ def calc_params(
     s_xy = float(np.sum(weights * dx * dy) / size)
 
     # length and width
-    d = s_yy - s_xx
-    z = np.sqrt(d*d + 4*s_xy*s_xy)
+    d = float(s_yy - s_xx)
+    z = float(np.sqrt(d*d + 4*s_xy*s_xy))
 
     length = float(np.sqrt( (s_xx + s_yy + z) / 2))
     width = float(np.sqrt( (s_xx + s_yy - z) / 2))
 
     # orientation (phi)
-    ac = (d+z)*(y_c-y) + 2.0*s_xy*(x_c-x);
-    bc = 2.0*s_xy*(y_c-y) - (d-z)*(x_c-x);
-    cc = np.sqrt(ac*ac + bc*bc);
-    cosphi = bc/cc;
-    sinphi = ac/cc;
-    tanphi = ((d+z)*(y_c-y) + 2.0*s_xy*(x_c-x)) / (2.0*s_xy*(y_c-y) - (d-z)*(x_c-x));
-
-    phi = np.arctan(tanphi)
-    phi = float(phi % (2.0 * np.pi))
+    ac = float((d+z)*(y_c-y) + 2.0*s_xy*(x_c-x))
+    bc = float(2.0*s_xy*(y_c-y) - (d-z)*(x_c-x))
+    cc = float(np.sqrt(ac*ac + bc*bc))
+    if cc == 0.0:
+        # undefined orientation — choose sensible defaults
+        cosphi = 1.0
+        sinphi = 0.0
+        phi = 0.0
+    else:
+        cosphi = float(bc / cc)
+        sinphi = float(ac / cc)
+        phi = float(np.arctan2(ac, bc))
+        phi = float(phi % (2.0 * np.pi))
 
     # distance: distance from centroid to position x,y
     distance = float(np.hypot(x_c-x,y_c-y))
