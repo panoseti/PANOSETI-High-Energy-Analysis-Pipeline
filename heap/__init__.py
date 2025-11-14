@@ -4,5 +4,13 @@ from . import parameterize
 from . import read_pcap
 from . import pre_cleaning
 from . import correct_after_meridian_flip
+from . import make_pedestals
 
-__all__ = ["read_pcap", "parameterize", "image_cleaning", "pre_cleaning", "correct_after_meridian_flip"]
+__all__ = [
+    "read_pcap", 
+    "parameterize", 
+    "image_cleaning", 
+    "pre_cleaning", 
+    "correct_after_meridian_flip", 
+    "make_pedestals"
+]
