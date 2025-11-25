@@ -42,8 +42,8 @@ def threshold_clean(
         mask: the removed pixels
     """
 
-    if not border_threshold < image_threshold:
-        raise ValueError("Border pixel threshold must be below image pixel threshold.")
+    if border_threshold > image_threshold:
+        raise ValueError("Border pixel threshold cannot be above image pixel threshold.")
 
     # read data
     arr = np.asarray(data)
