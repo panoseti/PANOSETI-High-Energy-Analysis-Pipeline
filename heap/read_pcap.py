@@ -62,3 +62,24 @@ def read_tel_pedvars(pedvar_file):
         image = h.values(flow=False).astype(np.float32)
     
     return image
+
+def read_tel_timestamps(data_file):
+    """
+    Read the data from a .root file derived from .pcap data of a single telescope and return a numpy array of the event timestamps
+
+    Parameters:
+        data file: .root file containing a histogram named "pedvars_2D_hist;1"
+        
+    Returns:
+        timestamps: numpy array with shape (N)
+    """
+
+    times = []
+    with uproot.open(data_file) as f:
+        tree = f["camdata"]
+        branch = tree["cam_pcap_time"]
+        
+        for t in branch.array(library="np"):
+            times.append(float(t))
+
+    return np.array(times, dtype=float)
