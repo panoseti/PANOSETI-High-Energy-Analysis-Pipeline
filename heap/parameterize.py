@@ -6,8 +6,8 @@ import numpy as np
 
 def calc_params(
         image: np.ndarray, 
-        x: float=0., 
-        y: float=0.
+        x: float=None, 
+        y: float=None
     ):
     """
     Calculate the Hillas parameters
@@ -49,6 +49,11 @@ def calc_params(
         }
 
     H, W = image.shape
+    # Set default x, y to image center if not provided
+    if x is None:
+        x = (W - 1) / 2.0
+    if y is None:
+        y = (H - 1) / 2.0
     cols = np.arange(W)
     rows = np.arange(H)
     col_sums = np.nansum(image, axis=0)
