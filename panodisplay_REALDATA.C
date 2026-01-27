@@ -205,10 +205,12 @@ double intersectionalArea(int R, int cx, int cy, int sx, int sy){
 /*
 * Clean image according to p.e. thresholds
 */
-TH2I* clean(TH2I* image){
+TH2D* clean(TH2D* image, TH2D* pedvars){
     
+    /*
+
     int Nbins = image->GetNcells();
-    TH2I *newImage = (TH2I*)image->Clone();
+    TH2D *newImage = (TH2D*)image->Clone();
     int binsX = newImage->GetNbinsX(); // = 32
     int binsY = binsX; // square camera
 
@@ -217,7 +219,7 @@ TH2I* clean(TH2I* image){
 
     // subdivide pixels into NxN subpixels where N = [angular pixel width]/[Aperture radius/2]
     // choose Aperture radius to be approximately the width of a gamma-ray shower - paper suggests 0.12 degrees
-        // might want to increase this for panoseti - higher energy showers will be larger
+    //     might want to increase this for panoseti - higher energy showers will be larger
     // therefore N = [0.31]/[0.06] ~=~ 5
 
     int N = 5;
@@ -230,7 +232,7 @@ TH2I* clean(TH2I* image){
     int SNR = 7; // signal to noise ratio required to keep pixel
 
     // create subdivided image
-    TH2I* dividedImage = new TH2I("div", "div", binsX*N, -4.95, 4.95, binsY*N, -4.95, 4.95 );
+    TH2D* dividedImage = new TH2D("div", "div", binsX*N, -4.95, 4.95, binsY*N, -4.95, 4.95 );
     // loop over subpixels
     for(int i = 1; i<=binsX*N; i++){
         for(int j = 1; j<=binsY*N; j++){
@@ -294,7 +296,7 @@ TH2I* clean(TH2I* image){
     for(int i=1; i<=binsX; i++){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
-            int binSize = newImage->GetBinContent(checkBin);
+            double binSize = newImage->GetBinContent(checkBin);
             
             if(binSize<0){
                 removeMe.push_back(checkBin);
@@ -312,7 +314,7 @@ TH2I* clean(TH2I* image){
     for(int i=1; i<=binsX; i++){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
-            int binSize = newImage->GetBinContent(checkBin);
+            double binSize = newImage->GetBinContent(checkBin);
             // make sure pixel has p.e. before checking to remove
             if(binSize!=0){
                 bool remove = true;
@@ -346,7 +348,7 @@ TH2I* clean(TH2I* image){
     int Nimagepix=0;
     for(int i = 1; i<=binsX; i++){
         for(int j = 1; j<=binsY; j++){
-            int binSize = newImage->GetBinContent(i,j);
+            double binSize = newImage->GetBinContent(i,j);
             if(binSize!=0){
                 Nimagepix++;
             }
@@ -359,24 +361,24 @@ TH2I* clean(TH2I* image){
     image->Delete();
     dividedImage->Delete();
     return newImage;
-    
+    */
 
-    /*
+    
     // this method is closer to how VERITAS works
     // threshold for image pixels
 
     // get telescope size to scale NSB
-    t->Draw("telR","","goff");
-    double telrad = t->GetV1()[0];
+    // t->Draw("telR","","goff");
+    // double telrad = t->GetV1()[0];
 
-    int imageThreshold = (((telrad/0.25)*(telrad/0.25)*.06)+1)*5; // corresponds to ~5 sigma, where sigma is electronics noise (1 p.e.)
-    //double imageThreshold = 5; // 5 corresponds to ~5 sigma, where sigma is electronics noise (1 p.e.)
+    // int imageThreshold = (((telrad/0.25)*(telrad/0.25)*.06)+1)*5; // corresponds to ~5 sigma, where sigma is electronics noise (1 p.e.)
+    double imageThreshold = 4; // 5 corresponds to ~5 sigma, where sigma is electronics noise (1 p.e.)
     // pixel can have this many p.e. if it borders an image pixel
-    int borderThreshold = (((telrad/0.25)*(telrad/0.25)*.06)+1)*3; // 6 corresponds to ~2.5 sigma, same as above
-    //double borderThreshold = 2.5; // 2.5 corresponds to ~2.5 sigma, same as above
+    // int borderThreshold = (((telrad/0.25)*(telrad/0.25)*.06)+1)*3; // 6 corresponds to ~2.5 sigma, same as above
+    double borderThreshold = 2; // 2.5 corresponds to ~2.5 sigma, same as above
 
     int Nbins = image->GetNcells();
-    TH2I *newImage = (TH2I*)image->Clone();
+    TH2D *newImage = (TH2D*)image->Clone();
     int binsX = newImage->GetNbinsX();
     int binsY = binsX;
 
@@ -385,25 +387,27 @@ TH2I* clean(TH2I* image){
 	for(int i=1; i<=binsX; i++){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
-            int binSize = newImage->GetBinContent(checkBin);
+            double binSize = newImage->GetBinContent(checkBin);
+            double pedvarSize = pedvars->GetBinContent(checkBin);
 
             bool remove = true;
             // check if pixel is above image threshold
-            if(binSize>=imageThreshold){
+            if(binSize>=imageThreshold*pedvarSize){
                 remove = false;
             // check if pixel is above border threshold
-            }else if(binSize>=borderThreshold){
+            }else if(binSize>=borderThreshold*pedvarSize){
                 // check if a neighbor is above image threshold
                 // get neighbors
                 for (int p=i-1; p<=i+1; p++){
                     for (int q=j-1; q<=j+1; q++){
                         // do not add central pixel as neighbor
-                        if(p!=i && q!=j){
+                        if(!(p==i && q==j)){ 
                             // stay in bounds of image
                             if(p>=1 && p<=binsX && q>=1 && q<=binsY){
-                                int neighbor = newImage->GetBinContent(newImage->GetBin(p,q));
+                                double neighbor = newImage->GetBinContent(newImage->GetBin(p,q));
+                                double neighborPedvar = pedvars->GetBinContent(pedvars->GetBin(p,q));
                                 // check if pixel borders a pixel above image threshold)
-                                if (neighbor >= imageThreshold){
+                                if (neighbor >= imageThreshold*neighborPedvar){
                                     remove = false;
                                 } // else it gets removed
                             }
@@ -423,44 +427,67 @@ TH2I* clean(TH2I* image){
         newImage->SetBinContent(removeMe[i], 0);
     }
     
-    // check for isolated pixels
+    // check for isolated pixels and small islands with border pixels
     removeMe.clear();
     for(int i=1; i<=binsX; i++){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
-            int binSize = newImage->GetBinContent(checkBin);
+            double binSize = newImage->GetBinContent(checkBin);
             // make sure pixel has p.e. before checking to remove
             if(binSize!=0){
-                bool remove = true;
-                // get neighbors
+                int neighborCount = 0;
+                // count neighbors
                 for (int p=i-1; p<=i+1; p++){
                     for (int q=j-1; q<=j+1; q++){
                         // do not add central pixel as neighbor
-                        if(p!=i && q!=j){
+                        if(!(p==i && q==j)){ 
                             // stay in bounds of image
                             if(p>=1 && p<=binsX && q>=1 && q<=binsY){
                                 // find a neighbor with pixels in it
                                 if(newImage->GetBinContent(newImage->GetBin(p,q)) != 0){
-                                    remove = false;
+                                    neighborCount++;
                                 }
                             }
                         }
                     }    
                 }
-                if (remove){
+                
+                // remove isolated pixels
+                if(neighborCount == 0){
                     removeMe.push_back(checkBin);
+                }
+                // remove 2-pixel islands if this pixel or its neighbor is a border pixel
+                else if(neighborCount == 1){
+                    double pedvarSize = pedvars->GetBinContent(pedvars->GetBin(i,j));
+                    bool isBorderPixel = (binSize < imageThreshold*pedvarSize);
+                    if(isBorderPixel){
+                        removeMe.push_back(checkBin);
+                    }
                 }
             }
         }
     }
-    // remove pixels which are isolated
+    // remove pixels which are isolated or small islands with border pixels
     for(int i=0; i<(int)removeMe.size(); i++){
         newImage->SetBinContent(removeMe[i], 0);
     }
 
+    // discard image if there are fewer than 3 pixels
+    int Nimagepix=0;
+    for(int i = 1; i<=binsX; i++){
+        for(int j = 1; j<=binsY; j++){
+            double binSize = newImage->GetBinContent(i,j);
+            if(binSize!=0){
+                Nimagepix++;
+            }
+        }    
+    }
+    if(Nimagepix < 3){
+        newImage->Reset();
+    }
+
     image->Delete();
     return newImage;
-    */
 
     /*
     // This method flatly removes pixels below a certain threshold
@@ -469,7 +496,7 @@ TH2I* clean(TH2I* image){
     int imageThreshold = 4;
     
     int Nbins = image->GetNcells();
-    TH2I *newImage = (TH2I*)image->Clone();
+    TH2D *newImage = (TH2D*)image->Clone();
     int binsX = newImage->GetNbinsX();
     int binsY = binsX;
 
@@ -478,7 +505,7 @@ TH2I* clean(TH2I* image){
 	for(int i=1; i<=binsX; i++){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
-            int binSize = newImage->GetBinContent(checkBin);
+            double binSize = newImage->GetBinContent(checkBin);
 
             bool remove = true;
             // check if pixel is above image threshold
@@ -544,10 +571,10 @@ std::tuple<double,double> calcOffset(double time, double t_initial, int initial_
 /*
 * Shift each pixel in an image by x,y
 */
-// TH2I* shift(TH2I* image, int x, int y){
+// TH2D* shift(TH2D* image, int x, int y){
 
 //     // clone image
-//     TH2I *newImage = (TH2I*)image->Clone();
+//     TH2D *newImage = (TH2D*)image->Clone();
 //     newImage->Reset();
 
 //     // loop over all bins
@@ -567,7 +594,7 @@ std::tuple<double,double> calcOffset(double time, double t_initial, int initial_
 * meanx, sigmax, meany, sigmay, angle, size, length, width
 */
 
-std::tuple<double, double, double, double, double, double, double, double, double, double, double, double> parameterize(TH2I* image,int telNumber){
+std::tuple<double, double, double, double, double, double, double, double, double, double, double, double> parameterize(TH2D* image,int telNumber){
     // if pointing needs to be corrected
     // set with setCorrection
     double deltax = 0;
@@ -1489,8 +1516,8 @@ bool reconstruct_core( unsigned int i_ntel,
 * Create an image in a single telescope for a given event number
 * coordinate transformations done using GrOptics method GUtilityFuncts::sourceOnTelescopePlane
 */
-// TH2I* telEvent(int telNumber, int eventNumber, int a, int b){
-TH2I* telEvent(int telNumber, int eventNumber){
+// TH2D* telEvent(int telNumber, int eventNumber, int a, int b){
+TH2D* telEvent(int telNumber, int eventNumber){
     if(!f){
         std::cout<< "error reading file, try readFile(\"rootfile.root\")" <<std::endl;
         return nullptr;
@@ -1515,11 +1542,11 @@ TH2I* telEvent(int telNumber, int eventNumber){
 
     // from Jamie's arraydisplay.C
     t->GetEntry(eventNumber);
-    TH2I* image = new TH2I(label,label, 32, -4.95, 4.95, 32, -4.95, 4.95);
+    TH2D* image = new TH2D(label,label, 32, -4.95, 4.95, 32, -4.95, 4.95);
     
     char pedvar_infile_name[200];
-    TH2D *peds_2D_hist;
-    TH2D *pedvars_2D_hist;
+    TH2D *peds_2D_hist = nullptr;
+    TH2D *pedvars_2D_hist = nullptr;
     if (array_scope_id[telNumber-1]>0) 
     {
         snprintf(pedvar_infile_name,200,"%s.T%d.pedvars",prefix,array_scope_id[telNumber-1]);
@@ -1531,6 +1558,18 @@ TH2I* telEvent(int telNumber, int eventNumber){
         pedvars_2D_hist->SetDirectory(nullptr);
         delete pedvar_infile;
     }
+    
+    // Create dummy pedvars if not loaded
+    if (!pedvars_2D_hist) {
+        pedvars_2D_hist = new TH2D("dummy_pedvars", "dummy", 32, -4.95, 4.95, 32, -4.95, 4.95);
+        pedvars_2D_hist->SetDirectory(nullptr);
+        for(int i=1; i<=32; i++) {
+            for(int j=1; j<=32; j++) {
+                pedvars_2D_hist->SetBinContent(i, j, 1.0);
+            }
+        }
+    }
+
     image->SetStats(0);
     for (int i=0;i<32;i++)
     {
@@ -1539,7 +1578,7 @@ TH2I* telEvent(int telNumber, int eventNumber){
             double pixval=0;
             if (array_scope_id[telNumber-1]>0)
             {
-                pixval=array_pix_data[telNumber-1][i][j]-peds_2D_hist->GetBinContent(i+1,j+1);
+                pixval=(double)(array_pix_data[telNumber-1][i][j]-peds_2D_hist->GetBinContent(i+1,j+1));
                 //pixval=array_pix_data[telNumber][i][j];
                 //pixval=(array_pix_data[telNumber][i][j]-peds_2D_hist->GetBinContent(i+1,j+1))/pedvars_2D_hist->GetBinContent(i+1,j+1);
                 //pixval=pixval;
@@ -1549,7 +1588,7 @@ TH2I* telEvent(int telNumber, int eventNumber){
     }
     //image[jtel]->Draw("COLZ");
 
-    image = clean(image);
+    image = clean(image, pedvars_2D_hist);
     
     image->Draw("COLZ");
     
@@ -1587,7 +1626,7 @@ void paramPixel(){
     // std::cout << "Processing file: "<< prefix << std::endl;
     // const int tel = 2; // Dorm
     // for(int eventNumber=1; eventNumber<=N+1; eventNumber++){
-    //     TH2I* image = telEvent(tel, eventNumber);
+    //     TH2D* image = telEvent(tel, eventNumber);
     //     int signal = image->GetBinContent(20,5); //central pixel
     //     // make sure image isnt empty
     //     if(image->GetSumOfWeights()!=0){
@@ -1604,7 +1643,7 @@ void paramPixel(){
     std::cout << "Processing file: "<< prefix << std::endl;
     const int tel = 2; // Dorm
     for(int eventNumber=1; eventNumber<=N+1; eventNumber++){
-        TH2I* image = telEvent(tel, eventNumber);
+        TH2D* image = telEvent(tel, eventNumber);
         // make sure image isnt empty
         if(image->GetSumOfWeights()!=0){
             int binsX=image->GetNbinsX();
@@ -1668,8 +1707,8 @@ void paramCircumcircle(){
         bool valid = true;
 
         for(int i=0; i<Ntel; i++){
-            //TH2I* image = telEvent(i+1, eventNumber,a,b);
-            TH2I* image = telEvent(i+1, eventNumber);
+            //TH2D* image = telEvent(i+1, eventNumber,a,b);
+            TH2D* image = telEvent(i+1, eventNumber);
             auto params = parameterize(image,i+1);
             image->Delete();
 
@@ -1711,7 +1750,7 @@ void paramCSV(bool reconstruct=false){
     // openfile
     std::ofstream datafile;
     std::string output = prefix;
-    datafile.open(output + ".corrected.csv");
+    datafile.open(output + ".threshold_clean.csv");
 
     if(!reconstruct){
         datafile << "Event,Telescope,Timestamp,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha" << std::endl;
@@ -1748,7 +1787,7 @@ void paramCSV(bool reconstruct=false){
         t->GetEntry(eventNumber);
     
         for(int i=0; i<Ntel; i++){
-            TH2I* image = telEvent(i+1, eventNumber);
+            TH2D* image = telEvent(i+1, eventNumber);
             auto params = parameterize(image, i+1);
             image->Delete();
 
@@ -1855,14 +1894,14 @@ void arraydisplay(int eventNumber){
     int colors[3] = {kBlue+2,kCyan-7,kYellow-7};
     TEllipse *ellipses[3]={0};
     TF1 *axes[3]={0};
-    TH2I* combined = new TH2I("combined","combined", 32, -4.95, 4.95, 32, -4.95, 4.95);
+    TH2D* combined = new TH2D("combined","combined", 32, -4.95, 4.95, 32, -4.95, 4.95);
     for(int i=0; i<Ntel; i++){
         gPad->SetTopMargin(0.1);
         gPad->SetBottomMargin(0.1);
         gPad->SetLeftMargin(0.1);
         gPad->SetRightMargin(0.15);
 
-        TH2I* image = telEvent(i+1, eventNumber);
+        TH2D* image = telEvent(i+1, eventNumber);
         int bins = image->GetNbinsX();
         for(int j=1; j<=bins; j++){
             for(int k=1; k<=bins; k++){
@@ -2053,7 +2092,7 @@ void panodisplay(int eventNumber){
         gPad->SetLeftMargin(0.01);
         gPad->SetRightMargin(0.15);
 
-        TH2I* image = telEvent(i+1, eventNumber);
+        TH2D* image = telEvent(i+1, eventNumber);
         image->DrawCopy("COLZ1","");
         // parameterization
         auto params = parameterize(image, i+1);
