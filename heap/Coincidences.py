@@ -1,4 +1,7 @@
-import pre_cleaning
+import sys, os
+project_root = os.path.abspath("..") 
+sys.path.insert(0, project_root)
+from heap import pre_cleaning
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -174,4 +177,105 @@ def match_coinc(timestamps1, data1, timestamps2, data2, window=0.001, tz='Americ
     print(f"Number of coincident events within {window}s: {ncoinc} "
           f"( ~{p1:.1f}% of all telescope 1 events and ~{p2:.1f}% of all telescope 2 events.)")
 
-    return time_coinc_pd1, data_coinc1, time_coinc_pd2, data_coinc2
+    return time_coinc1, data_coinc1, time_coinc2, data_coinc2
+
+def match_coinc3(timestamps1, data1, timestamps2, data2, timestamps3, data3, window=0.001):
+    """
+    Calculates tripple coincidences given time corrected timestamps
+    Calculates 2-telescopes coincidences first and then matches coincident times with third telescope
+    Returns coincident timestamps and data of all 3 telelscopes
+    """
+    t1 = np.asarray(timestamps1)
+    t2 = np.asarray(timestamps2)
+    t3 = np.asarray(timestamps3)
+    d1 = np.asarray(data1)
+    d2 = np.asarray(data2)
+    d3 = np.asarray(data3)
+
+    if len(t1) != len(d1): raise ValueError("timestamps1 and data1 length mismatch")
+    if len(t2) != len(d2): raise ValueError("timestamps2 and data2 length mismatch")
+    if len(t3) != len(d3): raise ValueError("timestamps3 and data3 length mismatch")
+
+    print("Number of events T1:", len(t1))
+    print("Number of events T2:", len(t2))
+    print("Number of events T3:", len(t3))
+
+    # --- Step 1: build all (i,j) pairs between T1 and T2 within ±window
+    left2  = np.searchsorted(t2, t1 - window, side="left")
+    right2 = np.searchsorted(t2, t1 + window, side="right")
+
+    idx1_pairs = []
+    idx2_pairs = []
+    for i, (l, r) in enumerate(zip(left2, right2)):
+        if l < r:
+            idx1_pairs.extend([i] * (r - l))
+            idx2_pairs.extend(range(l, r))
+
+    idx1_pairs = np.asarray(idx1_pairs, dtype=np.int64)
+    idx2_pairs = np.asarray(idx2_pairs, dtype=np.int64)
+
+    if idx1_pairs.size == 0:
+        # keine Paare -> keine Tripel
+        empty_dt = np.asarray([], dtype=float)
+        empty_t = pd.to_datetime([], utc=True).tz_convert(tz)
+        empty_data = np.asarray([])
+        print(f"Number of triple coincidences within {window}s: 0")
+        return empty_t, empty_data, empty_t, empty_data, empty_t, empty_data, empty_dt, empty_dt, empty_dt
+
+    # Representative time for the pair (you can also use 0.5*(t1+t2))
+    t_pair = 0.5 * (t1[idx1_pairs] + t2[idx2_pairs])
+
+    # --- Step 2: for each (i,j) pair, find all k in T3 within ±window around t_pair
+    left3  = np.searchsorted(t3, t_pair - window, side="left")
+    right3 = np.searchsorted(t3, t_pair + window, side="right")
+
+    idx1 = []
+    idx2 = []
+    idx3 = []
+
+    for p, (l, r) in enumerate(zip(left3, right3)):
+        if l < r:
+            idx1.extend([idx1_pairs[p]] * (r - l))
+            idx2.extend([idx2_pairs[p]] * (r - l))
+            idx3.extend(range(l, r))
+
+    idx1 = np.asarray(idx1, dtype=np.int64)
+    idx2 = np.asarray(idx2, dtype=np.int64)
+    idx3 = np.asarray(idx3, dtype=np.int64)
+
+    # Gather
+    time1 = t1[idx1]
+    time2 = t2[idx2]
+    time3 = t3[idx3]
+
+    data1_coinc = d1[idx1]
+    data2_coinc = d2[idx2]
+    data3_coinc = d3[idx3]
+
+    n = len(time1)
+    p1 = (n * 100 / len(t1)) if len(t1) else 0.0
+    p2 = (n * 100 / len(t2)) if len(t2) else 0.0
+    p3 = (n * 100 / len(t3)) if len(t3) else 0.0
+    print(f"Number of triple coincidences within {window}s: {n} "
+          f"(~{p1:.1f}% of T1, ~{p2:.1f}% of T2, ~{p3:.1f}% of T3)")
+
+    return (time1, data1_coinc, time2, data2_coinc, time3, data3_coinc)
+
+def coinc_rate(coinc_timestamps,plot_name,base_dir,bin_width=240,plotting=True):
+    #Given unix coincident timestamps: Calculates coincident rate over given time windows bin_width
+    #Since the coincident window is small we need only the coincident timestamps of one telescope
+    #Returns unix timestamps and rate binned as specified by bin_width
+    y,x=np.histogram(coinc_timestamps,bins=np.arange(min(coinc_timestamps),max(coinc_timestamps)+bin_width+1,bin_width))
+    time_rate=x[:-1]+bin_width/2
+    rate=y/bin_width
+    time_rate_pd=pd.to_datetime(time_rate, unit='s', utc=True).tz_convert('America/Los_Angeles')
+    if plotting:
+        plt.step(time_rate_pd,rate)
+        plt.grid()
+        plt.xlabel("time")
+        plt.ylabel("Coincidence Rate [Hz]")
+        plt.title(str(base_dir)+", Coincidences, "+plot_name)
+        path=f"{base_dir}/"
+        plt.savefig(path+plot_name+"_coinc_rate.png",dpi=300)
+        plt.show()
+    return(time_rate,rate)
