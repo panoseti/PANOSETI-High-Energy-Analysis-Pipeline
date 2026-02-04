@@ -10,6 +10,65 @@ import pypff
 import pandas as pd
 import matplotlib.pyplot as plt
 
+def wr_to_unix(pkt_nsec, tv_sec, tv_usec, ignore_clock_desync=False):
+    """
+    Vektorisierte Version:
+    - pkt_nsec : ns (int64)
+    - tv_sec   : Unix seconds (int64)
+    - tv_usec  : microseconds (int64)
+
+    Rückgabe:
+    - numpy.datetime64[ns] Array (exakt!)
+    """
+
+    # In Arrays casten
+    pkt_nsec = np.asarray(pkt_nsec, dtype=np.int64)
+    tv_sec   = np.asarray(tv_sec,   dtype=np.int64)
+    tv_usec  = np.asarray(tv_usec,  dtype=np.int64)
+
+    # Umrechnung tv_usec → ns
+    usec_ns = tv_usec * 1000
+
+    # Differenz in ns
+    diff = usec_ns - pkt_nsec
+
+    # 25ms Threshold in ns
+    TH = 25_000_000
+
+    # Fallbestimmung
+    mask0     = np.abs(diff) < TH     # normal
+    mask1023  = diff > TH             # tv_usec weit größer
+    mask1     = diff < -TH            # pkt_nsec weit größer
+
+    # Preallocate Ausgabe als ns-Integer
+    out_ns = np.empty_like(tv_sec, dtype=np.int64)
+
+    # Normalfall d=0: gleiche Sekunde
+    out_ns[mask0] = tv_sec[mask0] * 1_000_000_000 + pkt_nsec[mask0]
+
+    # d=1: pkt_nsec viel größer → Sekunde -1
+    out_ns[mask1] = (tv_sec[mask1] - 1) * 1_000_000_000 + pkt_nsec[mask1]
+
+    # d=1023: tv_usec viel größer → Sekunde +1
+    out_ns[mask1023] = (tv_sec[mask1023] + 1) * 1_000_000_000 + pkt_nsec[mask1023]
+
+    # Ungültige Fälle?
+    mask_bad = ~(mask0 | mask1 | mask1023)
+
+    if np.any(mask_bad):
+        if ignore_clock_desync:
+            out_ns[mask_bad] = tv_sec[mask_bad] * 1_000_000_000 + pkt_nsec[mask_bad]
+        else:
+            i = np.flatnonzero(mask_bad)[0]
+            raise Exception(
+                f"Clock mismatch: tv_sec={tv_sec[i]} tv_usec={tv_usec[i]} "
+                f"pkt_nsec={pkt_nsec[i]} diff={diff[i]}"
+            )
+
+    # Final: int64 ns → datetime64[ns] (EXAKT!)
+    return out_ns.astype("datetime64[ns]")
+    #return out_ns
+
 
 def read_pff(filename):
     #Reads in pff file and returns data and metadata
@@ -19,6 +78,28 @@ def read_pff(filename):
     return(data,metadata)
 
 def cut_pkt_loss(data,metadata):
+    #cut out frames with package loss and return data and timestamps
+    #get pkt number, if it is 0 the corresponding quabo will be missing in the data
+    pkt_num_0=metadata["quabo_0"]["pkt_num"]
+    pkt_num_1=metadata["quabo_1"]["pkt_num"]
+    pkt_num_2=metadata["quabo_2"]["pkt_num"]
+    pkt_num_3=metadata["quabo_3"]["pkt_num"]
+    #get timestamps for every quabo
+    trigger=np.zeros((4,len(metadata["quabo_0"]["tv_sec"])),dtype="datetime64[ns]")
+    #trigger=np.zeros((4,len(metadata["quabo_0"]["tv_sec"])))
+    trigger[0]=wr_to_unix(metadata["quabo_0"]["pkt_nsec"],metadata["quabo_0"]["tv_sec"],metadata["quabo_0"]["tv_usec"])
+    trigger[1]=wr_to_unix(metadata["quabo_1"]["pkt_nsec"],metadata["quabo_1"]["tv_sec"],metadata["quabo_1"]["tv_usec"])
+    trigger[2]=wr_to_unix(metadata["quabo_2"]["pkt_nsec"],metadata["quabo_2"]["tv_sec"],metadata["quabo_2"]["tv_usec"])
+    trigger[3]=wr_to_unix(metadata["quabo_3"]["pkt_nsec"],metadata["quabo_3"]["tv_sec"],metadata["quabo_3"]["tv_usec"])
+    #it is different for every quabo, I guess it is the time the paket arrived on the daq node, not the actual trigger time, taking min for now, but needs to be reviewed
+    timestamps=np.min(trigger,axis=0)
+    #cut out all data and timestamps with package loss for at least one quabo
+    data_cut=data[(pkt_num_0!=0)&(pkt_num_1!=0)&(pkt_num_2!=0)&(pkt_num_3!=0)]
+    timestamps_cut=timestamps[(pkt_num_0!=0)&(pkt_num_1!=0)&(pkt_num_2!=0)&(pkt_num_3!=0)]
+    print("Number of Events with package loss: ",len(data)-len(data_cut)," (",round((len(data)-len(data_cut))/len(data)*100,2),"%)")
+    return(data_cut,timestamps_cut)
+
+def cut_pkt_loss_old(data,metadata):
     #cut out frames with package loss and return data and timestamps
     #get pkt number, if it is 0 the corresponding quabo will be missing in the data
     pkt_num_0=metadata["quabo_0"]["pkt_num"]
@@ -38,6 +119,7 @@ def cut_pkt_loss(data,metadata):
     print("Number of Events with package loss: ",len(data)-len(data_cut)," (",round((len(data)-len(data_cut))/len(data)*100,2),"%)")
     return(data_cut,timestamps_cut)
 
+
 def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
     '''
     Removes spikes in trigger rate caused e.g. by planes passing through the filed of view
@@ -46,6 +128,8 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
     plotting: plots trigger rate over time before and after cut if True
     path: path to save the plot to
     '''
+    if np.issubdtype(timestamps.dtype, np.datetime64):
+        timestamps = timestamps.astype('datetime64[ns]').astype('int64') * 1e-9
     bins = np.arange(timestamps.min(), timestamps.max() + bin_width, bin_width)
     counts, _ = np.histogram(timestamps, bins=bins)
     rate = counts / bin_width  # Hz
@@ -69,7 +153,7 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
         ax[1].set_ylabel("Trigger Rate [Hz]")
         ax[1].set_title("After Cut")
         fig.tight_layout()
-        plt.savefig(path+"_spike_cut.png",dpi=300)
+        plt.savefig(path+"spike_cut.png",dpi=300)
         plt.show()
     timestamps_pd=pd.to_datetime(timestamps, unit='s', utc=True).tz_convert('America/Los_Angeles')
     print("Rate spikes at: ",time[rate>2])
@@ -130,7 +214,7 @@ def cut_meridian_flip(data,timestamps,hk, time_after=60, plotting=False,path=Non
         fig.legend(loc=1)
         fig.autofmt_xdate()
         fig.tight_layout()
-        plt.savefig(path+"_meridian_flip.png",dpi=300)
+        plt.savefig(path+"meridian_flip.png",dpi=300)
         plt.show()
     return(data_cut,timestamps_cut,time[no_track[0]],time[no_track[-1]])
 
