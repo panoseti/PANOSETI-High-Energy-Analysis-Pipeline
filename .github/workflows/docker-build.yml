@@ -62,4 +62,78 @@ jobs:
         docker run --rm panoseti:test bash -c "root-config --version && corsikaIOreader --help"
         
         # Quick CORSIKA test (run very short simulation)
-        docker run --rm panoseti:test bash -c "cd /opt/panoseti/corsika-77550/run && timeout 30 ./corsika77550Linux_QGSII_urqmd < /dev/null 2>&1 | head -20"# Trigger CI test Wed Feb  4 12:42:44 PM PST 2026
+        docker run --rm panoseti:test bash -c "cd /opt/panoseti/corsika-77550/run && timeout 30 ./corsika77550Linux_QGSII_urqmd < /dev/null 2>&1 | head -20"
+        
+    - name: Run CORSIKA simulation
+      run: |
+        cd container
+        docker run --rm \
+          -v $(pwd)/example:/opt/panoseti/example \
+          -w /opt/panoseti/corsika-77550/run \
+          panoseti:test \
+          bash -c "./corsika77550Linux_QGSII_urqmd < /opt/panoseti/example/example.inp > /opt/panoseti/example/corsika.log 2>&1 && ls -lh /opt/panoseti/example/DAT*"
+        
+    - name: Create visualization script
+      run: |
+        cd container/simulation-tools
+        cat > run_vis.C << 'EOF'
+#include "panodisplay.C"
+
+void run_vis() {
+    gROOT->LoadMacro("panodisplay.C");
+    readFile("example-output.root");
+    gROOT->SetBatch(kTRUE);
+    
+    // Generate visualization for each event
+    TFile* f = (TFile*)gROOT->GetListOfFiles()->FindObject("example-output.root");
+    TTree* tree = (TTree*)f->Get("T");
+    if (!tree) {
+        std::cout << "Error: Could not get TTree" << std::endl;
+        return;
+    }
+    
+    Long64_t nentries = tree->GetEntries();
+    std::cout << "Generating " << nentries << " event visualizations..." << std::endl;
+    
+    for (Long64_t i = 0; i < std::min(nentries, 3LL); i++) {
+        std::cout << "Event " << i << ":" << std::endl;
+        panodisplay(i);
+        
+        // Save visualization
+        gPad->SaveAs(Form("visualization_event_%lld.png", i));
+    }
+    
+    std::cout << "Visualization complete!" << std::endl;
+}
+EOF
+        
+    - name: Convert CORSIKA output to ROOT and generate visualizations
+      run: |
+        cd container
+        docker run --rm \
+          -v $(pwd)/example:/opt/panoseti/example \
+          -v $(pwd)/simulation-tools:/opt/panoseti/simulation-tools \
+          -w /opt/panoseti/example \
+          panoseti:test \
+          bash -c "
+          mkdir -p data && \
+          cp /opt/panoseti/corsika-77550/run/atmabs.dat mirreff.dat quanteff.dat data/ && \
+          corsikaIOreader -cors DAT000001 -histo example-output.root -abs CORSIKA >> corsika.log 2>&1 && \
+          cd /opt/panoseti/simulation-tools && \
+          root -l -b -q run_vis.C 2>&1 | tee root-vis.log
+          "
+        
+    - name: Upload visualization artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: corsika-simulation-results
+        path: |
+          container/example/corsika.log
+          container/example/example-output.root
+          container/example/DAT*000001
+          container/example/CER*000001
+          container/example/TEC*000001
+          container/example/*.png
+          container/simulation-tools/root-vis.log
+        retention-days: 30
