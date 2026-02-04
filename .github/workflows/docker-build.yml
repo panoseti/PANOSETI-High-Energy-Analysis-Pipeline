@@ -73,28 +73,21 @@ jobs:
           panoseti:test \
           bash -c "./corsika77550Linux_QGSII_urqmd < /opt/panoseti/example/example.inp > /opt/panoseti/example/corsika.log 2>&1 && ls -lh /opt/panoseti/example/DAT*"
         
-    - name: Create visualization script
+    - name: Convert CORSIKA output to ROOT and generate visualizations
       run: |
-        cd container/simulation-tools
-        cat > run_vis_simple.C <<'CLANGEOF'
-void run_vis() {
-  gROOT->ProcessLine("#include \"panodisplay.C\"");
-  gROOT->ProcessLine("gROOT->LoadMacro(\"panodisplay.C\");");
-  gROOT->ProcessLine("readFile(\"/opt/panoseti/example/example-output.root\");");
-  gROOT->ProcessLine("gROOT->SetBatch(kTRUE);");
-  
-  Int_t nevents = (Int_t)gROOT->ProcessLine("((TTree*)((TFile*)gROOT->GetListOfFiles()->FindObject(\"/opt/panoseti/example/example-output.root\"))->Get(\"T\"))->GetEntries()", kFALSE);
-  printf("Found %d events, save for events 0-2\n", nevents);
-  
-  for (Int_t i = 0; i < TMath::Min(nevents, 3); i++) {
-    printf("Saving event %d\n", i);
-    TString cmd; cmd.Form("panodisplay(%d); gPad->SaveAs(\"/opt/panoseti/example/vis_event_%d.png\");", i, i);
-    gROOT->ProcessLine(cmd);
-  }
-  
-  printf("Visualization complete!\n");
-}
-CLANGEOF
+        cd container
+        docker run --rm \
+          -v $(pwd)/example:/opt/panoseti/example \
+          -v $(pwd)/simulation-tools:/opt/panoseti/simulation-tools \
+          -w /opt/panoseti/example \
+          panoseti:test \
+          bash -c "
+          mkdir -p data && \
+          cp /opt/panoseti/corsika-77550/run/atmabs.dat mirreff.dat quanteff.dat data/ && \
+          corsikaIOreader -cors DAT000001 -histo example-output.root -abs CORSIKA >> corsika.log 2>&1 && \
+          cd /opt/panoseti/simulation-tools && \
+          root -l -b -q 'gROOT->LoadMacro(\"panodisplay.C\"); readFile(\"/opt/panoseti/example/example-output.root\"); Int_t nevents=Int_t(((TTree*)((TFile*)gROOT->GetListOfFiles()->FindObject(\"/opt/panoseti/example/example-output.root\"))->Get(\"T\"))->GetEntries(); printf(\"Found %d events\\n\",nevents); for(Int_t i=0;i<TMath::Min(nevents,3);i++){printf(\"Event %d\\n\",i);panodisplay(i);gPad->SaveAs(Form(\"/opt/panoseti/example/vis_event_%d.png\",i));}'
+          "
         
     - name: Convert CORSIKA output to ROOT and generate visualizations
       run: |
