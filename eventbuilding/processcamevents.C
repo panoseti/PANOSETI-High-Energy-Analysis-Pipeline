@@ -91,6 +91,47 @@ void draw_cam(int event)
   cam_2D_hist->Draw("COLZ");
 }
 
+void read_pedestals(const char *infile)
+{
+  
+  TFile *pedfile = TFile::Open(infile,"READ");
+  TH2D *peds_2D_hist=(TH2D*)pedfile->Get("peds_2D_hist");
+  TH2D *pedvars_2D_hist=(TH2D*)pedfile->Get("pedvars_2D_hist");
+}
+ 
+void eventdisplay(int start=0, int end=-1, bool wait=false)
+{
+  TCanvas *c1 = new TCanvas("c1", "Sequential Image Display", 600, 600);
+  if (end>camdata->GetEntries()) end=camdata->GetEntries();
+  if (end<start) end=camdata->GetEntries();
+  for (int i=start;i<end;i++)
+    {
+      camdata->GetEntry(i);
+      TH2D *cam_ped_subtracted=new TH2D(*cam_2D_hist);
+      cam_ped_subtracted->SetName("cam_ped_subtracted");
+      char mytitle[200];
+      snprintf(mytitle,200,"Event %i Pedestal Subtracted Camera",i);
+      cam_ped_subtracted->SetTitle(mytitle);
+      for (int i=0;i<32;i++)
+	{
+	  for (int j=0;j<32;j++)
+	    {
+	      cam_ped_subtracted->SetBinContent(i+1,j+1,(cam_pix_data[i][j]-ped[i][j]));
+	    }
+	}
+      cam_ped_subtracted->SetStats(0);
+      cam_ped_subtracted->Draw("COLZ");
+      c1->Modified();
+      c1->Update();
+      gSystem->ProcessEvents(); // Handle window interactions
+      gSystem->Sleep(200);      // 100ms delay between frames	
+      char a[200];
+      if (wait) (read(1,a,200));
+    }
+}
+
+
+
 void draw_cam_ped_subtracted(int event)
 {
   //TTree *camdata=loadcamdata(infile);

@@ -14,6 +14,8 @@ Double_t        array_WR_time[3];
 Short_t        array_pix_data[3][32][32];
 Bool_t         array_triggered[3];
 TH2D * array_2D_hist[3];
+TGraph *gsmoothtime;
+
 
 TTree * define_arraydata()
 {
@@ -58,6 +60,25 @@ UInt_t          cam_nanosec;
 Double_t        cam_WR_time;
 Short_t        cam_pix_data[32][32];
 TH2D * cam_2D_hist=new TH2D("cam_2D_hist","camera",32,0,32,32,0,32);
+
+TTree * load_camdata(const char *infile)
+{
+  cout << "reading from " << infile << endl;
+  TFile *root_infile = TFile::Open(infile);
+  TTree *camdata=(TTree*)root_infile->Get("camdata"); //variable declarations are in the .h file
+
+  camdata->SetBranchAddress("cam_npix", &cam_npix);
+  camdata->SetBranchAddress("cam_scope_id", &cam_scope_id);
+  camdata->SetBranchAddress("cam_pcap_time",&cam_pcap_time);
+  camdata->SetBranchAddress("cam_pcap_time_since_start",&cam_pcap_time_since_start);
+  camdata->SetBranchAddress("cam_acq_mode",&cam_acq_mode);
+  camdata->SetBranchAddress("cam_TAI",&cam_TAI);
+  camdata->SetBranchAddress("cam_nanosec",&cam_nanosec);
+  camdata->SetBranchAddress("cam_WR_time",&cam_WR_time);
+  camdata->SetBranchAddress("cam_pix_data",cam_pix_data);
+  camdata->SetBranchAddress("cam_2D_hist",&cam_2D_hist);
+  return camdata;
+}
 
 TTree * load_camdata(const char *infile)
 {
