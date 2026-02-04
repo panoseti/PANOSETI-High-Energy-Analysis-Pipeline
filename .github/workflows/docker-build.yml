@@ -55,4 +55,4 @@ jobs:
         docker run --rm panoseti:test bash -c "root-config --version && corsikaIOreader --help"
         
         # Quick CORSIKA test (run very short simulation)
-        docker run --rm panoseti:test bash -c "cd /opt/panoseti/corsika-77550/run && timeout 30 ./corsika77550Linux_QGSII_urqmd < /dev/null 2>&1 | head -20"
+        docker run --rm panoseti:test bash -c "cd /opt/panoseti/corsika-77550/run && timeout 30 ./corsika77550Linux_QGSII_urqmd < /dev/null 2>&1 | head -20"# Trigger CI test Wed Feb  4 12:42:44 PM PST 2026
