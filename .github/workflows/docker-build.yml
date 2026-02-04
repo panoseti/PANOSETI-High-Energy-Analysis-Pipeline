@@ -4,6 +4,13 @@ on:
   push:
     branches: [ docker ]
   workflow_dispatch:
+    inputs:
+      test_example:
+        description: 'Run example simulation'
+        required: false
+        type: boolean
+        default: false
+  repository_dispatch:
 
 jobs:
   build:
