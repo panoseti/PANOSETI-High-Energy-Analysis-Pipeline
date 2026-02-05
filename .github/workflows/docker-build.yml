@@ -1,0 +1,97 @@
+name: Build Docker Container
+
+on:
+  push:
+    branches: [ docker ]
+  workflow_dispatch:
+  repository_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Cache CORSIKA tarball
+      id: cache-corsika
+      uses: actions/cache@v3
+      with:
+        path: container/corsika-77550.tar.gz
+        key: corsika-77550-${{ hashFiles('container/Dockerfile') }}
+
+    - name: Download CORSIKA if not cached
+      if: steps.cache-corsika.outputs.cache-hit != 'true'
+      env:
+        CORSIKA_USER: ${{ secrets.CORSIKA_USER }}
+        CORSIKA_PASSWORD: ${{ secrets.CORSIKA_PASSWORD }}
+        CORSIKA_TARBALL_URL: ${{ secrets.CORSIKA_TARBALL_URL }}
+        CORSIKA_TARBALL_RESOLVE: ${{ secrets.CORSIKA_TARBALL_RESOLVE }}
+      run: |
+        cd container
+        DEFAULT_TARBALL_URL="https://nebula.sdsc.edu/corsika-77550.tar.gz"
+        CLEAN_TARBALL_URL="$(printf '%s' "${CORSIKA_TARBALL_URL:-$DEFAULT_TARBALL_URL}" | tr -d '\r\n')"
+        if [[ "$CLEAN_TARBALL_URL" != http* ]]; then
+          CLEAN_TARBALL_URL="$DEFAULT_TARBALL_URL"
+        fi
+        echo "Mirror URL length: ${#CLEAN_TARBALL_URL}"
+        if [ -n "$CLEAN_TARBALL_URL" ]; then
+          echo "Downloading CORSIKA tarball from mirror URL"
+          CURL_OPTS=(-fL --retry 3 --retry-delay 5 -o corsika-77550.tar.gz)
+          if [ -n "$CORSIKA_TARBALL_RESOLVE" ]; then
+            CURL_OPTS+=(--resolve "$CORSIKA_TARBALL_RESOLVE")
+          elif [[ "$CLEAN_TARBALL_URL" == *"nebula.sdsc.edu"* ]]; then
+            CURL_OPTS+=(--resolve "nebula.sdsc.edu:443:192.31.21.23")
+          fi
+          curl "${CURL_OPTS[@]}" -- "$CLEAN_TARBALL_URL"
+          exit 0
+        fi
+        if [ -z "$CORSIKA_USER" ] || [ -z "$CORSIKA_PASSWORD" ]; then
+          echo "ERROR: CORSIKA_USER and CORSIKA_PASSWORD secrets not set"
+          exit 1
+        fi
+        curl -fL --retry 3 --retry-delay 5 --digest \
+          -u "$CORSIKA_USER:$CORSIKA_PASSWORD" \
+          -o corsika-77550.tar.gz \
+          https://web.iap.kit.edu/corsika/download/corsika-v770/corsika-77550.tar.gz
+        
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build PANOSETI Docker image
+      env:
+        CORSIKA_USER: ${{ secrets.CORSIKA_USER }}
+        CORSIKA_PASSWORD: ${{ secrets.CORSIKA_PASSWORD }}
+      run: |
+        cd container
+        make build IMAGE_NAME=panoseti IMAGE_TAG=test
+        
+    - name: Quick CORSIKA test with CORSIKA example
+      run: |
+        cd container
+        make test IMAGE_NAME=panoseti IMAGE_TAG=test
+        
+    - name: Test CORSIKA with PANOSETI example
+      run: |
+        cd container
+        make ci-example-test IMAGE_NAME=panoseti IMAGE_TAG=test
+
+    - name: Generate example PNGs
+      run: |
+        mkdir -p container/test_output
+        docker run --rm \
+          -v "$PWD/simulation-tools:/opt/panoseti/simulation-tools" \
+          -v "$PWD/simulation-tools/example:/opt/panoseti/example" \
+          -v "$PWD/container/test_output:/output" \
+          -w /opt/panoseti/simulation-tools \
+          panoseti:test \
+          bash -lc 'cp /opt/panoseti/example/example.root ./example.root && root -l -b -q "run_example.C(0,true,\"/output/example\")"'
+        
+    - name: Upload CORSIKA logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: corsika-test-logs
+        path: container/test_output/
+        retention-days: 7

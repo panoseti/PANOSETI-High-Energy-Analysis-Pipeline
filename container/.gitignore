@@ -1,0 +1,7 @@
+rootproject/
+rootproject/
+
+# Generated files
+example/*.log
+example/*.root
+example/data/

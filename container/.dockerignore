@@ -1,0 +1,58 @@
+# .dockerignore - Files to exclude from Docker build context
+
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!container/README.md
+AGENTS.md
+README.md
+
+# Test data and results
+*.root
+*.log
+*.pcap
+*.pcapng
+
+# Build artifacts
+*.o
+*.so
+*.a
+*.pcm
+
+# IDE and editor files
+.vscode
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__
+*.pyc
+.Python
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints
+*/.ipynb_checkpoints
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Large source files that shouldn't be copied
+install_root/root_*
+install_corsika/corsika-77550.tar.gz
+install_root/root_v6.28*
+
+# Exclude deb files in root directory, but keep container deb files
+/libssl1.1*.deb
+/libtiff5*.deb
+/libwebp6*.deb
+
+# Keep only what we need for container
+# (Makefile is included - why it's ignored?)
