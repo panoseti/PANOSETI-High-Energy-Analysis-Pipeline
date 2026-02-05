@@ -24,29 +24,45 @@ jobs:
     - name: Download CORSIKA if not cached
       if: steps.cache-corsika.outputs.cache-hit != 'true'
       env:
+        CORSIKA_USER: ${{ secrets.CORSIKA_USER }}
+        CORSIKA_PASSWORD: ${{ secrets.CORSIKA_PASSWORD }}
         CORSIKA_TARBALL_URL: ${{ secrets.CORSIKA_TARBALL_URL }}
         CORSIKA_TARBALL_RESOLVE: ${{ secrets.CORSIKA_TARBALL_RESOLVE }}
       run: |
-        CLEAN_TARBALL_URL="$(printf '%s' "$CORSIKA_TARBALL_URL" | tr -d '\r\n')"
-        CLEAN_TARBALL_RESOLVE="$(printf '%s' "$CORSIKA_TARBALL_RESOLVE" | tr -d '\r\n')"
-        if [ -z "$CLEAN_TARBALL_URL" ]; then
-          echo "ERROR: CORSIKA_TARBALL_URL secret not set"
-          exit 1
-        fi
-        if [ -z "$CLEAN_TARBALL_RESOLVE" ]; then
-          echo "ERROR: CORSIKA_TARBALL_RESOLVE secret not set"
-          exit 1
-        fi
         cd container
-        curl -fL --retry 3 --retry-delay 5 \
-          --resolve "$CLEAN_TARBALL_RESOLVE" \
+        DEFAULT_TARBALL_URL="https://nebula.sdsc.edu/corsika-77550.tar.gz"
+        CLEAN_TARBALL_URL="$(printf '%s' "${CORSIKA_TARBALL_URL:-$DEFAULT_TARBALL_URL}" | tr -d '\r\n')"
+        if [[ "$CLEAN_TARBALL_URL" != http* ]]; then
+          CLEAN_TARBALL_URL="$DEFAULT_TARBALL_URL"
+        fi
+        echo "Mirror URL length: ${#CLEAN_TARBALL_URL}"
+        if [ -n "$CLEAN_TARBALL_URL" ]; then
+          echo "Downloading CORSIKA tarball from mirror URL"
+          CURL_OPTS=(-fL --retry 3 --retry-delay 5 -o corsika-77550.tar.gz)
+          if [ -n "$CORSIKA_TARBALL_RESOLVE" ]; then
+            CURL_OPTS+=(--resolve "$CORSIKA_TARBALL_RESOLVE")
+          elif [[ "$CLEAN_TARBALL_URL" == *"nebula.sdsc.edu"* ]]; then
+            CURL_OPTS+=(--resolve "nebula.sdsc.edu:443:192.31.21.23")
+          fi
+          curl "${CURL_OPTS[@]}" -- "$CLEAN_TARBALL_URL"
+          exit 0
+        fi
+        if [ -z "$CORSIKA_USER" ] || [ -z "$CORSIKA_PASSWORD" ]; then
+          echo "ERROR: CORSIKA_USER and CORSIKA_PASSWORD secrets not set"
+          exit 1
+        fi
+        curl -fL --retry 3 --retry-delay 5 --digest \
+          -u "$CORSIKA_USER:$CORSIKA_PASSWORD" \
           -o corsika-77550.tar.gz \
-          -- "$CLEAN_TARBALL_URL"
+          https://web.iap.kit.edu/corsika/download/corsika-v770/corsika-77550.tar.gz
         
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
       
     - name: Build PANOSETI Docker image
+      env:
+        CORSIKA_USER: ${{ secrets.CORSIKA_USER }}
+        CORSIKA_PASSWORD: ${{ secrets.CORSIKA_PASSWORD }}
       run: |
         cd container
         make build IMAGE_NAME=panoseti IMAGE_TAG=test
