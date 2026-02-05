@@ -2,7 +2,9 @@ name: Build Docker Container
 
 on:
   push:
-    branches: [ docker ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
   repository_dispatch:
 
