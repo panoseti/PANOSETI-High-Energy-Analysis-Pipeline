@@ -32,7 +32,9 @@ jobs:
           exit 1
         fi
         cd container
-        wget --user="$CORSIKA_USER" --password="$CORSIKA_PASSWORD" \
+        curl -fL --retry 3 --retry-delay 5 --digest \
+          -u "$CORSIKA_USER:$CORSIKA_PASSWORD" \
+          -o corsika-77550.tar.gz \
           https://web.iap.kit.edu/corsika/download/corsika-v770/corsika-77550.tar.gz
         
     - name: Set up Docker Buildx
