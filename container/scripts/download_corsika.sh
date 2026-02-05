@@ -26,7 +26,7 @@ else
     if [ -n "$USER" ] && [ -n "$PASSWORD" ]; then
         echo "Using provided credentials to download from official CORSIKA server"
         wget --user="$USER" --password="$PASSWORD" \
-            https://web.iap.kit.edu/corsika/download/corsika-v7750/${CORSIKA_TAR}
+            https://web.iap.kit.edu/corsika/download/corsika-v770/${CORSIKA_TAR}
 
         if [ $? -eq 0 ]; then
             echo "Download completed successfully"
@@ -38,7 +38,7 @@ else
             echo "Alternative: Pre-download the tarball and place it in the build context"
             echo "  cd container"
             echo "  wget --user=YOUR_USER --password=YOUR_PASS \\"
-            echo "    https://web.iap.kit.edu/corsika/download/corsika-v7750/corsika-77550.tar.gz"
+            echo "    https://web.iap.kit.edu/corsika/download/corsika-v770/corsika-77550.tar.gz"
             echo "  docker build -t panoseti:latest ."
             exit 1
         fi
@@ -56,7 +56,7 @@ else
         echo "     b) OR pre-download the tarball:"
         echo "        cd container"
         echo "        wget --user=YOUR_USER --password=YOUR_PASS \\"
-            echo "          https://web.iap.kit.edu/corsika/download/corsika-v7750/corsika-77550.tar.gz"
+            echo "          https://web.iap.kit.edu/corsika/download/corsika-v770/corsika-77550.tar.gz"
         echo "        make build"
         exit 1
     fi
