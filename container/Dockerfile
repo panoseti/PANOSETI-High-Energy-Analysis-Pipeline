@@ -36,11 +36,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installation scripts to container
-COPY scripts/*.sh /opt/panoseti/
+COPY container/scripts/*.sh /opt/panoseti/
 
 # Copy CORSIKA tarball if it exists in build context
 # This is an alternative to providing credentials via build args
-COPY corsika-77550.tar.gz /opt/panoseti/
+COPY container/corsika-77550.tar.gz /opt/panoseti/
 
 # Make scripts executable
 RUN chmod +x /opt/panoseti/*.sh
@@ -71,8 +71,9 @@ RUN ./install_corsikaIOreader.sh || \
 
 # Step 5: Copy example files
 # Example CORSIKA simulation ready-to-run
-COPY example/ /opt/panoseti/example/
-COPY simulation-tools/ /opt/panoseti/simulation-tools/
+COPY simulation-tools/example/ /opt/panoseti/example/
+COPY simulation-tools/panodisplay.C /opt/panoseti/simulation-tools/
+COPY simulation-tools/run_example.C /opt/panoseti/simulation-tools/
 
 # Set up environment for running examples
 ENV PYTHONUNBUFFERED=1

@@ -9,6 +9,8 @@ all: build
 IMAGE_NAME ?= panoseti
 IMAGE_TAG ?= latest
 CONTAINER_DIR ?= $(shell pwd)
+CONTEXT_DIR ?= $(abspath $(CONTAINER_DIR)/..)
+DOCKERFILE ?= $(CONTAINER_DIR)/Dockerfile
 
 # Optional build args for CORSIKA download
 BUILD_ARGS :=
@@ -80,7 +82,7 @@ build:
 	@echo ""
 	@echo "This may take 30-60 minutes (CORSIKA compilation)..."
 	@echo ""
-	@docker build $(BUILD_ARGS) -t $(IMAGE_NAME):$(IMAGE_TAG) $(CONTAINER_DIR)
+	@docker build $(BUILD_ARGS) -t $(IMAGE_NAME):$(IMAGE_TAG) -f $(DOCKERFILE) $(CONTEXT_DIR)
 	@if [ $$? -eq 0 ]; then \
 		echo ""; \
 		echo "============================================="; \
