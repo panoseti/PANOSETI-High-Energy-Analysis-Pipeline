@@ -32,6 +32,9 @@ jobs:
         cd container
         DEFAULT_TARBALL_URL="https://nebula.sdsc.edu/corsika-77550.tar.gz"
         CLEAN_TARBALL_URL="$(printf '%s' "${CORSIKA_TARBALL_URL:-$DEFAULT_TARBALL_URL}" | tr -d '\r\n')"
+        if [[ "$CLEAN_TARBALL_URL" != http* ]]; then
+          CLEAN_TARBALL_URL="$DEFAULT_TARBALL_URL"
+        fi
         echo "Mirror URL length: ${#CLEAN_TARBALL_URL}"
         if [ -n "$CLEAN_TARBALL_URL" ]; then
           echo "Downloading CORSIKA tarball from mirror URL"
