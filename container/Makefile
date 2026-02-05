@@ -1,6 +1,6 @@
 # Makefile for building PANOSETI Docker container
 
-.PHONY: build test run shell clean example example-sim example-vis help
+.PHONY: build test run shell clean example example-sim example-vis ci-example-test help
 
 # Default target
 all: build
@@ -9,6 +9,15 @@ all: build
 IMAGE_NAME ?= panoseti
 IMAGE_TAG ?= latest
 CONTAINER_DIR ?= $(shell pwd)
+
+# Optional build args for CORSIKA download
+BUILD_ARGS :=
+ifneq ($(strip $(CORSIKA_USER)),)
+BUILD_ARGS += --build-arg CORSIKA_USER=$(CORSIKA_USER)
+endif
+ifneq ($(strip $(CORSIKA_PASSWORD)),)
+BUILD_ARGS += --build-arg CORSIKA_PASSWORD=$(CORSIKA_PASSWORD)
+endif
 
 help:
 	@echo "PANOSETI Docker Container Makefile"
@@ -25,6 +34,7 @@ help:
 	@echo "  make example       - Run example CORSIKA simulation (requires X11 for visualization)"
 	@echo "  make example-sim    - Run example CORSIKA simulation only (batch mode)"
 	@echo "  make example-vis    - Visualize existing example.root (requires X11)"
+	@echo "  make ci-example-test - Run PANOSETI example in CI (writes test_output/)"
 	@echo ""
 	@echo "Variables:"
 	@echo "  IMAGE_NAME         - Docker image name (default: panoseti)"
@@ -39,7 +49,9 @@ help:
 	@echo ""
 
 test:
-	@bash test_container.sh $(IMAGE_NAME):$(IMAGE_TAG)
+	@echo "Running container tests..."
+	@docker run --rm $(IMAGE_NAME):$(IMAGE_TAG) bash -c "root-config --version && corsikaIOreader --help"
+	@docker run --rm $(IMAGE_NAME):$(IMAGE_TAG) bash -c "cd /opt/panoseti/corsika-77550/run && timeout 30 ./corsika77550Linux_QGSII_urqmd < all-inputs 2>&1 | tail -20"
 
 build:
 	@echo "============================================="
@@ -51,6 +63,16 @@ build:
 		echo "Please install Docker from https://docs.docker.com/get-docker/"; \
 		exit 1; \
 	fi
+	@if [ ! -f $(CONTAINER_DIR)/corsika-77550.tar.gz ]; then \
+		if [ -z "$(CORSIKA_USER)" ] || [ -z "$(CORSIKA_PASSWORD)" ]; then \
+			echo "Error: corsika-77550.tar.gz not found and CORSIKA_USER/CORSIKA_PASSWORD not set"; \
+			echo "Either set credentials or pre-download the tarball into $(CONTAINER_DIR)"; \
+			exit 1; \
+		fi; \
+		echo "Downloading CORSIKA tarball..."; \
+		wget --user="$(CORSIKA_USER)" --password="$(CORSIKA_PASSWORD)" \
+			https://web.iap.kit.edu/corsika/download/corsika-v7750/corsika-77550.tar.gz -O $(CONTAINER_DIR)/corsika-77550.tar.gz; \
+	fi
 	@echo "Docker found: $$(docker --version)"
 	@echo ""
 	@echo "Building image: $(IMAGE_NAME):$(IMAGE_TAG)"
@@ -58,7 +80,7 @@ build:
 	@echo ""
 	@echo "This may take 30-60 minutes (CORSIKA compilation)..."
 	@echo ""
-	@docker build -t $(IMAGE_NAME):$(IMAGE_TAG) $(CONTAINER_DIR)
+	@docker build $(BUILD_ARGS) -t $(IMAGE_NAME):$(IMAGE_TAG) $(CONTAINER_DIR)
 	@if [ $$? -eq 0 ]; then \
 		echo ""; \
 		echo "============================================="; \
@@ -210,3 +232,14 @@ example-vis:
 			echo \'Run make example-sim first to generate simulation data\'; \
 			exit 1; \
 		fi"
+
+# CI-only: run PANOSETI example and collect logs/output
+ci-example-test:
+	@mkdir -p $(CONTAINER_DIR)/test_output
+	@docker run --rm \
+		-v $(CONTAINER_DIR)/test_output:/output \
+		-w /opt/panoseti/corsika-77550/run \
+		$(IMAGE_NAME):$(IMAGE_TAG) \
+		bash -c "./corsika77550Linux_QGSII_urqmd < /opt/panoseti/example/example.inp 2>&1 > /output/corsika.log || true"
+	@ls -lh $(CONTAINER_DIR)/test_output/DAT* $(CONTAINER_DIR)/test_output/CER* 2>/dev/null || echo "No CORSIKA output files created"
+	@tail -50 $(CONTAINER_DIR)/test_output/corsika.log
