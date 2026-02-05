@@ -26,12 +26,20 @@ jobs:
       env:
         CORSIKA_USER: ${{ secrets.CORSIKA_USER }}
         CORSIKA_PASSWORD: ${{ secrets.CORSIKA_PASSWORD }}
+        CORSIKA_TARBALL_URL: ${{ secrets.CORSIKA_TARBALL_URL }}
       run: |
+        cd container
+        if [ -n "$CORSIKA_TARBALL_URL" ]; then
+          echo "Downloading CORSIKA tarball from mirror URL"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o corsika-77550.tar.gz \
+            "$CORSIKA_TARBALL_URL"
+          exit 0
+        fi
         if [ -z "$CORSIKA_USER" ] || [ -z "$CORSIKA_PASSWORD" ]; then
           echo "ERROR: CORSIKA_USER and CORSIKA_PASSWORD secrets not set"
           exit 1
         fi
-        cd container
         curl -fL --retry 3 --retry-delay 5 --digest \
           -u "$CORSIKA_USER:$CORSIKA_PASSWORD" \
           -o corsika-77550.tar.gz \
