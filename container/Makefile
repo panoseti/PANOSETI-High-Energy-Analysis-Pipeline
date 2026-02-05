@@ -64,6 +64,12 @@ build:
 		exit 1; \
 	fi
 	@if [ ! -f $(CONTAINER_DIR)/corsika-77550.tar.gz ]; then \
+		if [ -f $(CONTAINER_DIR)/../install_corsika/corsika-77550.tar.gz ]; then \
+			echo "Found existing tarball in ../install_corsika, copying..."; \
+			cp $(CONTAINER_DIR)/../install_corsika/corsika-77550.tar.gz $(CONTAINER_DIR)/corsika-77550.tar.gz; \
+		fi; \
+	fi
+	@if [ ! -f $(CONTAINER_DIR)/corsika-77550.tar.gz ]; then \
 		if [ -z "$(CORSIKA_USER)" ] || [ -z "$(CORSIKA_PASSWORD)" ]; then \
 			echo "Error: corsika-77550.tar.gz not found and CORSIKA_USER/CORSIKA_PASSWORD not set"; \
 			echo "Either set credentials or pre-download the tarball into $(CONTAINER_DIR)"; \
