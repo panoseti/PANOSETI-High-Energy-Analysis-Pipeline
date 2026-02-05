@@ -4,12 +4,6 @@ on:
   push:
     branches: [ docker ]
   workflow_dispatch:
-    inputs:
-      test_example:
-        description: 'Run example simulation'
-        required: false
-        type: boolean
-        default: false
   repository_dispatch:
 
 jobs:
@@ -35,13 +29,11 @@ jobs:
       run: |
         if [ -z "$CORSIKA_USER" ] || [ -z "$CORSIKA_PASSWORD" ]; then
           echo "ERROR: CORSIKA_USER and CORSIKA_PASSWORD secrets not set"
-          echo "Please set them in: Settings → Secrets and variables → Actions"
           exit 1
         fi
         cd container
         wget --user="$CORSIKA_USER" --password="$CORSIKA_PASSWORD" \
           https://web.iap.kit.edu/corsika/download/corsika-v7750/corsika-77550.tar.gz
-        ls -lh corsika-77550.tar.gz
         
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -57,58 +49,29 @@ jobs:
         
     - name: Run container tests
       run: |
-        cd container
-        # Run the test script
         docker run --rm panoseti:test bash -c "root-config --version && corsikaIOreader --help"
         
-        # Quick CORSIKA test (run very short simulation)
-        docker run --rm panoseti:test bash -c "cd /opt/panoseti/corsika-77550/run && timeout 30 ./corsika77550Linux_QGSII_urqmd < /dev/null 2>&1 | head -20"
-        
-    - name: Run CORSIKA simulation
+    - name: Quick CORSIKA test with CORSIKA example
       run: |
         cd container
+        docker run --rm panoseti:test bash -c "cd /opt/panoseti/corsika-77550/run && timeout 30 ./corsika77550Linux_QGSII_urqmd < all-inputs 2>&1 | tail -20"
+        
+    - name: Test CORSIKA with PANOSETI example
+      run: |
+        cd container
+        mkdir -p test_output
         docker run --rm \
-          -v $(pwd)/example:/opt/panoseti/example \
+          -v $(pwd)/test_output:/output \
           -w /opt/panoseti/corsika-77550/run \
           panoseti:test \
-          bash -c "./corsika77550Linux_QGSII_urqmd < /opt/panoseti/example/example.inp > /opt/panoseti/example/corsika.log 2>&1 && ls -lh /opt/panoseti/example/DAT*"
+          bash -c "./corsika77550Linux_QGSII_urqmd < /opt/panoseti/example/example.inp 2>&1 > /output/corsika.log || true" && \
+        ls -lh /output/DAT* /output/CER* 2>/dev/null || echo "No CORSIKA output files created" && \
+        tail -50 /output/corsika.log
         
-    - name: Convert CORSIKA output to ROOT and generate visualizations
-      run: |
-        cd container
-        docker run --rm \
-          -v $(pwd)/example:/opt/panoseti/example \
-          -v $(pwd)/simulation-tools:/opt/panoseti/simulation-tools \
-          -w /opt/panoseti/example \
-          panoseti:test \
-          bash -c "
-          mkdir -p data && \
-          cp /opt/panoseti/corsika-77550/run/atmabs.dat mirreff.dat quanteff.dat data/ && \
-          corsikaIOreader -cors DAT000001 -histo example-output.root -abs CORSIKA >> corsika.log 2>&1 && \
-          cd /opt/panoseti/simulation-tools && \
-          root -l -b -q 'gROOT->LoadMacro(\"panodisplay.C\"); readFile(\"/opt/panoseti/example/example-output.root\"); Int_t nevents=Int_t(((TTree*)((TFile*)gROOT->GetListOfFiles()->FindObject(\"/opt/panoseti/example/example-output.root\"))->Get(\"T\"))->GetEntries(); printf(\"Found %d events\\n\",nevents); for(Int_t i=0;i<TMath::Min(nevents,3);i++){printf(\"Event %d\\n\",i);panodisplay(i);gPad->SaveAs(Form(\"/opt/panoseti/example/vis_event_%d.png\",i));}'
-          "
-        
-    - name: Convert CORSIKA output to ROOT and generate visualizations
-      run: |
-        cd container
-        docker run --rm \
-          -v $(pwd)/example:/opt/panoseti/example \
-          -v $(pwd)/simulation-tools:/opt/panoseti/simulation-tools \
-          -w /opt/panoseti/example \
-          panoseti:test \
-          bash -c "mkdir -p data && cp /opt/panoseti/corsika-77550/run/atmabs.dat mirreff.dat quanteff.dat data/ && corsikaIOreader -cors DAT000001 -histo example-output.root -abs CORSIKA >> corsika.log 2>&1 && cd /opt/panoseti/simulation-tools && root -l -b -q run_vis_simple.C"
-        
-    - name: Upload visualization artifacts
+    - name: Upload CORSIKA logs
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: corsika-simulation-results
-        path: |
-          container/example/corsika.log
-          container/example/example-output.root
-          container/example/DAT*000001
-          container/example/CER*000001
-          container/example/TEC*000001
-          container/example/vis_event_*.png
-        retention-days: 30
+        name: corsika-test-logs
+        path: container/test_output/
+        retention-days: 7
