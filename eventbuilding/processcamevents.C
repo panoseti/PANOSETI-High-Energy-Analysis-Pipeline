@@ -97,16 +97,34 @@ void read_pedestals(const char *infile)
   TFile *pedfile = TFile::Open(infile,"READ");
   TH2D *peds_2D_hist=(TH2D*)pedfile->Get("peds_2D_hist");
   TH2D *pedvars_2D_hist=(TH2D*)pedfile->Get("pedvars_2D_hist");
+  for (int i=0;i<32;i++)
+    {
+      for (int j=0;j<32;j++)
+	{
+	  ped[i][j]=peds_2D_hist->GetBinContent(i+1,j+1);
+	  pedvar[i][j]=pedvars_2D_hist->GetBinContent(i+1,j+1);
+	}
+    }
+  
+
 }
  
 void eventdisplay(int start=0, int end=-1, bool wait=false)
 {
-  TCanvas *c1 = new TCanvas("c1", "Sequential Image Display", 600, 600);
+  // have to do this first:
+  //read_pedestals("../Fern/rawdata/Mrk421_preflip.root.pedvars")
+  //camdata=loadcamdata("../Fern/rawdata/Mrk421_preflip.root")
+  double image_thresh=3;
+
+  TCanvas *c1 = new TCanvas("c1", "Sequential Image Display", 1200, 600);
+  c1->Divide(2,1);
+    
   if (end>camdata->GetEntries()) end=camdata->GetEntries();
   if (end<start) end=camdata->GetEntries();
   for (int i=start;i<end;i++)
     {
       camdata->GetEntry(i);
+
       TH2D *cam_ped_subtracted=new TH2D(*cam_2D_hist);
       cam_ped_subtracted->SetName("cam_ped_subtracted");
       char mytitle[200];
@@ -120,13 +138,38 @@ void eventdisplay(int start=0, int end=-1, bool wait=false)
 	    }
 	}
       cam_ped_subtracted->SetStats(0);
+      c1->cd(1);
       cam_ped_subtracted->Draw("COLZ");
+
+      TH2D *cam_cleaned=new TH2D(*cam_2D_hist);
+      cam_cleaned->SetName("cam_cleaned");
+      snprintf(mytitle,200,"Event %i Cleaned Camera",i);
+      cam_cleaned->SetTitle(mytitle);
+      for (int i=0;i<32;i++)
+	{
+	  for (int j=0;j<32;j++)
+	    {
+	      double pix_value=0;
+	      pix_value=cam_pix_data[i][j]-ped[i][j];
+	      double SN=0;
+	      if (pedvar[i][j]!=0) SN=pix_value/pedvar[i][j];
+	      if (SN<image_thresh) pix_value=0;
+	      cam_cleaned->SetBinContent(i+1,j+1,pix_value);
+	    }
+	}
+      
+      cam_cleaned->SetStats(0);
+      c1->cd(2);
+      cam_cleaned->Draw("COLZ");
+      
+      
       c1->Modified();
       c1->Update();
       gSystem->ProcessEvents(); // Handle window interactions
       gSystem->Sleep(200);      // 100ms delay between frames	
       char a[200];
       if (wait) (read(1,a,200));
+      
     }
 }
 
