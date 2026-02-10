@@ -765,8 +765,8 @@ TMultiGraph* eventMap(int eventNumber){
     telescopes->SetMarkerSize(3);
 
     // Hard-wired for now, probably better to read in a .cfg file in the long term
-    double* TelX = new double[Ntel]{80.48,-6.95,-73.52}; // K,D,C
-    double* TelY = new double[Ntel]{53.59,-107.18,53.59};
+    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
+    double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
     for(int i=0;i<Ntel;i++){
         double x=TelX[i];
         double y=TelY[i];
@@ -775,13 +775,13 @@ TMultiGraph* eventMap(int eventNumber){
         TString label="";
         switch(i){
             case 0:
-                label="Kron";
+                label="PTI";
                 break;
             case 1:
-                label="Dorm";
+                label="Fern";
                 break;
             case 2:
-                label="Crocker";
+                label="Winter";
                 break;
         }
 
@@ -1530,13 +1530,13 @@ TH2D* telEvent(int telNumber, int eventNumber){
     TString label="";
     switch(telNumber){
         case 1:
-            label="Kron";
+            label="PTI";
             break;
         case 2:
-            label="Dorm";
+            label="Fern";
             break;
         case 3:
-            label="Crocker";
+            label="Winter";
             break;
     }
 
@@ -1779,9 +1779,9 @@ void paramCSV(bool reconstruct=false){
         double* alpha = new double[Ntel];
 
         // Hard-wired for now, probably better to read in a .cfg file in the long term
-        double* TelX = new double[Ntel]{80.48,-6.95,-73.52}; // K,D,C
-        double* TelY = new double[Ntel]{53.59,-107.18,53.59};
-        double* TelZ = new double[Ntel]{0.,0.,0.};
+        double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
+        double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
+        double* TelZ = new double[Ntel]{5.04, 0.00, 14.51};
 
         double* timestamp = new double[Ntel];
         t->GetEntry(eventNumber);
@@ -1886,9 +1886,9 @@ void arraydisplay(int eventNumber){
     double* alpha = new double[Ntel];
 
     // Hard-wired for now, probably better to read in a .cfg file in the long term
-    double* TelX = new double[Ntel]{80.48,-6.95,-73.52}; // K,D,C
-    double* TelY = new double[Ntel]{53.59,-107.18,53.59};
-    double* TelZ = new double[Ntel]{0.,0.,0.};
+    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
+    double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
+    double* TelZ = new double[Ntel]{5.04, 0.00, 14.51};
 
 
     int colors[3] = {kBlue+2,kCyan-7,kYellow-7};
@@ -1983,13 +1983,13 @@ void arraydisplay(int eventNumber){
         TString label="";
         switch(i){
             case 0:
-                label="Kron";
+                label="PTI";
                 break;
             case 1:
-                label="Dorm";
+                label="Fern";
                 break;
             case 2:
-                label="Crocker";
+                label="Winter";
                 break;
         }
         if(ellipses[i]){
@@ -2081,9 +2081,9 @@ void panodisplay(int eventNumber){
     double* alpha = new double[Ntel];
 
     // Hard-wired for now, probably better to read in a .cfg file in the long term
-    double* TelX = new double[Ntel]{80.48,-6.95,-73.52}; // K,D,C
-    double* TelY = new double[Ntel]{53.59,-107.18,53.59};
-    double* TelZ = new double[Ntel]{0.,0.,0.};
+    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
+    double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
+    double* TelZ = new double[Ntel]{5.04, 0.00, 14.51};
 
     for(int i=0; i<Ntel; i++){
         c->cd(i+1);
