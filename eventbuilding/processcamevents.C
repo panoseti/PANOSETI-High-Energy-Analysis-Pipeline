@@ -111,10 +111,10 @@ void read_pedestals(const char *infile)
  
 void eventdisplay(int start=0, int end=-1, bool wait=false)
 {
-  // have to do this first:
+  //If you calculated pedestals in a previous ROOT session, you have to do this first:
   //read_pedestals("../Fern/rawdata/Mrk421_preflip.root.pedvars")
   //camdata=loadcamdata("../Fern/rawdata/Mrk421_preflip.root")
-  double image_thresh=3;
+  double image_thresh=4;
 
   TCanvas *c1 = new TCanvas("c1", "Sequential Image Display", 1200, 600);
   c1->Divide(2,1);
