@@ -3,7 +3,7 @@
 void findtimingoffsets(const char *infile,int refscope=2, int testscope=0)
 {
   //Find the timing offsets between telescope clocks using matched events
-  // The output is analyzed using analyzetiming.C
+  // The output is analyzed using analyzetiming()
   
   TCanvas *mycanv=new TCanvas();
   mycanv->Divide(2);
@@ -357,7 +357,7 @@ void analyzetiming(const char *infile)
       g->SetPoint(i,xp[i],yp[i]);
     }
 
-      g->Draw("AW*");
+  //g->Draw("AW*");
 
       TGraphSmooth *gs=new TGraphSmooth("normal");
       TGraph *smoothedGraph = gs->SmoothLowess(g);
@@ -369,8 +369,8 @@ void analyzetiming(const char *infile)
       gsmoothtime->SetMarkerStyle(21);
       gsmoothtime->SetMarkerSize(0.4);
       gsmoothtime->SetMarkerColor(2);
-      //gsmoothtime->Draw("AWP");
-      g->Draw("AW*SAME");
+      gsmoothtime->Draw("AWP");
+      g->Draw("*SAME");
       gsmoothtime->GetXaxis()->SetTitle("Time(s)");
       gsmoothtime->GetYaxis()->SetTitle("Time difference (s)");
       gsmoothtime->GetYaxis()->SetTitleOffset(1.3);
@@ -382,7 +382,8 @@ void analyzetiming(const char *infile)
 void correcttiming(const char * cam_infile)
 {
 // this uses the smoothed timing offset graph produced by analyzetiming to correct the times in the camera event trees.
-// it produces a duplicate tree in the same file, with timing corrections applied.
+// it produces a new file with a .corr extension, with timing corrections applied.
+// for the telescope which is used as a reference, you should simply copy the camera event file and give it a .corr extension
 
   if (gsmoothtime!=NULL){
     gsmoothtime->Draw("AWP");
