@@ -4,6 +4,9 @@
 #include "./makeevents.h"
 
 //maxrate is the maximum number of events per bin (i.e. it is not in Hz)
+
+
+
 void clean_ratespikes(const char *infile, double maxrate)
 {
   double bin_duration=0.1;
@@ -59,3 +62,24 @@ void clean_ratespikes(const char *infile, double maxrate)
   hrateclean->Reset();
 }
 
+void ProcessFiles(const char* listFileName = "filelist.dat") {
+    std::ifstream inputFile(listFileName);
+    if (!inputFile.is_open()) {
+        std::cerr << "Error: Cannot open list file " << listFileName << std::endl;
+        return;
+    }
+
+    std::string line;
+    // Loop through each line (filename) in the text file
+    while (std::getline(inputFile, line)) {
+        // Remove potential leading/trailing whitespace or newline characters
+        // (basic example; robust handling might need TString methods)
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        
+        if (!line.empty() && line[0] != '#') { // Ignore empty lines and comments
+	  clean_ratespikes(line.c_str(),25);
+        }
+    }
+
+    inputFile.close();
+}

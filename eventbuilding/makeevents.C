@@ -1,5 +1,7 @@
 #include "./makeevents.h"
 
+
+
 void plotaquabo(const char *infile, int packet, bool rotate)
 // reads the pdata tree and plots a single quadrant board for a given data packet
 {
@@ -498,13 +500,24 @@ void makeevents_timematch(const char *infile, int this_scope_id)
 
 }
 
-//TH2D *cam_2D_hist;
-//camdata->SetBranchAddress("cam_2D_hist",&cam_2D_hist);
-//camdata->GetEntry(10);
-//cam_2D_hist->Draw("COLZ");
+void ProcessFiles(const char* listFileName = "filelist.dat",int scope_id=0) {
+    std::ifstream inputFile(listFileName);
+    if (!inputFile.is_open()) {
+        std::cerr << "Error: Cannot open list file " << listFileName << std::endl;
+        return;
+    }
 
-//TChain *ch=new TChain("pdata","pdata");
-//ch->Add("March2024/20240317MarkarianPH/rawdata/PH_Markarian_onskyph11.5pe__20240317_065059_008.pcapng.root");
-//ch->Draw("pcap_time");
+    std::string line;
+    // Loop through each line (filename) in the text file
+    while (std::getline(inputFile, line)) {
+        // Remove potential leading/trailing whitespace or newline characters
+        // (basic example; robust handling might need TString methods)
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        
+        if (!line.empty() && line[0] != '#') { // Ignore empty lines and comments
+	  makeevents_timehistomatch(line.c_str(),scope_id);
+        }
+    }
 
-//219/20
+    inputFile.close();
+}
