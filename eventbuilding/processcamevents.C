@@ -1,6 +1,6 @@
 #include "./processcamevents.h"
 
-void calcPedestals(const char *infile, bool do_fit=0)
+void calcPedestals(const char *infile, bool do_fit=1)
 {
   camdata=loadcamdata(infile);
   camdata->GetEntry(0);
