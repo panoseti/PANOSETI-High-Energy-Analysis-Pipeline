@@ -56,7 +56,14 @@ void clean_ratespikes(const char *infile, double maxrate)
     }
   mycanv->cd(2);
   hrateclean->Draw();
-
+  mycanv->Modified();
+  mycanv->Update();
+  gSystem->ProcessEvents(); // Handle window interactions
+  gSystem->Sleep(200);      // 100ms delay between frames	
+  char a[200];
+  bool wait=0;
+  if (wait) (read(1,a,200));
+      
   pdataclean->AutoSave();
   hrate->Reset();
   hrateclean->Reset();
@@ -77,7 +84,7 @@ void ProcessFiles(const char* listFileName = "filelist.dat") {
         line.erase(line.find_last_not_of(" \t\r\n") + 1);
         
         if (!line.empty() && line[0] != '#') { // Ignore empty lines and comments
-	  clean_ratespikes(line.c_str(),25);
+	  clean_ratespikes(line.c_str(),15);
         }
     }
 
