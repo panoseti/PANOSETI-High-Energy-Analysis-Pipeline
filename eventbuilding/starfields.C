@@ -1,5 +1,8 @@
 #include "./makeevents.h"
 
+TH2D *hdiff;
+TH2D *hdiffcleaned;
+
 void starfields(const char *infile1, const char *infile2)
 {
   cout << "comparing before: " << infile1 << endl;
@@ -22,13 +25,13 @@ void starfields(const char *infile1, const char *infile2)
 
   TCanvas *cjh=new TCanvas("cjh","cjh",800,800);
   cjh->Draw();
-  cjh->Divide(2,2);
+  //cjh->Divide(2,2);
   //cjh->cd(1);
   //before->Draw("COLZ");
   //cjh->cd(2);
   //after->Draw("COLZ");
 
-  TH2D *hdiff=new TH2D("hdiff","Difference",32,0,32,32,0,32);
+  hdiff=new TH2D("hdiff","Difference",32,0,32,32,0,32);
   TH2D *hratio=new TH2D("hratio","Ratio",32,0,32,32,0,32);
   for (int i=0; i<32;i++)
     {
@@ -46,6 +49,7 @@ void starfields(const char *infile1, const char *infile2)
 	}
     }
   hdiff->SetStats(0);
+  hdiffcleaned = (TH2D*)hdiff->Clone("hdiffcleaned");
   //hdiff->SetMinimum(-5);
   //hdiff->SetMaximum(5);
   hratio->SetStats(0);
@@ -53,7 +57,7 @@ void starfields(const char *infile1, const char *infile2)
   hratio->SetMaximum(1.7);
   cjh->cd(1);
   hdiff->Draw("COLZ");
-  cjh->cd(2);
+  /*cjh->cd(2);
   hratio->Draw("COLZ");
   //  cjh->cd();
   //  TLatex *t =new TLatex(10,0,infile1);
@@ -100,6 +104,51 @@ void starfields(const char *infile1, const char *infile2)
   hdiff2->SetMinimum(-30);
   hdiff2->SetMaximum(30);
   hdiff2->Draw("COLZ");
+  */
+}
+
+
+int findandremovestar()
+// this finds the brightest pixel in the map, and returns its bin number. It also zeros that bin and adjacent pixels in the cleaned map
+{
+  
+  int maxbin=hdiffcleaned->GetMaximumBin();
+  double maxbincontent=hdiffcleaned->GetBinContent(maxbin);
+  int maxxbin,maxybin,maxzbin;
+  hdiffcleaned->GetBinXYZ(maxbin,maxxbin,maxybin,maxzbin);
+  
+    
+  cout << "max bin " << maxbin << " contains " << maxbincontent << " counts at X,Y bins " <<  maxxbin << "," << maxybin << endl;
+  for (int i=0;i<3;i++)
+    {
+      for (int j=0;j<3;j++)
+	{
+	  
+	  hdiffcleaned->SetBinContent(maxxbin-1+i,maxybin-1+j,0);
+	}
+    }
+  
+  return maxbin;
   
 }
 
+void fitstar(double xstar=-100,double ystar=-100)
+{
+  int starbin=findandremovestar();
+  int starxbin,starybin,starzbin;
+  hdiff->GetBinXYZ(starbin,starxbin,starybin,starzbin);
+  double maxbincontent=hdiff->GetBinContent(starbin);
+  double range=2.5;
+  if (maxbincontent<12) range=1.5;
+  cout << maxbincontent << " " << range << endl;
+  TF2 *f2 = new TF2("f2", "[0]*TMath::Gaus(x,[1],[2])*TMath::Gaus(y,[3],[2])", starxbin-0.5-range, starxbin-0.5+range, starybin-0.5-range, starybin-0.5+range);
+  cout << "here: " <<  starxbin-0.5 << " " << starybin-0.5 << endl ;
+  f2->SetParameters(maxbincontent, starxbin-0.5, 0.3, starybin-0.5);
+  f2->SetParNames("Constant", "MeanX", "Sigma", "MeanY");
+
+// 4. Fit the Histogram
+  hdiff->Fit(f2,"R");
+  cout << f2->GetParameter(1) << " " <<  f2->GetParameter(3) << endl;
+  
+
+}
