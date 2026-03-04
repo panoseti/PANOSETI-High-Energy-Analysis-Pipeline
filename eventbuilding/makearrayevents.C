@@ -26,7 +26,7 @@ void findtimingoffsets(const char *infile,int refscope=2, int testscope=0)
   cout << "writing to: " << outfile_name << endl;
   
   double toffset[ntel];
-  double match_tolerence=0.02;
+  double match_tolerence=0.025;
 
   for (int i=0;i<ntel;i++)
     {
@@ -54,7 +54,7 @@ void findtimingoffsets(const char *infile,int refscope=2, int testscope=0)
     }
   
   TH1D *htdiff=new TH1D("tdiff","tdiff",500,-1*match_tolerence,match_tolerence);
-  TH2D *htdiff_t=new TH2D("tdiff_t","Time Offset vs Time",ntimebins,tstart, tend, 1000,-1*match_tolerence,match_tolerence);
+  TH2D *htdiff_t=new TH2D("tdiff_t","Time Offset vs Time",ntimebins,tstart, tend, 1250,-1*match_tolerence,match_tolerence);
   for (int i=0;i<camdata[testscope]->GetEntries();i++)
     {
       camdata[testscope]->GetEntry(i);
@@ -182,7 +182,7 @@ void makearrayevents(const char *infile)
 
   int array_event[ntel][max_arrayevents];
   double trig_width=2*match_tolerence;
-  double trig_step=trig_width/3.;
+  double trig_step=trig_width/2.;
 
   double tmin=mintime;
   double tmax=trig_width+tmin;
@@ -192,9 +192,9 @@ void makearrayevents(const char *infile)
   cout << "ntel:" << ntel << " tmin:" << tmin << " tsteps:" << tsteps << endl;
   vector<vector<int> >   vevent_triggered;
 
+  vector<int> vtelhits(ntel);
   for (int it=0;it<tsteps;it++)
     {
-      vector<int> vtelhits(ntel);
       bool triggered=0;
       for (int jtel=0;jtel<ntel;jtel++)
 	{
