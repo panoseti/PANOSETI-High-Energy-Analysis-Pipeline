@@ -81,7 +81,7 @@ float fShower_stdP = -99999.;
 void readFile(const char *infile_prefix){
     // load tree
     char array_infile_name[200];
-    snprintf(array_infile_name,200,"%s.array",infile_prefix);
+    snprintf(array_infile_name,200,"%s.corr.array",infile_prefix);
     f = new TFile(array_infile_name);
     t = (TTree*)f->Get("arraydata"); 
     prefix = infile_prefix;
@@ -549,7 +549,7 @@ void setCorrections(int telNumber, double t_initial, double x_initial, double y_
 * arrays in function arguments are structured so elements are ordered like {before flip, after flip}
 */
 //std::tuple<int,int> calcOffset(double pix_start[4], double pix_end[4], int time_start[2], int time_end[2]){
-std::tuple<double,double> calcOffset(double time, double t_initial, int initial_offset_x, int initial_offset_y, double drift_velocity_x, double drift_velocity_y){
+std::tuple<double,double> calcOffset(double time, double t_initial, double initial_offset_x, double initial_offset_y, double drift_velocity_x, double drift_velocity_y){
 
     // get delta t
     time=time-t_initial;
@@ -1549,9 +1549,11 @@ TH2D* telEvent(int telNumber, int eventNumber){
     TH2D *pedvars_2D_hist = nullptr;
     if (array_scope_id[telNumber-1]>0) 
     {
-        snprintf(pedvar_infile_name,200,"%s.T%d.pedvars",prefix,array_scope_id[telNumber-1]);
+        TString pre(prefix);
+        TString dir = pre(0, pre.Last('/'));
+        TString src = pre(pre.Last('/')+1, pre.Length());
+        sprintf(pedvar_infile_name, "%s/%s/rawdata/%s.pedvars", dir.Data(), label.Data(), src.Data());
         TFile *pedvar_infile = TFile::Open(pedvar_infile_name, "read");
-        // TFile *pedvar_infile=new TFile(pedvar_infile_name);
         peds_2D_hist=(TH2D*)pedvar_infile->Get("peds_2D_hist");
         pedvars_2D_hist=(TH2D*)pedvar_infile->Get("pedvars_2D_hist");
         peds_2D_hist->SetDirectory(nullptr);
@@ -1750,7 +1752,7 @@ void paramCSV(bool reconstruct=false){
     // openfile
     std::ofstream datafile;
     std::string output = prefix;
-    datafile.open(output + ".threshold_clean.csv");
+    datafile.open(output + ".corrected.csv");
 
     if(!reconstruct){
         datafile << "Event,Telescope,Timestamp,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha" << std::endl;
