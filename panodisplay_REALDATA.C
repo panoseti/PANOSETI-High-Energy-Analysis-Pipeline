@@ -608,7 +608,7 @@ std::tuple<double, double, double, double, double, double, double, double, doubl
         double vx=corrections[telNumber-1][3];
         double vy=corrections[telNumber-1][4];
         rotation_angle=TMath::DegToRad()*corrections[telNumber-1][5];
-        std::tuple<int,int> offset = calcOffset(time,time_initial,x_initial,y_initial,vx,vy);
+        std::tuple<double,double> offset = calcOffset(time,time_initial,x_initial,y_initial,vx,vy);
         deltax = deltax + std::get<0>(offset);
         deltay = deltay + std::get<1>(offset);
         
