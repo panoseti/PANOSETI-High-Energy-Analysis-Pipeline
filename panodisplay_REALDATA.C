@@ -1760,8 +1760,11 @@ void paramCSV(bool reconstruct=false){
 
     // make images and paramaterize every event in each telescope
     int N = t->GetEntries();
-
-    for(int eventNumber=1; eventNumber<=N+1; eventNumber++){
+    // find event numbers
+    t->Draw("eventNumber","","goff");
+    int start = (int) t->GetV1()[0];
+    int stop = (int) t->GetV1()[N-1];
+    for(int eventNumber=start; eventNumber<=stop; eventNumber++){
         std::cout << "Parameterizing event "<< eventNumber << std::endl;
 
         double* meanx = new double[Ntel];

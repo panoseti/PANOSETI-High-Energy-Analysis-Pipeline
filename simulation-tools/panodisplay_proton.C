@@ -1611,7 +1611,9 @@ void paramCSV(bool reconstruct=false){
     int N = t->GetEntries();
     // find event numbers
     t->Draw("eventNumber","","goff");
-    for(int eventNumber=1; eventNumber<=N; eventNumber++){
+    int start = (int) t->GetV1()[0];
+    int stop = (int) t->GetV1()[N-1];
+    for(int eventNumber=start; eventNumber<=stop; eventNumber++){
         std::cout << "Parameterizing event "<< eventNumber << std::endl;
         
         double* meanx = new double[Ntel];
