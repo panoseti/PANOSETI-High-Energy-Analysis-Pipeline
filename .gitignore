@@ -5,3 +5,4 @@
 *.so
 *.pcm
 eventbuilding/pcapreader
+__pycache__
