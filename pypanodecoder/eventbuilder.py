@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+
+# eventbuilder.py: Build full camera events from PANOSETI Science packets.
+
+# Author: Steve Fegan (2026-05-11)
+
 import struct
 import os
 import sys

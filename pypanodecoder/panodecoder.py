@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+
+# panodecoder.py: A pure Python decoder for PANOSETI data stored in PCAP format.
+# Does not rely on any external packages.
+
+# Author: Steve Fegan (2026-05-10)
+
 import struct
 from collections import namedtuple
 import os
