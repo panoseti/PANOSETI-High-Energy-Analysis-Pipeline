@@ -180,7 +180,7 @@ class PanosetiEventBuilder:
                 yield self.active_events[tid].pop(et)
         self.active_events.clear()
 
-def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=None):
+def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=None, verbose=True):
     """
     Convenience generator to get full camera events from one or more PANOSETI pcap files.
     
@@ -194,7 +194,7 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=N
         PanosetiCameraEvent: Reconstructed camera events.
     """
     builder = PanosetiEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff)
-    for packet in get_panoseti_events(filenames, gti=gti):
+    for packet in get_panoseti_events(filenames, gti=gti, verbose=verbose):
         for event in builder.process_packet(packet):
             yield event
     for event in builder.flush():

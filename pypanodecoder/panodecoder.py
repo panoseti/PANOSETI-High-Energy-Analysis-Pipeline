@@ -385,7 +385,7 @@ class PanosetiPcapDecoder:
     def close(self):
         self._file.close()
 
-def get_panoseti_events(filenames, gti=None):
+def get_panoseti_events(filenames, gti=None, verbose=True):
     """
     Convenience function to get events from one or more PANOSETI PCAP/PCAPNG files.
     'filenames' can be a single filename (string), a glob pattern (string), 
@@ -407,6 +407,8 @@ def get_panoseti_events(filenames, gti=None):
                 files.append(item)
 
     for filename in files:
+        if(verbose):
+            print(f"Processing file: {filename}")
         decoder = PanosetiPcapDecoder(filename)
         try:
             for event in decoder:
