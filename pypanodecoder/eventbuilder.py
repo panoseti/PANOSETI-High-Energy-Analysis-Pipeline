@@ -45,6 +45,7 @@ class PanosetiCameraEvent:
         self.nanosec = first_packet.nanosec
         self.packet_num = first_packet.packet_num
         self.board_loc = first_packet.board_loc
+        self.gti_index = first_packet.gti_index
 
     def add_packet(self, packet):
         """Adds a packet to the current camera event."""
@@ -103,7 +104,7 @@ class PanosetiCameraEvent:
 
     def __repr__(self):
         quabos = sorted(list(self.packets.keys()))
-        return f"<PanosetiCameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} pcap_time={self.start_pcap_time:.6f}>"
+        return f"<PanosetiCameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.start_pcap_time:.6f}>"
 
 class PanosetiEventBuilder:
     """

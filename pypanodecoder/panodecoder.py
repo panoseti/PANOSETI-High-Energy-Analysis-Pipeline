@@ -20,7 +20,7 @@ ScienceEvent = namedtuple('ScienceEvent', [
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
     'telescope_id', 'quabo_id',
     'tai', 'nanosec', 'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
-    'dummy', 'pix_data'
+    'dummy', 'gti_index', 'pix_data'
 ])
 
 def parse_time(t):
@@ -61,7 +61,7 @@ class GTIFilter:
     """
     def __init__(self, gti):
         if gti is None:
-            self.intervals = [(-float('inf'), float('inf'), True)]
+            self.intervals = [(-float('inf'), float('inf'), True, 0)]
             self._starts = [-float('inf')]
             self._current_idx = 0
             return
@@ -96,28 +96,34 @@ class GTIFilter:
         # 4. Build a continuous set of intervals from -inf to inf
         self.intervals = []
         last_t = -float('inf')
+        gti_idx = 0
         for start, stop in merged:
             if start > last_t:
-                self.intervals.append((last_t, start, False))
-            self.intervals.append((start, stop, True))
+                self.intervals.append((last_t, start, False, -1))
+            self.intervals.append((start, stop, True, gti_idx))
+            gti_idx += 1
             last_t = stop
         if last_t < float('inf'):
-            self.intervals.append((last_t, float('inf'), False))
+            self.intervals.append((last_t, float('inf'), False, -1))
+        
+        if not merged:
+            self.intervals = [(-float('inf'), float('inf'), True, 0)]
             
         self._starts = [i[0] for i in self.intervals]
         self._current_idx = 0
 
-    def is_good(self, t):
-        """Returns True if time t is within a GTI."""
+    def get_info(self, t):
+        """Returns (is_good, gti_index) for time t."""
         # Check cached interval first (optimizes for time-ordered data)
-        start, stop, good = self.intervals[self._current_idx]
+        start, stop, good, idx = self.intervals[self._current_idx]
         if start <= t < stop:
-            return good
+            return good, idx
         
         # Find correct interval using binary search
-        idx = bisect.bisect_right(self._starts, t) - 1
-        self._current_idx = idx
-        return self.intervals[idx][2]
+        idx_bin = bisect.bisect_right(self._starts, t) - 1
+        self._current_idx = idx_bin
+        _, _, good, idx = self.intervals[idx_bin]
+        return good, idx
 
 def wr_to_unix(pkt_tai, pkt_nsec, tv_sec, ignore_clock_desync=False):
     """
@@ -372,6 +378,7 @@ class PanosetiPcapDecoder:
             event_time=event_time,
             event_time_good=event_time_good,
             dummy=meta[6],
+            gti_index=0,
             pix_data=pix_data
         )
 
@@ -403,8 +410,9 @@ def get_panoseti_events(filenames, gti=None):
         decoder = PanosetiPcapDecoder(filename)
         try:
             for event in decoder:
-                if gti_filter.is_good(event.event_time):
-                    yield event
+                is_good, gti_idx = gti_filter.get_info(event.event_time)
+                if is_good:
+                    yield event._replace(gti_index=gti_idx)
         finally:
             decoder.close()
 
