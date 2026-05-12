@@ -9,23 +9,123 @@ import struct
 from collections import namedtuple
 import os
 import glob
+import datetime
+import bisect
 
 # Define the structure for a PANOSETI Science Event
 # Using namedtuple for a "struct-like" behavior as requested.
 ScienceEvent = namedtuple('ScienceEvent', [
-    'filename', 'file_offset', 'packet_idx',
+    'filename', 'file_offset', 'file_packet_index',
     'pcap_sec', 'pcap_usec', 'incl_len',
-    'acq_mode', 'packer_ver', 'packet_no', 'boardloc',
+    'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
     'telescope_id', 'quabo_id',
     'tai', 'nanosec', 'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
     'dummy', 'pix_data'
 ])
+
+def parse_time(t):
+    """
+    Attempts to parse a time value into a Unix timestamp.
+    Accepts floats/ints (Unix epoch) or strings (various ISO-like formats).
+    Assumes UTC if no timezone is specified.
+    """
+    if isinstance(t, (int, float)):
+        return float(t)
+    if isinstance(t, str):
+        # Try a few common formats
+        for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f", 
+                    "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d"]:
+            try:
+                dt = datetime.datetime.strptime(t, fmt)
+                if dt.tzinfo is None:
+                    # Assume UTC as requested
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                return dt.timestamp()
+            except ValueError:
+                continue
+        # Last resort: fromisoformat (available in Python 3.7+)
+        try:
+            dt = datetime.datetime.fromisoformat(t)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            return dt.timestamp()
+        except (ValueError, AttributeError):
+            pass
+    raise ValueError(f"Could not parse time: {t}")
+
+class GTIFilter:
+    """
+    Manages Good Time Intervals (GTI) for filtering events.
+    Normalizes, merges overlapping intervals, and provides efficient lookup.
+    """
+    def __init__(self, gti):
+        if gti is None:
+            self.intervals = [(-float('inf'), float('inf'), True)]
+            self._starts = [-float('inf')]
+            self._current_idx = 0
+            return
+
+        if isinstance(gti, dict):
+            gti = [gti]
+        
+        # 1. Normalize and collect start/stop pairs
+        raw_intervals = []
+        for d in gti:
+            start = parse_time(d.get('start', -float('inf')))
+            # Support both 'stop' and 'end'
+            stop = parse_time(d.get('stop') or d.get('end', float('inf')))
+            if start < stop:
+                raw_intervals.append((start, stop))
+        
+        # 2. Sort by start time
+        raw_intervals.sort()
+        
+        # 3. Merge overlapping intervals
+        merged = []
+        if raw_intervals:
+            curr_start, curr_stop = raw_intervals[0]
+            for next_start, next_stop in raw_intervals[1:]:
+                if next_start <= curr_stop:
+                    curr_stop = max(curr_stop, next_stop)
+                else:
+                    merged.append((curr_start, curr_stop))
+                    curr_start, curr_stop = next_start, next_stop
+            merged.append((curr_start, curr_stop))
+        
+        # 4. Build a continuous set of intervals from -inf to inf
+        self.intervals = []
+        last_t = -float('inf')
+        for start, stop in merged:
+            if start > last_t:
+                self.intervals.append((last_t, start, False))
+            self.intervals.append((start, stop, True))
+            last_t = stop
+        if last_t < float('inf'):
+            self.intervals.append((last_t, float('inf'), False))
+            
+        self._starts = [i[0] for i in self.intervals]
+        self._current_idx = 0
+
+    def is_good(self, t):
+        """Returns True if time t is within a GTI."""
+        # Check cached interval first (optimizes for time-ordered data)
+        start, stop, good = self.intervals[self._current_idx]
+        if start <= t < stop:
+            return good
+        
+        # Find correct interval using binary search
+        idx = bisect.bisect_right(self._starts, t) - 1
+        self._current_idx = idx
+        return self.intervals[idx][2]
 
 def wr_to_unix(pkt_tai, pkt_nsec, tv_sec, ignore_clock_desync=False):
     """
     Given a WR packet time (TAI) with only 10 bits of sec,
     and a Unix time that's within a few ms,
     return the complete WR time (in Unix time, not TAI).
+
+    See: https://github.com/panoseti/panoseti/blob/master/control/utils/pff.py#L238
     """
     # 37 is the TAI-UTC offset. 
     # The packet TAI seconds is only 10 bits (0-1023).
@@ -59,7 +159,7 @@ class PanosetiPcapDecoder:
         self._is_pcapng = False
         self._endian = '<'
         self._ts_resol = 1000000 # Default to microseconds (10^-6)
-        self.packet_idx = 0
+        self.file_packet_index = 0
         self._detect_format()
 
     def _detect_format(self):
@@ -122,10 +222,10 @@ class PanosetiPcapDecoder:
             ts_sec, ts_usec, incl_len, orig_len = struct.unpack(f"{self._endian}IIII", header_data)
             packet_data = self._file.read(incl_len)
             
-            event = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.packet_idx)
+            event = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
             if event:
                 yield event
-                self.packet_idx += 1
+                self.file_packet_index += 1
 
     def _iter_pcapng(self):
         while True:
@@ -182,13 +282,13 @@ class PanosetiPcapDecoder:
                     ts_usec = (timestamp % self._ts_resol) * (1000000 // self._ts_resol)
                 
                 packet_data = block_data[20:20+incl_len]
-                event = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.packet_idx)
+                event = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
                 if event:
                     yield event
-                    self.packet_idx += 1
+                    self.file_packet_index += 1
             # Skip other block types (SHB, IDB, etc. are already read into block_data)
 
-    def _parse_packet(self, packet_data, ts_sec, ts_usec, file_offset, packet_idx):
+    def _parse_packet(self, packet_data, ts_sec, ts_usec, file_offset, file_packet_index):
         # Based on Quabo Packet Interface Wiki:
         # Science packets are sent to port 60001.
         # Total payload sizes: 
@@ -210,7 +310,7 @@ class PanosetiPcapDecoder:
             return None
         
         # PANOSETI metadata (16 bytes)
-        # acq_mode(1), packer_ver(1), packet_no(2), boardloc(2), TAI(4), nanosec(4), dummy(2)
+        # acq_mode(1), packet_ver(1), packet_num(2), board_loc(2), TAI(4), nanosec(4), dummy(2)
         # All multi-byte fields in Quabo packets are little-endian.
         meta_format = "<BBHHIIH"
         meta_size = struct.calcsize(meta_format)
@@ -244,9 +344,9 @@ class PanosetiPcapDecoder:
 
         pix_data = struct.unpack(pix_format, payload[meta_size:meta_size+pix_bytes])
         
-        boardloc = meta[3]
-        telescope_id = boardloc >> 2
-        quabo_id = boardloc & 0x3
+        board_loc = meta[3]
+        telescope_id = board_loc >> 2
+        quabo_id = board_loc & 0x3
         
         tai = meta[4]
         nanosec = meta[5]
@@ -255,14 +355,14 @@ class PanosetiPcapDecoder:
         return ScienceEvent(
             filename=self.filename,
             file_offset=file_offset,
-            packet_idx=packet_idx,
+            file_packet_index=file_packet_index,
             pcap_sec=ts_sec,
             pcap_usec=ts_usec,
             incl_len=len(packet_data),
             acq_mode=acq_mode,
-            packer_ver=meta[1],
-            packet_no=meta[2],
-            boardloc=boardloc,
+            packet_ver=meta[1],
+            packet_num=meta[2],
+            board_loc=board_loc,
             telescope_id=telescope_id,
             quabo_id=quabo_id,
             tai=tai,
@@ -278,12 +378,14 @@ class PanosetiPcapDecoder:
     def close(self):
         self._file.close()
 
-def get_panoseti_events(filenames):
+def get_panoseti_events(filenames, gti=None):
     """
     Convenience function to get events from one or more PANOSETI PCAP/PCAPNG files.
     'filenames' can be a single filename (string), a glob pattern (string), 
     or a list/iterable of filenames.
+    'gti' can be a dict with start/stop keys or a list of such dicts.
     """
+    gti_filter = GTIFilter(gti)
     if isinstance(filenames, str):
         if any(char in filenames for char in '*?['):
             files = sorted(glob.glob(filenames))
@@ -301,7 +403,8 @@ def get_panoseti_events(filenames):
         decoder = PanosetiPcapDecoder(filename)
         try:
             for event in decoder:
-                yield event
+                if gti_filter.is_good(event.event_time):
+                    yield event
         finally:
             decoder.close()
 

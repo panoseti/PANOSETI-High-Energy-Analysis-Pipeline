@@ -43,8 +43,8 @@ class PanosetiCameraEvent:
         self.acq_mode = first_packet.acq_mode
         self.tai = first_packet.tai
         self.nanosec = first_packet.nanosec
-        self.packet_no = first_packet.packet_no
-        self.boardloc = first_packet.boardloc
+        self.packet_num = first_packet.packet_num
+        self.board_loc = first_packet.board_loc
 
     def add_packet(self, packet):
         """Adds a packet to the current camera event."""
@@ -179,7 +179,7 @@ class PanosetiEventBuilder:
                 yield self.active_events[tid].pop(et)
         self.active_events.clear()
 
-def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6):
+def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=None):
     """
     Convenience generator to get full camera events from one or more PANOSETI pcap files.
     
@@ -187,12 +187,13 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6):
         filenames (str or list): One or more paths to .pcap or .pcapng files, or a glob pattern.
         max_pcap_tdiff (float): Maximum PCAP arrival time difference.
         max_event_tdiff (float): Maximum hybridized event time difference (s).
+        gti (dict or list): Good Time Intervals for filtering events.
         
     Yields:
         PanosetiCameraEvent: Reconstructed camera events.
     """
     builder = PanosetiEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff)
-    for packet in get_panoseti_events(filenames):
+    for packet in get_panoseti_events(filenames, gti=gti):
         for event in builder.process_packet(packet):
             yield event
     for event in builder.flush():
