@@ -46,6 +46,7 @@ class PanosetiCameraEvent:
         self.packet_num = first_packet.packet_num
         self.board_loc = first_packet.board_loc
         self.gti_index = first_packet.gti_index
+        self.gti_event_time = first_packet.gti_event_time
 
     def add_packet(self, packet):
         """Adds a packet to the current camera event."""
@@ -105,6 +106,23 @@ class PanosetiCameraEvent:
     def __repr__(self):
         quabos = sorted(list(self.packets.keys()))
         return f"<PanosetiCameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.start_pcap_time:.6f}>"
+
+class PanosetiCameraImages:
+    """
+    Container for PANOSETI camera images and metadata.
+    Allows access via attributes (e.g., .images) or keys (e.g., ['images']).
+    """
+    def __init__(self, images, event_times, gti_indexes, gti_event_times):
+        self.images = images
+        self.event_times = event_times
+        self.gti_indexes = gti_indexes
+        self.gti_event_times = gti_event_times
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __repr__(self):
+        return f"<PanosetiCameraImages events={len(self.event_times)}>"
 
 class PanosetiEventBuilder:
     """
@@ -199,6 +217,35 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=N
             yield event
     for event in builder.flush():
         yield event
+
+def load_camera_images(filenames, gti=None, min_packets=4, **kwargs):
+    """
+    Load all camera images from one or more PANOSETI pcap files.
+    
+    Args:
+        filenames (str or list): One or more paths to .pcap or .pcapng files, or a glob pattern.
+
+    Returns:
+        PanosetiCameraImages: Object containing the 32x32xNevent images and metadata.
+    """
+    images = []
+    event_times = []
+    gti_indexes = []
+    gti_event_times = []
+
+    for event in get_camera_events(filenames, gti=gti, **kwargs):
+        if(len(event.packets) >= min_packets):
+            images.append(event.get_image())
+            event_times.append(event.event_time)
+            gti_indexes.append(event.gti_index)
+            gti_event_times.append(event.gti_event_time)
+
+    return PanosetiCameraImages(
+        images=np.stack(images, axis=2) if images else np.zeros((32, 32, 0)),
+        event_times=np.array(event_times),
+        gti_indexes=np.array(gti_indexes),
+        gti_event_times=np.array(gti_event_times)
+    )
 
 if __name__ == "__main__":
     import sys
