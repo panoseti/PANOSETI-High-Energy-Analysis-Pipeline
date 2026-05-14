@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# pedestals.py: Calculate pedestal values for PANOSETI Science packets.
+# pedestals.py: Calculate charge spectra and pedestal values
 
 # Author: Steve Fegan (2026-05-13)
 
@@ -18,6 +18,146 @@ try:
 except ImportError:
     # Fallback if imported from outside the package
     from .eventbuilder import get_camera_events, PanosetiCameraEvent, PanosetiCameraImages
+
+class PanosetiChargeHistogram:
+    """
+    Represents a multi-dimensional histogram of charge values.
+    """
+    def __init__(self, qrange, qhist, bin_width):
+        self.qrange = qrange
+        self.qhist = qhist
+        self.bin_width = bin_width
+
+    @property
+    def shape(self):
+        """Returns the shape of the histogram grid (e.g., (32, 32))."""
+        return self.qhist.shape[:-1]
+
+    def cdf(self):
+        """
+        Returns the normalized cumulative distribution function (CDF) for all elements.
+        
+        Returns:
+            tuple: (edges, cdf)
+                edges: np.ndarray of bin edges (length N+1)
+                cdf: np.ndarray of normalized cumulative counts (shape: grid_shape + (N+1))
+        """
+        # Cumulative sum along the range axis
+        cumsum = np.cumsum(self.qhist, axis=-1)
+        total_counts = cumsum[..., -1]
+        
+        # Edges: left edges + one right edge
+        edges = np.append(self.qrange, self.qrange[-1] + self.bin_width)
+        
+        # Result CDF array
+        cdf_shape = self.qhist.shape[:-1] + (self.qhist.shape[-1] + 1,)
+        cdf = np.zeros(cdf_shape)
+        
+        good_mask = total_counts > 0
+        if good_mask.any():
+            cdf[good_mask, 1:] = cumsum[good_mask] / total_counts[good_mask, np.newaxis]
+            
+        return edges, cdf
+
+    def quantiles(self, q):
+        """
+        Computes the quantiles for all elements in the histogram grid.
+        
+        Args:
+            q (float or iterable): The quantile(s) to compute (e.g., 0.5 for median).
+            
+        Returns:
+            list of np.ndarray: A list containing an array of quantile values for each q.
+        """
+        # Ensure q is an array
+        q_vals = np.atleast_1d(q)
+        
+        edges, cdf = self.cdf()
+        
+        # Flatten for interpolation
+        flat_cdf = cdf.reshape(-1, cdf.shape[-1])
+        grid_shape = self.shape
+        num_elements = flat_cdf.shape[0]
+        
+        # Mask for histograms with data
+        # Last element of CDF is 1.0 for those with data
+        good_mask = flat_cdf[:, -1] > 0
+        
+        results = []
+        for qv in q_vals:
+            # Output array for this quantile
+            res = np.full(num_elements, np.nan)
+            
+            # For each histogram, interpolate qv
+            for i in range(num_elements):
+                if good_mask[i]:
+                    res[i] = np.interp(qv, flat_cdf[i], edges)
+            
+            results.append(res.reshape(grid_shape))
+            
+        return results[0] if np.isscalar(q) else results
+
+    def mean(self):
+        """Returns the weighted mean for all elements in the histogram grid."""
+        centers = self.qrange + 0.5 * self.bin_width
+        total = np.sum(self.qhist, axis=-1)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.sum(self.qhist * centers, axis=-1) / total
+
+    def var(self):
+        """Returns the weighted variance for all elements in the histogram grid."""
+        centers = self.qrange + 0.5 * self.bin_width
+        total = np.sum(self.qhist, axis=-1)
+        m = self.mean()
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.sum(self.qhist * (centers - m[..., np.newaxis])**2, axis=-1) / total
+
+    def std(self):
+        """Returns the weighted standard deviation for all elements in the histogram grid."""
+        return np.sqrt(self.var())
+
+    def median(self):
+        """Returns the median for all elements in the histogram grid."""
+        return self.quantiles(0.5)
+
+    def iqr(self):
+        """Returns the Interquartile Range (IQR) for all elements in the histogram grid."""
+        q1, q3 = self.quantiles([0.25, 0.75])
+        return q3 - q1
+
+    def winsorized_mean(self, limits=(0.05, 0.05)):
+        """
+        Computes the Winsorized mean for all elements in the histogram grid.
+        
+        Args:
+            limits (tuple): The fraction to cut from the (low, high) ends.
+        """
+        v_low, v_high = self.quantiles([limits[0], 1.0 - limits[1]])
+        centers = self.qrange + 0.5 * self.bin_width
+        total = np.sum(self.qhist, axis=-1)
+        
+        # Clip bin centers to the Winsorized limits for each grid point
+        centers_clipped = np.clip(centers, v_low[..., np.newaxis], v_high[..., np.newaxis])
+        
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.sum(self.qhist * centers_clipped, axis=-1) / total
+
+    def winsorized_var(self, limits=(0.05, 0.05)):
+        """
+        Computes the Winsorized variance for all elements in the histogram grid.
+        
+        Args:
+            limits (tuple): The fraction to cut from the (low, high) ends.
+        """
+        v_low, v_high = self.quantiles([limits[0], 1.0 - limits[1]])
+        centers = self.qrange + 0.5 * self.bin_width
+        total = np.sum(self.qhist, axis=-1)
+        
+        wm = self.winsorized_mean(limits=limits)
+        centers_clipped = np.clip(centers, v_low[..., np.newaxis], v_high[..., np.newaxis])
+        
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return np.sum(self.qhist * (centers_clipped - wm[..., np.newaxis])**2, axis=-1) / total
 
 class PanosetiChargeSpectra:
     """
@@ -76,7 +216,6 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
         image_sum[1:,1:] = np.cumsum(np.cumsum(image, axis=0), axis=1)
 
         image_sipm = np.diff(np.diff(image_sum[::8,::8],axis=0),axis=1)
-        # Ensure image_sipm is within range for binned indexing
         image_sipm = np.maximum(np.minimum(image_sipm, qmax_pix*64 - 1), qmin_pix*64)
         qhist_sipm[jj_sipm, ii_sipm, (image_sipm - qmin_pix*64) // w_sipm] += 1
 
@@ -90,10 +229,10 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
 
     return PanosetiChargeSpectra(
         num_events=num_events,
-        pix=(qrange_pix, qhist_pix),
-        sipm=(qrange_sipm, qhist_sipm),
-        quabo=(qrange_quabo, qhist_quabo),
-        camera=(qrange_camera, qhist_camera)
+        pix=PanosetiChargeHistogram(qrange_pix, qhist_pix, w_pix),
+        sipm=PanosetiChargeHistogram(qrange_sipm, qhist_sipm, w_sipm),
+        quabo=PanosetiChargeHistogram(qrange_quabo, qhist_quabo, w_quabo),
+        camera=PanosetiChargeHistogram(qrange_camera, qhist_camera, w_camera)
     )
 
 def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True, 
