@@ -13,18 +13,12 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-try:
-    from eventbuilder import get_camera_events, PanosetiCameraEvent, PanosetiCameraImages
-except ImportError:
-    # Fallback if imported from outside the package
-    from .eventbuilder import get_camera_events, PanosetiCameraEvent, PanosetiCameraImages
-
 class PanosetiChargeHistogram:
     """
     Represents a multi-dimensional histogram of charge values.
     """
-    def __init__(self, qrange, qhist, bin_width):
-        self.qrange = qrange
+    def __init__(self, qcenter, qhist, bin_width):
+        self.qcenter = qcenter
         self.qhist = qhist
         self.bin_width = bin_width
 
@@ -46,8 +40,9 @@ class PanosetiChargeHistogram:
         cumsum = np.cumsum(self.qhist, axis=-1)
         total_counts = cumsum[..., -1]
         
-        # Edges: left edges + one right edge
-        edges = np.append(self.qrange, self.qrange[-1] + self.bin_width)
+        # If qcenter are centers, left edges are qcenter - 0.5 * bin_width
+        left_edges = self.qcenter - 0.5 * self.bin_width
+        edges = np.append(left_edges, left_edges[-1] + self.bin_width)
         
         # Result CDF array
         cdf_shape = self.qhist.shape[:-1] + (self.qhist.shape[-1] + 1,)
@@ -99,18 +94,16 @@ class PanosetiChargeHistogram:
 
     def mean(self):
         """Returns the weighted mean for all elements in the histogram grid."""
-        centers = self.qrange + 0.5 * self.bin_width
         total = np.sum(self.qhist, axis=-1)
         with np.errstate(divide='ignore', invalid='ignore'):
-            return np.sum(self.qhist * centers, axis=-1) / total
+            return np.sum(self.qhist * self.qcenter, axis=-1) / total
 
     def var(self):
         """Returns the weighted variance for all elements in the histogram grid."""
-        centers = self.qrange + 0.5 * self.bin_width
         total = np.sum(self.qhist, axis=-1)
         m = self.mean()
         with np.errstate(divide='ignore', invalid='ignore'):
-            return np.sum(self.qhist * (centers - m[..., np.newaxis])**2, axis=-1) / total
+            return np.sum(self.qhist * (self.qcenter - m[..., np.newaxis])**2, axis=-1) / total
 
     def std(self):
         """Returns the weighted standard deviation for all elements in the histogram grid."""
@@ -133,11 +126,10 @@ class PanosetiChargeHistogram:
             limits (tuple): The fraction to cut from the (low, high) ends.
         """
         v_low, v_high = self.quantiles([limits[0], 1.0 - limits[1]])
-        centers = self.qrange + 0.5 * self.bin_width
         total = np.sum(self.qhist, axis=-1)
         
         # Clip bin centers to the Winsorized limits for each grid point
-        centers_clipped = np.clip(centers, v_low[..., np.newaxis], v_high[..., np.newaxis])
+        centers_clipped = np.clip(self.qcenter, v_low[..., np.newaxis], v_high[..., np.newaxis])
         
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.sum(self.qhist * centers_clipped, axis=-1) / total
@@ -150,11 +142,10 @@ class PanosetiChargeHistogram:
             limits (tuple): The fraction to cut from the (low, high) ends.
         """
         v_low, v_high = self.quantiles([limits[0], 1.0 - limits[1]])
-        centers = self.qrange + 0.5 * self.bin_width
         total = np.sum(self.qhist, axis=-1)
         
         wm = self.winsorized_mean(limits=limits)
-        centers_clipped = np.clip(centers, v_low[..., np.newaxis], v_high[..., np.newaxis])
+        centers_clipped = np.clip(self.qcenter, v_low[..., np.newaxis], v_high[..., np.newaxis])
         
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.sum(self.qhist * (centers_clipped - wm[..., np.newaxis])**2, axis=-1) / total
@@ -187,20 +178,21 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
     w_camera = 32 if downsample else 1
 
     # Histogram for charge each pixel (32x32)
-    qrange_pix = np.arange(qmin_pix, qmax_pix, w_pix)
-    qhist_pix = np.zeros((32, 32, len(qrange_pix)), dtype=int)
+    # Centers are the expected integer values
+    qcenter_pix = np.arange(qmin_pix, qmax_pix, w_pix)
+    qhist_pix = np.zeros((32, 32, len(qcenter_pix)), dtype=int)
 
     # Histograms for (summed) charge in each SiPM 
-    qrange_sipm = np.arange(qmin_pix*64, qmax_pix*64, w_sipm)
-    qhist_sipm = np.zeros((4, 4, len(qrange_sipm)), dtype=int)
+    qcenter_sipm = np.arange(qmin_pix*64, qmax_pix*64, w_sipm)
+    qhist_sipm = np.zeros((4, 4, len(qcenter_sipm)), dtype=int)
 
     # Histograms for (summed) charge in each Quabo
-    qrange_quabo = np.arange(qmin_pix*256, qmax_pix*256, w_quabo)
-    qhist_quabo = np.zeros((2, 2, len(qrange_quabo)), dtype=int)
+    qcenter_quabo = np.arange(qmin_pix*256, qmax_pix*256, w_quabo)
+    qhist_quabo = np.zeros((2, 2, len(qcenter_quabo)), dtype=int)
 
     # Histograms for (summed) charge in the full camera
-    qrange_camera = np.arange(qmin_pix*1024, qmax_pix*1024, w_camera)
-    qhist_camera = np.zeros(len(qrange_camera), dtype=int)
+    qcenter_camera = np.arange(qmin_pix*1024, qmax_pix*1024, w_camera)
+    qhist_camera = np.zeros(len(qcenter_camera), dtype=int)
 
     num_events = images.shape[2]
 
@@ -209,30 +201,36 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
     ii_quabo, jj_quabo = np.meshgrid(range(2),range(2))
 
     for n in range(num_events):
-        image = np.maximum(np.minimum(images[:,:,n], qmax_pix-1), qmin_pix)
-        qhist_pix[jj_pix, ii_pix, (image - qmin_pix) // w_pix] += 1
+        image = images[:,:,n]
+        # Index: (val - center_0) / w + 0.5. Since center_0 is qmin, it's (val - qmin) / w + 0.5
+        idx_pix = np.floor((image - qmin_pix) / w_pix + 0.5).astype(int)
+        idx_pix = np.clip(idx_pix, 0, len(qcenter_pix) - 1)
+        qhist_pix[jj_pix, ii_pix, idx_pix] += 1
 
-        image_sum = np.zeros((33,33),dtype=int)
+        image_sum = np.zeros((33,33),dtype=float)
         image_sum[1:,1:] = np.cumsum(np.cumsum(image, axis=0), axis=1)
 
         image_sipm = np.diff(np.diff(image_sum[::8,::8],axis=0),axis=1)
-        image_sipm = np.maximum(np.minimum(image_sipm, qmax_pix*64 - 1), qmin_pix*64)
-        qhist_sipm[jj_sipm, ii_sipm, (image_sipm - qmin_pix*64) // w_sipm] += 1
+        idx_sipm = np.floor((image_sipm - qmin_pix*64) / w_sipm + 0.5).astype(int)
+        idx_sipm = np.clip(idx_sipm, 0, len(qcenter_sipm) - 1)
+        qhist_sipm[jj_sipm, ii_sipm, idx_sipm] += 1
 
         image_quabo = np.diff(np.diff(image_sum[::16,::16],axis=0),axis=1)
-        image_quabo = np.maximum(np.minimum(image_quabo, qmax_pix*256 - 1), qmin_pix*256)
-        qhist_quabo[jj_quabo, ii_quabo, (image_quabo - qmin_pix*256) // w_quabo] += 1
+        idx_quabo = np.floor((image_quabo - qmin_pix*256) / w_quabo + 0.5).astype(int)
+        idx_quabo = np.clip(idx_quabo, 0, len(qcenter_quabo) - 1)
+        qhist_quabo[jj_quabo, ii_quabo, idx_quabo] += 1
 
         image_camera = image_sum[32,32]
-        image_camera = np.maximum(np.minimum(image_camera, qmax_pix*1024 - 1), qmin_pix*1024)
-        qhist_camera[(image_camera - qmin_pix*1024) // w_camera] += 1
+        idx_camera = int(np.floor((image_camera - qmin_pix*1024) / w_camera + 0.5))
+        idx_camera = np.clip(idx_camera, 0, len(qcenter_camera) - 1)
+        qhist_camera[idx_camera] += 1
 
     return PanosetiChargeSpectra(
         num_events=num_events,
-        pix=PanosetiChargeHistogram(qrange_pix, qhist_pix, w_pix),
-        sipm=PanosetiChargeHistogram(qrange_sipm, qhist_sipm, w_sipm),
-        quabo=PanosetiChargeHistogram(qrange_quabo, qhist_quabo, w_quabo),
-        camera=PanosetiChargeHistogram(qrange_camera, qhist_camera, w_camera)
+        pix=PanosetiChargeHistogram(qcenter_pix, qhist_pix, w_pix),
+        sipm=PanosetiChargeHistogram(qcenter_sipm, qhist_sipm, w_sipm),
+        quabo=PanosetiChargeHistogram(qcenter_quabo, qhist_quabo, w_quabo),
+        camera=PanosetiChargeHistogram(qcenter_camera, qhist_camera, w_camera)
     )
 
 def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True, 
