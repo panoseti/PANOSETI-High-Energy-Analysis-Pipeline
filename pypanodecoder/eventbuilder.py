@@ -112,11 +112,23 @@ class PanosetiCameraImages:
     Container for PANOSETI camera images and metadata.
     Allows access via attributes (e.g., .images) or keys (e.g., ['images']).
     """
-    def __init__(self, images, event_times, gti_indexes, gti_event_times):
+    def __init__(self, images, event_times, gti_indexes, gti_event_times, quabo_masks):
         self.images = images
         self.event_times = event_times
         self.gti_indexes = gti_indexes
         self.gti_event_times = gti_event_times
+        self.quabo_masks = quabo_masks
+
+    def filter_gti(self, gti_index):
+        """Returns a new PanosetiCameraImages object filtered for a specific GTI index."""
+        mask = (self.gti_indexes == gti_index)
+        return PanosetiCameraImages(
+            images=self.images[:, :, mask],
+            event_times=self.event_times[mask],
+            gti_indexes=self.gti_indexes[mask],
+            gti_event_times=self.gti_event_times[mask],
+            quabo_masks=self.quabo_masks[mask]
+        )
 
     def __getitem__(self, key):
         return getattr(self, key)
@@ -232,6 +244,7 @@ def load_camera_images(filenames, gti=None, min_packets=4, **kwargs):
     event_times = []
     gti_indexes = []
     gti_event_times = []
+    quabo_masks = []
 
     for event in get_camera_events(filenames, gti=gti, **kwargs):
         if(len(event.packets) >= min_packets):
@@ -239,12 +252,19 @@ def load_camera_images(filenames, gti=None, min_packets=4, **kwargs):
             event_times.append(event.event_time)
             gti_indexes.append(event.gti_index)
             gti_event_times.append(event.gti_event_time)
+            
+            # Calculate quabo bitmask
+            mask = 0
+            for qid in event.packets.keys():
+                mask |= (1 << qid)
+            quabo_masks.append(mask)
 
     return PanosetiCameraImages(
         images=np.stack(images, axis=2) if images else np.zeros((32, 32, 0)),
         event_times=np.array(event_times),
         gti_indexes=np.array(gti_indexes),
-        gti_event_times=np.array(gti_event_times)
+        gti_event_times=np.array(gti_event_times),
+        quabo_masks=np.array(quabo_masks)
     )
 
 if __name__ == "__main__":
