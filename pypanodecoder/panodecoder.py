@@ -20,7 +20,7 @@ ScienceEvent = namedtuple('ScienceEvent', [
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
     'telescope_id', 'quabo_id',
     'tai', 'nanosec', 'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
-    'dummy', 'gti_index', 'pix_data'
+    'dummy', 'gti_index', 'gti_event_time', 'pix_data'
 ])
 
 def parse_time(t):
@@ -117,13 +117,13 @@ class GTIFilter:
         # Check cached interval first (optimizes for time-ordered data)
         start, stop, good, idx = self.intervals[self._current_idx]
         if start <= t < stop:
-            return good, idx
+            return good, idx, start
         
         # Find correct interval using binary search
         idx_bin = bisect.bisect_right(self._starts, t) - 1
         self._current_idx = idx_bin
-        _, _, good, idx = self.intervals[idx_bin]
-        return good, idx
+        start, _, good, idx = self.intervals[idx_bin]
+        return good, idx, start
 
 def wr_to_unix(pkt_tai, pkt_nsec, tv_sec, ignore_clock_desync=False):
     """
@@ -379,6 +379,7 @@ class PanosetiPcapDecoder:
             event_time_good=event_time_good,
             dummy=meta[6],
             gti_index=0,
+            gti_event_time=event_time,
             pix_data=pix_data
         )
 
@@ -406,15 +407,18 @@ def get_panoseti_events(filenames, gti=None, verbose=False):
             else:
                 files.append(item)
 
-    for filename in files:
+    for filename in sorted(files):
         if(verbose):
             print(f"Processing file: {filename} (size: {os.path.getsize(filename)} bytes)")
         decoder = PanosetiPcapDecoder(filename)
         try:
             for event in decoder:
-                is_good, gti_idx = gti_filter.get_info(event.event_time)
+                is_good, gti_idx, gti_start_time = gti_filter.get_info(event.event_time)
                 if is_good:
-                    yield event._replace(gti_index=gti_idx)
+                    gti_event_time = event.event_time
+                    if gti_start_time != -float('inf'):
+                        gti_event_time -= gti_start_time
+                    yield event._replace(gti_index=gti_idx, gti_event_time=gti_event_time)
         finally:
             decoder.close()
 
