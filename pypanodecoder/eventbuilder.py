@@ -112,12 +112,31 @@ class PanosetiCameraImages:
     Container for PANOSETI camera images and metadata.
     Allows access via attributes (e.g., .images) or keys (e.g., ['images']).
     """
-    def __init__(self, images, event_times, gti_indexes, gti_event_times, quabo_masks):
-        self.images = images
+    def __init__(self, images, event_times, gti_indexes, 
+                 gti_event_times, quabo_masks, dtype=None):
+        self.images = np.array(images, dtype=dtype) if dtype else images
         self.event_times = event_times
         self.gti_indexes = gti_indexes
         self.gti_event_times = gti_event_times
         self.quabo_masks = quabo_masks
+
+    @classmethod
+    def concatenate(cls, objects):
+        """Concatenates multiple PanosetiCameraImages objects into one."""
+        if not objects:
+            raise ValueError("concatenate() requires a non-empty list of PanosetiCameraImages objects")
+        return cls(
+            images=np.concatenate([o.images for o in objects], axis=2),
+            event_times=np.concatenate([o.event_times for o in objects]),
+            gti_indexes=np.concatenate([o.gti_indexes for o in objects]),
+            gti_event_times=np.concatenate([o.gti_event_times for o in objects]),
+            quabo_masks=np.concatenate([o.quabo_masks for o in objects])
+        )
+
+    @property
+    def unique_gti_indexes(self):
+        """Returns the sorted unique GTI indexes present in this object."""
+        return np.unique(self.gti_indexes)
 
     def filter_gti(self, gti_index):
         """Returns a new PanosetiCameraImages object filtered for a specific GTI index."""
@@ -128,6 +147,34 @@ class PanosetiCameraImages:
             gti_indexes=self.gti_indexes[mask],
             gti_event_times=self.gti_event_times[mask],
             quabo_masks=self.quabo_masks[mask]
+        )
+
+    def apply_pedestal_corrections(self, pcorr):
+        """
+        Applies a time-dependent polynomial correction to each pixel's image values.
+        Correction for pixel (i, j) at event k is -polyval(pcorr[i, j, :], gti_event_times[k]).
+        
+        Args:
+            pcorr (np.ndarray): 3D array of shape (32, 32, N_coeffs) containing 
+                                polynomial coefficients (highest degree first).
+                                
+        Returns:
+            PanosetiCameraImages: A new object with adjusted images (dtype float).
+        """
+        num_coeffs = pcorr.shape[2]
+        
+        # Horner's method for efficient polynomial evaluation across the stack
+        # res = p[0]*x^n + p[1]*x^(n-1) + ... + p[n]
+        res = np.full(self.images.shape, pcorr[:, :, 0][..., np.newaxis], dtype=float)
+        for k in range(1, num_coeffs):
+            res = res * self.gti_event_times + pcorr[:, :, k][..., np.newaxis]
+            
+        return PanosetiCameraImages(
+            images=self.images - res,
+            event_times=self.event_times,
+            gti_indexes=self.gti_indexes,
+            gti_event_times=self.gti_event_times,
+            quabo_masks=self.quabo_masks
         )
 
     def __getitem__(self, key):
