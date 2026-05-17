@@ -2,7 +2,7 @@
 
 # dqm.py: Data Quality Monitoring tools for PANOSETI
 
-# Author: Gemini CLI (2026-05-17)
+# Author: Steve Fegan (2026-05-17)
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,6 +10,7 @@ import matplotlib.dates as mdates
 import datetime
 import os
 import sys
+from scipy.optimize import curve_fit
 
 # Ensure we can import from the current directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -205,13 +206,14 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
     
     return fig, axes
 
-def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=True, num_bins=100, figsize=(10, 6), **kwargs):
+def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=True, fit=False, num_bins=100, figsize=(10, 6), **kwargs):
     """
     Plots the distribution of times between consecutive events (delta_t).
     
     The distribution is plotted as log-log (default) or semilog-y.
     By default, it bins by log(delta_t) (equally spaced in log space).
     The 'semilog' option bins by delta_t (equally spaced in linear space).
+    Optionally fits an exponential model to the data.
 
     Args:
         camera_images (PanosetiCameraImages): The images and metadata container.
@@ -219,6 +221,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
         semilog (bool): If True, bin by dt linearly and plot semilog-y. 
                         If False (default), bin by log(dt) and plot log-log.
         normalize (bool): If True, normalize the distribution (integral = 1).
+        fit (bool): If True, fit an exponential model to each distribution.
         num_bins (int): Number of bins for the histogram.
         figsize (tuple): Size of the figure (width, height).
         **kwargs: Additional keyword arguments passed to axes.stairs.
@@ -268,17 +271,42 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
     
+    all_y_values = []
+    min_normalized_y = 1.0 # Default fallback
+    
     for i, (gti_idx, dts) in enumerate(data_to_plot.items()):
         color = colors[i % len(colors)]
         
         if semilog:
-            counts, bin_edges = np.histogram(dts, bins=bins, density=normalize)
+            counts, bin_edges = np.histogram(dts, bins=bins)
             x_plot = bin_edges
+            x_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+            bw = np.diff(bins)
         else:
-            counts, bin_edges = np.histogram(np.log(dts), bins=bins, density=normalize)
+            counts, bin_edges = np.histogram(np.log(dts), bins=bins)
             x_plot = np.exp(bin_edges)
+            x_centers = np.exp((bin_edges[:-1] + bin_edges[1:]) / 2.0)
+            bw = np.diff(bins)
             
-        # Construct label
+        y_plot = counts.astype(float)
+        # Calculate normalization factor: 1.0 / (total * bin_width)
+        # This is used to find the value of "0.5 events" in the density space
+        norm_factor = 1.0 / (np.sum(counts) * bw) if normalize else 1.0
+        
+        if normalize:
+            y_plot = y_plot * norm_factor
+
+        # Set min_normalized_y to the value of 0.5 events for this GTI
+        # We take the minimum across all GTIs to ensure we see everything
+        current_gti_min = 0.5 * np.min(norm_factor)
+        if i == 0:
+            min_normalized_y = current_gti_min
+        else:
+            min_normalized_y = min(min_normalized_y, current_gti_min)
+
+        all_y_values.extend(y_plot[counts > 0])
+
+        # Construct base label
         label = f"GTI {gti_idx}" if gti_idx != 'Combined' else 'Combined'
         if gti_idx != 'Combined' and camera_images.gtis:
             try:
@@ -299,15 +327,46 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
                         label = f"{start} ({label})"
             except: pass
             
+        if fit:
+            # Fit exponential model. Ignore empty bins.
+            mask = counts > 0
+            if np.sum(mask) > 2:
+                xx = x_centers[mask]
+                yy = y_plot[mask]
+                # Poisson errors: sigma = counts / (total * bw) / sqrt(counts) = yy / sqrt(counts)
+                sigmas = yy / np.sqrt(counts[mask])
+                
+                if semilog:
+                    def model(x, A, lam): return A * np.exp(-lam * x)
+                    p0 = [yy[0], 1.0 / np.mean(dts)]
+                else:
+                    def model(x, A, lam): return A * x * np.exp(-lam * x)
+                    p0 = [np.max(yy) * np.exp(1) * (1.0/np.mean(dts)), 1.0 / np.mean(dts)]
+
+                try:
+                    popt, _ = curve_fit(model, xx, yy, p0=p0, sigma=sigmas)
+                    label = f"{label} (Rate: {popt[1]:.2f} Hz)"
+                    x_smooth = np.logspace(np.log10(min_dt), np.log10(max_dt), 200) if not semilog else np.linspace(min_dt, max_dt, 200)
+                    y_smooth = model(x_smooth, *popt)
+                    # Clip smooth curve to sensible limits for plotting
+                    y_smooth = np.maximum(y_smooth, min_normalized_y * 0.1)
+                    ax.plot(x_smooth, y_smooth, color=color, alpha=0.8, linestyle='--')
+                except Exception as e:
+                    print(f"Fit failed for {label}: {e}")
+
         current_kwargs = kwargs.copy()
         if 'color' not in current_kwargs:
             current_kwargs['color'] = color
         if 'label' not in current_kwargs:
             current_kwargs['label'] = label
         
-        ax.stairs(counts, x_plot, **current_kwargs)
+        ax.stairs(y_plot, x_plot, **current_kwargs)
 
     ax.set_yscale('log')
+    if all_y_values:
+        y_max = np.max(all_y_values) * 2.0
+        ax.set_ylim(min_normalized_y, y_max)
+    
     ax.set_xlabel(r'$\Delta t$ (s)')
     ax.set_ylabel(ylabel)
     
@@ -315,19 +374,15 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
         ax.set_xscale('linear')
     else:
         ax.set_xscale('log')
-        # Add secondary frequency axis. 
-        # lambda x: 1/x is safe here because x-axis is log and min_dt > 0.
         def safe_reciprocal(x):
             with np.errstate(divide='ignore', invalid='ignore'):
                 return 1.0 / x
-
         try:
             secax = ax.secondary_xaxis('top', functions=(safe_reciprocal, safe_reciprocal))
             secax.set_xlabel('Frequency (Hz)')
-        except (AttributeError, ValueError):
-            pass
+        except (AttributeError, ValueError): pass
     
-    if len(data_to_plot) > 1:
+    if len(data_to_plot) > 1 or fit:
         ax.legend()
         
     fig.tight_layout()
@@ -369,11 +424,12 @@ if __name__ == "__main__":
     
     # Test plot_delta_t
     print("Running self-test for plot_delta_t...")
-    fig4, _ = plot_delta_t(dummy_images)
+    fig4, _ = plot_delta_t(dummy_images, fit=True)
     plt.close(fig4)
-    fig5, _ = plot_delta_t(dummy_images, semilog=True, combine_gtis=True)
+    fig5, _ = plot_delta_t(dummy_images, semilog=True, combine_gtis=True, fit=True)
     plt.close(fig5)
     print("plot_delta_t tests passed.")
     
     print("dqm.py self-test complete.")
+
 
