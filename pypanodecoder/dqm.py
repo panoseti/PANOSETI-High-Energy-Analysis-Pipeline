@@ -179,10 +179,10 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
             hi_mask = rates > y_max
             lo_mask = rates < y_min
             if np.any(hi_mask):
-                cur_ax.scatter(np.array(x_centers)[hi_mask], [y_max]*np.sum(hi_mask), 
+                cur_ax.scatter(np.array(x_centers)[hi_mask], [y_max*0.95 + y_min*0.05]*np.sum(hi_mask), 
                                marker='^', color='red', s=20, zorder=5)
             if np.any(lo_mask):
-                cur_ax.scatter(np.array(x_centers)[lo_mask], [y_min]*np.sum(lo_mask), 
+                cur_ax.scatter(np.array(x_centers)[lo_mask], [y_min*0.95 + y_max*0.05]*np.sum(lo_mask), 
                                marker='v', color='red', s=20, zorder=5)
 
         if subplots:
@@ -259,7 +259,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
     else:
         log_min, log_max = np.log(min_dt), np.log(max_dt)
         bins = np.linspace(log_min, log_max, num_bins + 1)
-        ylabel = r"dN/dlog($\Delta t$) [dimensionless]" if normalize else "Counts"
+        ylabel = r"dN/dlog($\Delta t$) [1]" if normalize else "Counts"
 
     if combine_gtis:
         data_to_plot = {'Combined': all_dts}
