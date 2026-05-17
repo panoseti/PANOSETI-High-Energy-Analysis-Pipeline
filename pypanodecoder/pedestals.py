@@ -13,6 +13,12 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
+try:
+    from eventbuilder import get_camera_events, PanosetiCameraEvent, PanosetiCameraImages
+except ImportError:
+    # Fallback if imported from outside the package
+    from .eventbuilder import get_camera_events, PanosetiCameraEvent, PanosetiCameraImages
+
 class PanosetiChargeHistogram:
     """
     Represents a multi-dimensional histogram of charge values.
@@ -266,4 +272,45 @@ def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True,
             results[gti_idx] = _build_spectra(camera_images.images[:, :, gti_mask],
                                               qmin_pix=qmin_pix, qmax_pix=qmax_pix, downsample=downsample)
         return results
+
+def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.15, 0.85)):
+    """
+    Fits a polynomial pedestal model to each pixel and subtracts it.
+    The fit is performed independently for each GTI.
+    Events outside the specified quantiles are excluded from the fit for robustness.
+    
+    Args:
+        camera_images (PanosetiCameraImages): The image container.
+        norder (int): The order of the polynomial to fit (0=constant, 1=linear, etc.).
+        quantiles (tuple): The (low, high) quantile limits for including data in the fit.
+        
+    Returns:
+        PanosetiCameraImages: A new container with pedestal-subtracted images.
+    """
+    results = []
+    for gti_idx in camera_images.unique_gti_indexes:
+        gti_images = camera_images.filter_gti(gti_idx)
+        
+        # Calculate bounds for fitting (robust estimation of the quiet pedestal)
+        charge_spectra = calculate_charge_spectra(gti_images, combine_gtis=True)
+        q_low, q_high = charge_spectra.pix.quantiles(quantiles)
+        
+        t = gti_images.gti_event_times
+        pcorr = np.zeros((32, 32, norder + 1))
+        
+        for i in range(32):
+            for j in range(32):
+                y = gti_images.images[i, j, :]
+                mask = (y >= q_low[i, j]) & (y <= q_high[i, j])
+                
+                if np.sum(mask) > norder:
+                    pcorr[i, j, :] = np.polyfit(t[mask], y[mask], norder)
+                else:
+                    # Fallback to simple mean if not enough data for polynomial fit
+                    pcorr[i, j, -1] = np.mean(y)
+                    
+        # Use the class method to apply the subtraction
+        results.append(gti_images.apply_pedestal_corrections(pcorr))
+        
+    return PanosetiCameraImages.concatenate(results)
 
