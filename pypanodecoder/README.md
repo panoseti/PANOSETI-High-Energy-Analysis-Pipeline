@@ -7,22 +7,21 @@ Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytech
 
 ## Overview
 
-This directory contains a pure Python implementation of the PANOSETI data pipeline, from raw packet decoding to higher-level calibration and data quality monitoring. These tools aspire to be easy to use and free of non-standard dependencies (except NumPy, SciPy, and Matplotlib).
+This directory contains the pure Python tools for loading and analyzing PANOSETI data. At the low level a raw packet decoding and event merging tool is provided. At a higher level there are utilities for pedestal calculation and data quality monitoring. The tools aspire to be simple and extensible, so that they can be used to build more complex analysis tasks or as part of a larger pipelines. They are largely free from non-standard dependencies (except NumPy, SciPy, and Matplotlib).
 
 ## Modules
 
 ### `panodecoder.py`
-The core decoder for PANOSETI Science packets.
+The core decoder for PANOSETI Science packets from PCAP/PCAPNG files.
 - **`PanosetiPcapDecoder`**: A pure Python class that reads `.pcap` and `.pcapng` files without requiring external libraries like `libpcap` or `scapy`.
-- **`GTIFilter`**: Efficiently manages Good Time Intervals (GTI) for filtering events during decoding.
-- **Time Synchronization**: Implements `wr_to_unix` to convert White Rabbit (WR) hardware timestamps (TAI/nanosec) to Unix epoch time.
-- **`get_panoseti_events`**: A generator function to stream events from multiple files or glob patterns.
+- **`GTIFilter`**: Manages Good Time Intervals (GTI) for filtering packets into runs during decoding.
+- **`get_panoseti_packets`**: A generator function to stream packets from multiple files or glob patterns, optionally filtering based on GTIs.
 
 ### `eventbuilder.py`
 Tools for reconstructing full camera events from individual Quabo packets.
 - **`PanosetiCameraEvent`**: Groups packets from the four Quabos (quadrants) of a telescope that share the same hardware timestamp.
-- **Image Reconstruction**: Provides a `get_image()` method that correctly rotates and mosaics Quabo data into a 32x32 camera image.
-- **`PanosetiCameraImages`**: A container for stacks of camera images and associated metadata, supporting GTI filtering and pedestal correction.
+- **Image Reconstruction**: Provides a `get_image()` method that rotates and mosaics Quabo data into a 32x32 camera image.
+- **`PanosetiCameraImages`**: A container for holding stacks of camera images and associated metadata in memory, supporting GTI filtering and pedestal correction.
 - **`load_camera_images`**: High-level utility to load data directly into a 3D NumPy array (32x32xN).
 
 ### `pedestals.py`
@@ -36,18 +35,46 @@ Data Quality Monitoring (DQM) and visualization tools.
 - **`plot_event_rate`**: Plots the event rate (Hz) over time, with support for multiple GTIs, subplots, and absolute UT time.
 - **`plot_delta_t`**: Analyzes the distribution of time intervals between consecutive events. Includes exponential fitting to measure random trigger rates.
 
-## Usage Example
+## Usage Example: decode Quabo packets from one file
+
+```python
+from pypanodecoder.panodecoder import get_panoseti_packets
+# Stream packets from a single PCAP file
+for packet in get_panoseti_packets("data/run_001.pcap"):
+    print(f"Quabo: {packet.quabo_id}, timestamp: {packet.event_time}")
+```
+
+## Usage Example: merge Quabo packets from multiple files into camera events
+
+```python
+from pypanodecoder.eventbuilder import get_camera_events
+GTIs = [ 
+    { "start": "2026-01-10 05:00:00", "end": "2026-01-10 08:00:00" },
+    { "start": "2026-01-11 05:30:00", "end": "2026-01-11 07:45:00" }
+]
+# Stream camera events from multiple PCAP files
+for camera_event in get_camera_events("data/run_*.pcap", gtis=GTIs):
+    print(f"Camera event at {camera_event.event_time} with {len(camera_event.packets)} packets")
+```
+
+## Usage Example: load camera images and plot DQM metrics
 
 ```python
 from pypanodecoder.eventbuilder import load_camera_images
 from pypanodecoder.dqm import plot_event_rate, plot_delta_t
 import matplotlib.pyplot as plt
 
-# Load images from a PCAP file
-data = load_camera_images("data/run_001.pcap")
+# Define Good Time Intervals (GTIs)
+GTIs = [ 
+    { "start": "2026-01-10 05:00:00", "end": "2026-01-10 08:00:00" },
+    { "start": "2026-01-11 05:30:00", "end": "2026-01-11 07:45:00" }
+]
+
+# Load images from multiple PCAP files with GTI filtering
+data = load_camera_images("data/run_*.pcap", gtis=GTIs)
 
 # Plot the event rate
-fig_rate, _ = plot_event_rate(data)
+fig_rate, _ = plot_event_rate(data, subplots=True, uttime=True)
 plt.show()
 
 # Plot the inter-event time distribution

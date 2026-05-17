@@ -13,9 +13,9 @@ import glob
 import datetime
 import bisect
 
-# Define the structure for a PANOSETI Science Event
+# Define the structure for a PANOSETI Science Packet
 # Using namedtuple for a "struct-like" behavior as requested.
-ScienceEvent = namedtuple('ScienceEvent', [
+SciencePacket = namedtuple('SciencePacket', [
     'filename', 'file_offset', 'file_packet_index',
     'pcap_sec', 'pcap_usec', 'incl_len',
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
@@ -57,10 +57,16 @@ def parse_time(t):
 
 class GTIFilter:
     """
-    Manages Good Time Intervals (GTI) for filtering events.
+    Manages Good Time Intervals (GTI) for filtering packets.
     Normalizes, merges overlapping intervals, and provides efficient lookup.
     """
     def __init__(self, gti):
+        if isinstance(gti, GTIFilter):
+            self.intervals = gti.intervals
+            self._starts = gti._starts
+            self._current_idx = gti._current_idx
+            return
+
         if gti is None:
             self.intervals = [(-float('inf'), float('inf'), True, 0)]
             self._starts = [-float('inf')]
@@ -229,9 +235,9 @@ class PanosetiPcapDecoder:
             ts_sec, ts_usec, incl_len, orig_len = struct.unpack(f"{self._endian}IIII", header_data)
             packet_data = self._file.read(incl_len)
             
-            event = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
-            if event:
-                yield event
+            packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
+            if packet:
+                yield packet
                 self.file_packet_index += 1
 
     def _iter_pcapng(self):
@@ -289,9 +295,9 @@ class PanosetiPcapDecoder:
                     ts_usec = (timestamp % self._ts_resol) * (1000000 // self._ts_resol)
                 
                 packet_data = block_data[20:20+incl_len]
-                event = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
-                if event:
-                    yield event
+                packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
+                if packet:
+                    yield packet
                     self.file_packet_index += 1
             # Skip other block types (SHB, IDB, etc. are already read into block_data)
 
@@ -359,7 +365,7 @@ class PanosetiPcapDecoder:
         nanosec = meta[5]
         event_time_good, event_time_sec, event_time_nsec, event_time = wr_to_unix(tai, nanosec, ts_sec, ignore_clock_desync=True)
 
-        return ScienceEvent(
+        return SciencePacket(
             filename=self.filename,
             file_offset=file_offset,
             file_packet_index=file_packet_index,
@@ -387,14 +393,14 @@ class PanosetiPcapDecoder:
     def close(self):
         self._file.close()
 
-def get_panoseti_events(filenames, gti=None, verbose=False):
+def get_panoseti_packets(filenames, gtis=None, verbose=False):
     """
-    Convenience function to get events from one or more PANOSETI PCAP/PCAPNG files.
+    Convenience function to get packets from one or more PANOSETI PCAP/PCAPNG files.
     'filenames' can be a single filename (string), a glob pattern (string), 
     or a list/iterable of filenames.
-    'gti' can be a dict with start/stop keys or a list of such dicts.
+    'gtis' can be a GTIFilter object, a dict with start/stop keys, or a list of such dicts.
     """
-    gti_filter = GTIFilter(gti)
+    gti_filter = gtis if isinstance(gtis, GTIFilter) else GTIFilter(gtis)
     if isinstance(filenames, str):
         if any(char in filenames for char in '*?['):
             files = sorted(glob.glob(filenames))
@@ -413,13 +419,13 @@ def get_panoseti_events(filenames, gti=None, verbose=False):
             print(f"Processing file: {filename} (size: {os.path.getsize(filename)} bytes)")
         decoder = PanosetiPcapDecoder(filename)
         try:
-            for event in decoder:
-                is_good, gti_idx, gti_start_time = gti_filter.get_info(event.event_time)
+            for packet in decoder:
+                is_good, gti_idx, gti_start_time = gti_filter.get_info(packet.event_time)
                 if is_good:
-                    gti_event_time = event.event_time
+                    gti_event_time = packet.event_time
                     if gti_start_time != -float('inf'):
                         gti_event_time -= gti_start_time
-                    yield event._replace(gti_index=gti_idx, gti_event_time=gti_event_time)
+                    yield packet._replace(gti_index=gti_idx, gti_event_time=gti_event_time)
         finally:
             decoder.close()
 
@@ -431,9 +437,9 @@ if __name__ == "__main__":
     
     count = 0
     # Process all arguments passed on the command line
-    for event in get_panoseti_events(sys.argv[1:]):
+    for packet in get_panoseti_packets(sys.argv[1:]):
         if count % 1000 == 0:
             # Use _asdict() for pretty printing if needed, or just repr
-            print(f"Event {count}: {event._replace(pix_data='...')}")
+            print(f"Packet {count}: {packet._replace(pix_data='...')}")
         count += 1
-    print(f"Total events: {count}")
+    print(f"Total packets: {count}")

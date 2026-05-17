@@ -16,10 +16,10 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 try:
-    from panodecoder import get_panoseti_events, ScienceEvent, GTIFilter
+    from panodecoder import get_panoseti_packets, SciencePacket, GTIFilter
 except ImportError:
     # Fallback if imported from outside the package
-    from .panodecoder import get_panoseti_events, ScienceEvent, GTIFilter
+    from .panodecoder import get_panoseti_packets, SciencePacket, GTIFilter
 
 class PanosetiCameraEvent:
     """
@@ -29,7 +29,7 @@ class PanosetiCameraEvent:
     """
     def __init__(self, telescope_id, first_packet):
         self.telescope_id = telescope_id
-        # Map of quabo_id (0-3) to ScienceEvent
+        # Map of quabo_id (0-3) to SciencePacket
         self.packets = {first_packet.quabo_id: first_packet}
         
         # Timing from the first packet that started this event
@@ -148,7 +148,7 @@ class PanosetiCameraImages:
         """Returns the sorted unique GTI indexes present in this object."""
         return np.unique(self.gti_indexes)
 
-    def filter_gti(self, gti_index):
+    def filter_gtis(self, gti_index):
         """Returns a new PanosetiCameraImages object filtered for a specific GTI index."""
         mask = (self.gti_indexes == gti_index)
         
@@ -224,7 +224,7 @@ class PanosetiEventBuilder:
 
     def process_packet(self, packet):
         """
-        Process a single ScienceEvent and yield any completed PanosetiCameraEvents.
+        Process a single SciencePacket and yield any completed PanosetiCameraEvents.
         """
         pcap_time = packet.pcap_sec + packet.pcap_usec / 1e6
         event_time = packet.event_time
@@ -276,7 +276,7 @@ class PanosetiEventBuilder:
                 yield self.active_events[tid].pop(et)
         self.active_events.clear()
 
-def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=None, verbose=False):
+def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=None, verbose=False):
     """
     Convenience generator to get full camera events from one or more PANOSETI pcap files.
     
@@ -284,25 +284,25 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=N
         filenames (str or list): One or more paths to .pcap or .pcapng files, or a glob pattern.
         max_pcap_tdiff (float): Maximum PCAP arrival time difference.
         max_event_tdiff (float): Maximum hybridized event time difference (s).
-        gti (dict or list): Good Time Intervals for filtering events.
+        gtis (GTIFilter, dict or list): Good Time Intervals for filtering events.
         
     Yields:
         PanosetiCameraEvent: Reconstructed camera events.
     """
     builder = PanosetiEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff)
-    for packet in get_panoseti_events(filenames, gti=gti, verbose=verbose):
+    for packet in get_panoseti_packets(filenames, gtis=gtis, verbose=verbose):
         for event in builder.process_packet(packet):
             yield event
     for event in builder.flush():
         yield event
 
-def load_camera_images(filenames, gti=None, min_packets=4, store_camera_events=False, **kwargs):
+def load_camera_images(filenames, gtis=None, min_packets=4, store_camera_events=False, **kwargs):
     """
     Load all camera images from one or more PANOSETI pcap files.
     
     Args:
         filenames (str or list): One or more paths to .pcap or .pcapng files, or a glob pattern.
-        gti (dict or list, optional): Good Time Intervals.
+        gtis (GTIFilter, dict or list, optional): Good Time Intervals.
         min_packets (int): Minimum number of quabo packets required to form an image.
         store_camera_events (bool): If True, store the PanosetiCameraEvent instances.
 
@@ -317,13 +317,13 @@ def load_camera_images(filenames, gti=None, min_packets=4, store_camera_events=F
     events_list = []
 
     # Get GTI info
-    gti_filter = GTIFilter(gti)
+    gti_filter = gtis if isinstance(gtis, GTIFilter) else GTIFilter(gtis)
     gtis_dict = {}
     for start, stop, good, idx in gti_filter.intervals:
         if good:
             gtis_dict[idx] = {'start': start, 'stop': stop}
 
-    for event in get_camera_events(filenames, gti=gti, **kwargs):
+    for event in get_camera_events(filenames, gtis=gti_filter, **kwargs):
         if(len(event.packets) >= min_packets):
             images.append(event.get_image())
             event_times.append(event.event_time)
