@@ -15,10 +15,10 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 try:
-    from panodecoder import get_panoseti_events, ScienceEvent
+    from panodecoder import get_panoseti_events, ScienceEvent, GTIFilter
 except ImportError:
     # Fallback if imported from outside the package
-    from .panodecoder import get_panoseti_events, ScienceEvent
+    from .panodecoder import get_panoseti_events, ScienceEvent, GTIFilter
 
 class PanosetiCameraEvent:
     """
@@ -113,24 +113,33 @@ class PanosetiCameraImages:
     Allows access via attributes (e.g., .images) or keys (e.g., ['images']).
     """
     def __init__(self, images, event_times, gti_indexes, 
-                 gti_event_times, quabo_masks, dtype=None):
+                 gti_event_times, quabo_masks, gtis=None, events=None, dtype=None):
         self.images = np.array(images, dtype=dtype) if dtype else images
         self.event_times = event_times
         self.gti_indexes = gti_indexes
         self.gti_event_times = gti_event_times
         self.quabo_masks = quabo_masks
+        self.gtis = gtis if gtis is not None else {}
+        self.events = events if events is not None else []
 
     @classmethod
     def concatenate(cls, objects):
         """Concatenates multiple PanosetiCameraImages objects into one."""
         if not objects:
             raise ValueError("concatenate() requires a non-empty list of PanosetiCameraImages objects")
+        
+        merged_gtis = {}
+        for o in objects:
+            merged_gtis.update(o.gtis)
+            
         return cls(
             images=np.concatenate([o.images for o in objects], axis=2),
             event_times=np.concatenate([o.event_times for o in objects]),
             gti_indexes=np.concatenate([o.gti_indexes for o in objects]),
             gti_event_times=np.concatenate([o.gti_event_times for o in objects]),
-            quabo_masks=np.concatenate([o.quabo_masks for o in objects])
+            quabo_masks=np.concatenate([o.quabo_masks for o in objects]),
+            gtis=merged_gtis,
+            events=[ev for o in objects for ev in o.events]
         )
 
     @property
@@ -141,12 +150,19 @@ class PanosetiCameraImages:
     def filter_gti(self, gti_index):
         """Returns a new PanosetiCameraImages object filtered for a specific GTI index."""
         mask = (self.gti_indexes == gti_index)
+        
+        filtered_events = []
+        if self.events:
+            filtered_events = [self.events[i] for i, m in enumerate(mask) if m]
+            
         return PanosetiCameraImages(
             images=self.images[:, :, mask],
             event_times=self.event_times[mask],
             gti_indexes=self.gti_indexes[mask],
             gti_event_times=self.gti_event_times[mask],
-            quabo_masks=self.quabo_masks[mask]
+            quabo_masks=self.quabo_masks[mask],
+            gtis={gti_index: self.gtis[gti_index]} if gti_index in self.gtis else {},
+            events=filtered_events
         )
 
     def apply_pedestal_corrections(self, pcorr):
@@ -174,14 +190,16 @@ class PanosetiCameraImages:
             event_times=self.event_times,
             gti_indexes=self.gti_indexes,
             gti_event_times=self.gti_event_times,
-            quabo_masks=self.quabo_masks
+            quabo_masks=self.quabo_masks,
+            gtis=self.gtis,
+            events=self.events
         )
 
     def __getitem__(self, key):
         return getattr(self, key)
 
     def __repr__(self):
-        return f"<PanosetiCameraImages events={len(self.event_times)}>"
+        return f"<PanosetiCameraImages events={len(self.event_times)} gtis={list(self.gtis.keys())}>"
 
 class PanosetiEventBuilder:
     """
@@ -277,12 +295,15 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gti=N
     for event in builder.flush():
         yield event
 
-def load_camera_images(filenames, gti=None, min_packets=4, **kwargs):
+def load_camera_images(filenames, gti=None, min_packets=4, store_camera_events=False, **kwargs):
     """
     Load all camera images from one or more PANOSETI pcap files.
     
     Args:
         filenames (str or list): One or more paths to .pcap or .pcapng files, or a glob pattern.
+        gti (dict or list, optional): Good Time Intervals.
+        min_packets (int): Minimum number of quabo packets required to form an image.
+        store_camera_events (bool): If True, store the PanosetiCameraEvent instances.
 
     Returns:
         PanosetiCameraImages: Object containing the 32x32xNevent images and metadata.
@@ -292,6 +313,14 @@ def load_camera_images(filenames, gti=None, min_packets=4, **kwargs):
     gti_indexes = []
     gti_event_times = []
     quabo_masks = []
+    events_list = []
+
+    # Get GTI info
+    gti_filter = GTIFilter(gti)
+    gtis_dict = {}
+    for start, stop, good, idx in gti_filter.intervals:
+        if good:
+            gtis_dict[idx] = {'start': start, 'stop': stop}
 
     for event in get_camera_events(filenames, gti=gti, **kwargs):
         if(len(event.packets) >= min_packets):
@@ -305,13 +334,18 @@ def load_camera_images(filenames, gti=None, min_packets=4, **kwargs):
             for qid in event.packets.keys():
                 mask |= (1 << qid)
             quabo_masks.append(mask)
+            
+            if store_camera_events:
+                events_list.append(event)
 
     return PanosetiCameraImages(
         images=np.stack(images, axis=2) if images else np.zeros((32, 32, 0)),
         event_times=np.array(event_times),
         gti_indexes=np.array(gti_indexes),
         gti_event_times=np.array(gti_event_times),
-        quabo_masks=np.array(quabo_masks)
+        quabo_masks=np.array(quabo_masks),
+        gtis=gtis_dict,
+        events=events_list if store_camera_events else None
     )
 
 if __name__ == "__main__":
