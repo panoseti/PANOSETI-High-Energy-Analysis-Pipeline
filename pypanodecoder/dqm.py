@@ -22,7 +22,7 @@ except ImportError:
     # Fallback if imported from outside the package
     from .eventbuilder import PanosetiCameraImages
 
-def plot_event_rate(camera_images, bin_width_min=1.0, gtis=None, subplots=False, figsize=(10, 6), uttime=False, clip=False, **kwargs):
+def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, **kwargs):
     """
     Plots the event rate in Hz as a function of GTI event time.
     
@@ -32,8 +32,6 @@ def plot_event_rate(camera_images, bin_width_min=1.0, gtis=None, subplots=False,
     Args:
         camera_images (PanosetiCameraImages): The images and metadata container.
         bin_width_min (float): Bin width in minutes for rate calculation.
-        gtis (list, optional): Original list of GTI dictionaries. If provided, 
-                               GTI start times will be included in the legend/titles.
         subplots (bool): If True, each GTI is plotted in its own subplot with a shared X-axis.
         figsize (tuple): Size of the figure (width, height).
         uttime (bool): If True, plot against absolute UT time (HH:MM) instead of seconds 
@@ -134,11 +132,10 @@ def plot_event_rate(camera_images, bin_width_min=1.0, gtis=None, subplots=False,
 
         # Construct label
         label = f"GTI {gti_idx}"
-        if gtis is not None:
+        if camera_images.gtis:
             try:
-                # Use gti_idx for lookup if it's a valid index for the list
-                if isinstance(gti_idx, (int, np.integer)) and 0 <= gti_idx < len(gtis):
-                    gti_info = gtis[gti_idx]
+                if gti_idx in camera_images.gtis:
+                    gti_info = camera_images.gtis[gti_idx]
                     start = gti_info.get('start', gti_info.get('stop', 'Unknown'))
                     
                     dt = None
@@ -208,6 +205,134 @@ def plot_event_rate(camera_images, bin_width_min=1.0, gtis=None, subplots=False,
     
     return fig, axes
 
+def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=True, num_bins=100, figsize=(10, 6), **kwargs):
+    """
+    Plots the distribution of times between consecutive events (delta_t).
+    
+    The distribution is plotted as log-log (default) or semilog-y.
+    By default, it bins by log(delta_t) (equally spaced in log space).
+    The 'semilog' option bins by delta_t (equally spaced in linear space).
+
+    Args:
+        camera_images (PanosetiCameraImages): The images and metadata container.
+        combine_gtis (bool): If True, combine delta_t from all GTIs into one distribution.
+        semilog (bool): If True, bin by dt linearly and plot semilog-y. 
+                        If False (default), bin by log(dt) and plot log-log.
+        normalize (bool): If True, normalize the distribution (integral = 1).
+        num_bins (int): Number of bins for the histogram.
+        figsize (tuple): Size of the figure (width, height).
+        **kwargs: Additional keyword arguments passed to axes.stairs.
+
+    Returns:
+        tuple: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+    """
+    unique_gtis = camera_images.unique_gti_indexes
+    
+    gti_dts = {}
+    all_dts_list = []
+    
+    for gti_idx in unique_gtis:
+        mask = (camera_images.gti_indexes == gti_idx)
+        times = np.sort(camera_images.event_times[mask])
+        if len(times) < 2:
+            continue
+        dt = np.diff(times)
+        dt = dt[dt > 0] # Ensure positive intervals
+        if len(dt) > 0:
+            gti_dts[gti_idx] = dt
+            all_dts_list.append(dt)
+
+    if not gti_dts:
+        print("No delta_t values to plot.")
+        return None, None
+
+    all_dts = np.concatenate(all_dts_list)
+    
+    # Calculate global binning range
+    min_dt, max_dt = np.min(all_dts), np.max(all_dts)
+    if semilog:
+        bins = np.linspace(min_dt, max_dt, num_bins + 1)
+        ylabel = r"dN/dt [s$^{-1}$]" if normalize else "Counts"
+    else:
+        log_min, log_max = np.log(min_dt), np.log(max_dt)
+        bins = np.linspace(log_min, log_max, num_bins + 1)
+        ylabel = r"dN/dlog($\Delta t$) [dimensionless]" if normalize else "Counts"
+
+    if combine_gtis:
+        data_to_plot = {'Combined': all_dts}
+    else:
+        data_to_plot = gti_dts
+
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+    
+    for i, (gti_idx, dts) in enumerate(data_to_plot.items()):
+        color = colors[i % len(colors)]
+        
+        if semilog:
+            counts, bin_edges = np.histogram(dts, bins=bins, density=normalize)
+            x_plot = bin_edges
+        else:
+            counts, bin_edges = np.histogram(np.log(dts), bins=bins, density=normalize)
+            x_plot = np.exp(bin_edges)
+            
+        # Construct label
+        label = f"GTI {gti_idx}" if gti_idx != 'Combined' else 'Combined'
+        if gti_idx != 'Combined' and camera_images.gtis:
+            try:
+                if gti_idx in camera_images.gtis:
+                    gti_info = camera_images.gtis[gti_idx]
+                    start = gti_info.get('start', gti_info.get('stop', 'Unknown'))
+                    dt_start = None
+                    if isinstance(start, str):
+                        try:
+                            dt_start = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
+                        except ValueError: pass
+                    elif isinstance(start, (int, float)):
+                        dt_start = datetime.datetime.fromtimestamp(start, tz=datetime.timezone.utc)
+                    
+                    if dt_start:
+                        label = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} ({label})"
+                    else:
+                        label = f"{start} ({label})"
+            except: pass
+            
+        current_kwargs = kwargs.copy()
+        if 'color' not in current_kwargs:
+            current_kwargs['color'] = color
+        if 'label' not in current_kwargs:
+            current_kwargs['label'] = label
+        
+        ax.stairs(counts, x_plot, **current_kwargs)
+
+    ax.set_yscale('log')
+    ax.set_xlabel(r'$\Delta t$ (s)')
+    ax.set_ylabel(ylabel)
+    
+    if semilog:
+        ax.set_xscale('linear')
+    else:
+        ax.set_xscale('log')
+        # Add secondary frequency axis. 
+        # lambda x: 1/x is safe here because x-axis is log and min_dt > 0.
+        def safe_reciprocal(x):
+            with np.errstate(divide='ignore', invalid='ignore'):
+                return 1.0 / x
+
+        try:
+            secax = ax.secondary_xaxis('top', functions=(safe_reciprocal, safe_reciprocal))
+            secax.set_xlabel('Frequency (Hz)')
+        except (AttributeError, ValueError):
+            pass
+    
+    if len(data_to_plot) > 1:
+        ax.legend()
+        
+    fig.tight_layout()
+    return fig, ax
+
 if __name__ == "__main__":
     # Minimal self-test with dummy data
     print("Running self-test for plot_event_rate...")
@@ -215,15 +340,16 @@ if __name__ == "__main__":
     # Create dummy PanosetiCameraImages
     # GTI 0: 100 events in 100 seconds
     # GTI 1: 50 events in 100 seconds
-    times0 = np.random.uniform(0, 100, 100)
-    times1 = np.random.uniform(0, 100, 50)
+    times0 = np.sort(np.random.uniform(0, 100, 100))
+    times1 = np.sort(np.random.uniform(0, 100, 50))
     
     dummy_images = PanosetiCameraImages(
         images=np.zeros((32, 32, 150)),
         event_times=np.concatenate([times0, times1 + 1000]),
         gti_indexes=np.array([0]*100 + [1]*50),
         gti_event_times=np.concatenate([times0, times1]),
-        quabo_masks=np.zeros(150, dtype=int)
+        quabo_masks=np.zeros(150, dtype=int),
+        gtis={0: {'start': 0, 'stop': 100}, 1: {'start': 1000, 'stop': 1100}}
     )
     
     # Test overlaid
@@ -241,4 +367,13 @@ if __name__ == "__main__":
     plt.close(fig3)
     print("UT Time and Clip test passed.")
     
+    # Test plot_delta_t
+    print("Running self-test for plot_delta_t...")
+    fig4, _ = plot_delta_t(dummy_images)
+    plt.close(fig4)
+    fig5, _ = plot_delta_t(dummy_images, semilog=True, combine_gtis=True)
+    plt.close(fig5)
+    print("plot_delta_t tests passed.")
+    
     print("dqm.py self-test complete.")
+
