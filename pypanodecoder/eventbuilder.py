@@ -2,7 +2,8 @@
 
 # eventbuilder.py: Build full camera events from PANOSETI Science packets.
 
-# Author: Steve Fegan (2026-05-11)
+# Author: Stephen Fegan <sfegan@llr.in2p3.fr> (2026-05-11)
+# Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytechnique de Paris
 
 import struct
 import os

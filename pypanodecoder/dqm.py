@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-# dqm.py: Data Quality Monitoring tools for PANOSETI
+# dqm.py: Generate data quality monitoring plots for PANOSETI
 
-# Author: Steve Fegan (2026-05-17)
+# Author: Stephen Fegan <sfegan@llr.in2p3.fr> (2026-05-17)
+# Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytechnique de Paris
 
 import numpy as np
 import matplotlib.pyplot as plt

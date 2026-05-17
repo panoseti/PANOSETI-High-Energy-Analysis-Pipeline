@@ -2,7 +2,8 @@
 
 # pedestals.py: Calculate charge spectra and pedestal values
 
-# Author: Steve Fegan (2026-05-13)
+# Author: Stephen Fegan <sfegan@llr.in2p3.fr> (2026-05-13)
+# Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytechnique de Paris
 
 import os
 import sys
