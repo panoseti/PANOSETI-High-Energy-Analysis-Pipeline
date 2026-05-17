@@ -87,7 +87,7 @@ fig_dt, _ = plot_delta_t(data, fit=True)
 plt.show()
 ```
 
-Here we show how to load camera images from multiple runs (as in the previous example) into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering, and returns a `PanosetiCameraImages` object containing the image data and metadata. Once the data is loaded, we can easily access the event times and use the DQM plotting functions to visualize the event rate and inter-event time distribution.
+Here we show how to load camera images from multiple runs (as in the previous example) into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `PanosetiCameraImages` object containing the image data and metadata. Once the data is loaded, we can easily access the event data or process it.
 
 In this example we use the DQM plotting functions to plot the event rate and inter-event (Delta-T) time distribution. The `plot_event_rate` is configured to create subplots for each GTI and display time in absolute UT time. The `plot_delta_t` function fits an exponential model to the inter-event time distribution to estimate the random trigger rate.
 
