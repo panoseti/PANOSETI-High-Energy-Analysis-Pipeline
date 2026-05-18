@@ -428,18 +428,3 @@ def get_panoseti_packets(filenames, gtis=None, verbose=False):
                     yield packet._replace(gti_index=gti_idx, gti_event_time=gti_event_time)
         finally:
             decoder.close()
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <pcap_file_or_pattern> [...]")
-        sys.exit(1)
-    
-    count = 0
-    # Process all arguments passed on the command line
-    for packet in get_panoseti_packets(sys.argv[1:]):
-        if count % 1000 == 0:
-            # Use _asdict() for pretty printing if needed, or just repr
-            print(f"Packet {count}: {packet._replace(pix_data='...')}")
-        count += 1
-    print(f"Total packets: {count}")

@@ -13,16 +13,7 @@ import os
 import sys
 from scipy.optimize import curve_fit
 
-# Ensure we can import from the package root directory
-package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if package_root not in sys.path:
-    sys.path.append(package_root)
-
-try:
-    from eventbuilder import PanosetiCameraImages
-except ImportError:
-    # Fallback if imported as a subpackage
-    from ..eventbuilder import PanosetiCameraImages
+from ..eventbuilder import PanosetiCameraImages
 
 def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, **kwargs):
     """
@@ -388,47 +379,3 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
         
     fig.tight_layout()
     return fig, ax
-
-if __name__ == "__main__":
-    # Minimal self-test with dummy data
-    print("Running self-test for plot_event_rate...")
-    
-    # Create dummy PanosetiCameraImages
-    # GTI 0: 100 events in 100 seconds
-    # GTI 1: 50 events in 100 seconds
-    times0 = np.sort(np.random.uniform(0, 100, 100))
-    times1 = np.sort(np.random.uniform(0, 100, 50))
-    
-    dummy_images = PanosetiCameraImages(
-        images=np.zeros((32, 32, 150)),
-        event_times=np.concatenate([times0, times1 + 1000]),
-        gti_indexes=np.array([0]*100 + [1]*50),
-        gti_event_times=np.concatenate([times0, times1]),
-        quabo_masks=np.zeros(150, dtype=int),
-        gtis={0: {'start': 0, 'stop': 100}, 1: {'start': 1000, 'stop': 1100}}
-    )
-    
-    # Test overlaid
-    fig1, _ = plot_event_rate(dummy_images, bin_width_min=0.2)
-    plt.close(fig1)
-    print("Overlaid plot test passed.")
-    
-    # Test subplots
-    fig2, _ = plot_event_rate(dummy_images, bin_width_min=0.2, subplots=True)
-    plt.close(fig2)
-    print("Subplots test passed.")
-    
-    # Test clip and uttime
-    fig3, _ = plot_event_rate(dummy_images, uttime=True, clip=True)
-    plt.close(fig3)
-    print("UT Time and Clip test passed.")
-    
-    # Test plot_delta_t
-    print("Running self-test for plot_delta_t...")
-    fig4, _ = plot_delta_t(dummy_images, fit=True)
-    plt.close(fig4)
-    fig5, _ = plot_delta_t(dummy_images, semilog=True, combine_gtis=True, fit=True)
-    plt.close(fig5)
-    print("plot_delta_t tests passed.")
-    
-    print("dqm.py self-test complete.")

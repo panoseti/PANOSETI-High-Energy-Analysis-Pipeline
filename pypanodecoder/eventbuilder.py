@@ -10,16 +10,7 @@ import os
 import sys
 import numpy as np
 
-# Ensure we can import from the current directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
-
-try:
-    from panodecoder import get_panoseti_packets, SciencePacket, GTIFilter
-except ImportError:
-    # Fallback if imported from outside the package
-    from .panodecoder import get_panoseti_packets, SciencePacket, GTIFilter
+from .panodecoder import get_panoseti_packets, SciencePacket, GTIFilter
 
 class PanosetiCameraEvent:
     """
@@ -348,16 +339,3 @@ def load_camera_images(filenames, gtis=None, min_packets=4, store_camera_events=
         gtis=gtis_dict,
         events=events_list if store_camera_events else None
     )
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <pcap_file_or_pattern> [...]")
-        sys.exit(1)
-    
-    count = 0
-    for event in get_camera_events(sys.argv[1:]):
-        if count % 100 == 0:
-            print(event)
-        count += 1
-    print(f"Total camera events found: {count}")
