@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# dqm.py: Generate data quality monitoring plots for PANOSETI
+# event_rate.py: Generate event rate and delta-t plots for PANOSETI
 
 # Author: Stephen Fegan <sfegan@llr.in2p3.fr> (2026-05-17)
 # Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytechnique de Paris
@@ -13,16 +13,16 @@ import os
 import sys
 from scipy.optimize import curve_fit
 
-# Ensure we can import from the current directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
+# Ensure we can import from the package root directory
+package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if package_root not in sys.path:
+    sys.path.append(package_root)
 
 try:
     from eventbuilder import PanosetiCameraImages
 except ImportError:
-    # Fallback if imported from outside the package
-    from .eventbuilder import PanosetiCameraImages
+    # Fallback if imported as a subpackage
+    from ..eventbuilder import PanosetiCameraImages
 
 def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, **kwargs):
     """
@@ -432,5 +432,3 @@ if __name__ == "__main__":
     print("plot_delta_t tests passed.")
     
     print("dqm.py self-test complete.")
-
-
