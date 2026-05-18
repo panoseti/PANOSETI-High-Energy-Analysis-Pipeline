@@ -281,6 +281,8 @@ TH2D* clean(TH2D* image){
         newImage->SetBinContent(removeMe[i], 0);
     }
 
+    image->Delete();
+    return newImage;
 }
 /*
 * Attempt image parameterization
@@ -1386,15 +1388,6 @@ TH2D* telEvent(int telNumber, int eventNumber){
 
     image = addNoise(image);
 
-    // trigger threshold
-    /*
-    if(image->GetMaximum()<6.5*petoadu){
-        image->Reset();
-    }else{
-        image = clean(image);
-        image->Draw("COLZ");
-    }
-    */
     // 2-pixel trigger in quadrants
     int npixtrigq1=0, npixtrigq2=0, npixtrigq3=0, npixtrigq4=0;
     for(int i=1; i<=16; i++){

@@ -234,11 +234,19 @@ TH2D* clean(TH2D* image, TH2D* pedvars, TH2D* gains){
             }
         }
     }
+
+    // SETI
+    if(removeMe.size()<=2){
+        removeMe.clear();
+    }
+
     // remove pixels which are isolated or small islands with border pixels
     for(int i=0; i<(int)removeMe.size(); i++){
         newImage->SetBinContent(removeMe[i], 0);
     }
 
+    image->Delete();
+    return newImage;
 }
 /*
 * prepares the code for correction of pointing offsets
