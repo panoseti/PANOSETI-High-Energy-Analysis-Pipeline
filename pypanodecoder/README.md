@@ -36,7 +36,7 @@ Data Quality Monitoring (DQM) subpackage and visualization tools.
 - **`plot_event_rate`**: Plots the event rate (Hz) over time, with support for multiple GTIs, subplots, and absolute UT time.
 - **`plot_delta_t`**: Analyzes the distribution of time intervals between consecutive events. Includes exponential fitting to measure random trigger rates.
 
-## Usage Example: decode Quabo packets from one file
+## Example: decode Quabo packets from one file
 
 ```python
 from pypanodecoder.pcapdecoder import get_panoseti_packets
@@ -47,7 +47,7 @@ for packet in get_panoseti_packets("data/20260110/onsky_20260110_050000.pcapng")
 
 This example demonstrates how to use the `get_panoseti_packets` generator to read packets from a single PCAP file. Each packet is decoded into a structured format `SciencePacket` (described in `pcapdecoder.py`), with attributes like `quabo_id`, `event_time` and `pix_data`. Note that multiple files can be read using glob patterns, and GTI filtering can be applied to select only packets within specified time intervals (see below).
 
-## Usage Example: merge Quabo packets from multiple files into camera events
+## Example: merge Quabo packets from multiple files into camera events
 
 ```python
 from pypanodecoder.eventbuilder import get_camera_events
@@ -63,7 +63,7 @@ Here we demonstrate how to use the `get_camera_events` generator to read and mer
 
 Each call to `get_camera_events` yields a `CameraEvent` containing the merged data from the four Quabos that correspond to the same hardware timestamp, allowing for easy manipulation of the full camera image.
 
-## Usage Example: load camera images and plot DQM metrics
+## Example: load camera images and plot DQM metrics
 
 ```python
 from pypanodecoder.eventbuilder import load_camera_images
