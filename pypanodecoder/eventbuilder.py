@@ -193,7 +193,7 @@ class CameraImages:
     def __repr__(self):
         return f"<CameraImages events={len(self.event_times)} gtis={list(self.gtis.keys())}>"
 
-class PanosetiEventBuilder:
+class CameraEventBuilder:
     """
     Builds camera events from a stream of PANOSETI Science packets.
     Uses hybridized event_time for grouping and PCAP arrival time for flushing.
@@ -280,7 +280,7 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=
     Yields:
         CameraEvent: Reconstructed camera events.
     """
-    builder = PanosetiEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff)
+    builder = CameraEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff)
     for packet in get_panoseti_packets(filenames, gtis=gtis, verbose=verbose):
         for event in builder.process_packet(packet):
             yield event

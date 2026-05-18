@@ -17,7 +17,7 @@ from .pcapdecoder import (
 from .eventbuilder import (
     CameraEvent,
     CameraImages,
-    PanosetiEventBuilder,
+    CameraEventBuilder,
     get_camera_events,
     load_camera_images
 )
@@ -38,7 +38,7 @@ __all__ = [
     'get_panoseti_packets',
     'CameraEvent',
     'CameraImages',
-    'PanosetiEventBuilder',
+    'CameraEventBuilder',
     'get_camera_events',
     'load_camera_images',
     'ChargeHistogram',

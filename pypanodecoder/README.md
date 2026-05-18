@@ -22,12 +22,13 @@ Tools for reconstructing full camera events from individual Quabo packets.
 - **`CameraEvent`**: Groups packets from the four Quabos (quadrants) of a telescope that share the same hardware timestamp.
 - **Image Reconstruction**: Provides a `get_image()` method that rotates and mosaics Quabo data into a 32x32 camera image.
 - **`CameraImages`**: A container for holding stacks of camera images and associated metadata in memory, supporting GTI filtering and pedestal correction.
+- **`get_camera_events`**: A generator function to stream merged camera events from multiple files, with GTI filtering.
 - **`load_camera_images`**: High-level utility to load data directly into a 3D NumPy array (32x32xN).
 
 ### `pedestals.py`
 Utilities for charge spectra analysis and pedestal management.
-- **`PanosetiChargeHistogram`**: Calculates robust statistics (mean, median, quantiles, Winsorized mean/variance) from charge distributions.
-- **`PanosetiChargeSpectra`**: Generates histograms at the pixel, SiPM (8x8), Quabo (16x16), and full camera (32x32) levels.
+- **`ChargeHistogram`**: Calculates robust statistics (mean, median, quantiles, Winsorized mean/variance) from charge distributions.
+- **`ChargeSpectra`**: Generates histograms at the pixel, SiPM (8x8), Quabo (16x16), and full camera (32x32) levels.
 - **Pedestal Correction**: Implements time-dependent polynomial pedestal fitting and subtraction to handle drift in detector baselines.
 
 ### `dqm.py`
@@ -44,7 +45,7 @@ for packet in get_panoseti_packets("data/20260110/onsky_20260110_050000.pcap"):
     print(f"Quabo: {packet.quabo_id}, timestamp: {packet.event_time}")
 ```
 
-This example demonstrates how to use the `get_panoseti_packets` generator to read packets from a single PCAP file. Each packet is decoded into a structured format `PanosetiPacket` (described in `panodecoder.py`), with attributes like `quabo_id`, `event_time` and `pix_data`. Note that multiple files can be read using glob patterns, and GTI filtering can be applied to select only packets within specified time intervals.
+This example demonstrates how to use the `get_panoseti_packets` generator to read packets from a single PCAP file. Each packet is decoded into a structured format `PanosetiPacket` (described in `pcapdecoder.py`), with attributes like `quabo_id`, `event_time` and `pix_data`. Note that multiple files can be read using glob patterns, and GTI filtering can be applied to select only packets within specified time intervals.
 
 ## Usage Example: merge Quabo packets from multiple files into camera events
 
@@ -92,5 +93,5 @@ Here we show how to load camera images from multiple runs into memory and then p
 In this example we use the DQM plotting functions to plot the event rate and inter-event (Delta-T) time distribution. The `plot_event_rate` is configured to create subplots for each GTI and display time in absolute UT time. The `plot_delta_t` function fits an exponential model to the inter-event time distribution to estimate the random trigger rate.
 
 ## Dependencies
-- **`panodecoder.py`**: No external dependencies (Standard Library only).
+- **`pcapdecoder.py`**: No external dependencies (Standard Library only).
 - **Others**: `numpy`, `matplotlib`, `scipy`.
