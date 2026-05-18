@@ -45,7 +45,7 @@ for packet in get_panoseti_packets("data/20260110/onsky_20260110_050000.pcapng")
     print(f"Quabo: {packet.quabo_id}, timestamp: {packet.event_time}")
 ```
 
-This example demonstrates how to use the `get_panoseti_packets` generator to read packets from a single PCAP file. Each packet is decoded into a structured format `SciencePacket` (described in `pcapdecoder.py`), with attributes like `quabo_id`, `event_time` and `pix_data`. Note that multiple files can be read using glob patterns, and GTI filtering can be applied to select only packets within specified time intervals.
+This example demonstrates how to use the `get_panoseti_packets` generator to read packets from a single PCAP file. Each packet is decoded into a structured format `SciencePacket` (described in `pcapdecoder.py`), with attributes like `quabo_id`, `event_time` and `pix_data`. Note that multiple files can be read using glob patterns, and GTI filtering can be applied to select only packets within specified time intervals (see below).
 
 ## Usage Example: merge Quabo packets from multiple files into camera events
 
@@ -59,7 +59,7 @@ GTIs = [
 for camera_event in get_camera_events("data/202601*/onsky_*.pcapng", gtis=GTIs):
     print(f"Camera event at {camera_event.event_time} with {len(camera_event.packets)} packets")
 ```
-Here we demonstrate how to use the `get_camera_events` generator to read and merge Quabo packets into full camera events. The function takes a glob pattern to read multiple files  and an optional list of GTIs to filter the events. Here illustrate how to specify the while January 2026 dataset (assuming they are organized by date) and select only events that occur during two hypothetical Crab runs, each specified by a start and end time.
+Here we demonstrate how to use the `get_camera_events` generator to read and merge Quabo packets into full camera events. The function takes a glob pattern to read multiple files  and an optional list of GTIs to filter the events. Here we illustrate how to specify the whole January 2026 dataset (assuming a heirarchical organization by date) and select only events that occur during two hypothetical  runs, each specified by a start and end time.
 
 Each call to `get_camera_events` yields a `CameraEvent` containing the merged data from the four Quabos that correspond to the same hardware timestamp, allowing for easy manipulation of the full camera image.
 
@@ -88,9 +88,9 @@ fig_dt, _ = plot_delta_t(data, fit=True)
 plt.show()
 ```
 
-Here we show how to load camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `CameraImages` object containing the image data and metadata. Once the data is loaded, we can easily access the event data or process it.
+Here we show how to load the camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `CameraImages` object containing the image data and metadata. Once the data is loaded, it can easily be accessed to retrieve the event data or process it.
 
-In this example we use the DQM plotting functions to plot the event rate and inter-event (Delta-T) time distribution. The `plot_event_rate` is configured to create subplots for each GTI and display time in absolute UT time. The `plot_delta_t` function fits an exponential model to the inter-event time distribution to estimate the random trigger rate.
+In this example we use the DQM plotting functions to plot the event rate histogram and inter-event (Delta-T) time distribution. The `plot_event_rate` is configured to create subplots for each GTI and display time in absolute UT time. The `plot_delta_t` function fits an exponential model to the inter-event time distribution to estimate the random trigger rate.
 
 ## Dependencies
 - **`pcapdecoder.py`**: No external dependencies (Standard Library only).
