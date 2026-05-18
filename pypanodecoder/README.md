@@ -11,17 +11,17 @@ This directory contains the pure Python tools for loading and analyzing PANOSETI
 
 ## Modules
 
-### `panodecoder.py`
+### `pcapdecoder.py`
 The core decoder for PANOSETI Science packets from PCAP/PCAPNG files.
-- **`PanosetiPcapDecoder`**: A pure Python class that reads `.pcap` and `.pcapng` files without requiring external libraries like `libpcap` or `scapy`.
+- **`PcapDecoder`**: A pure Python class that reads `.pcap` and `.pcapng` files without requiring external libraries like `libpcap` or `scapy`.
 - **`GTIFilter`**: Manages Good Time Intervals (GTI) for filtering packets into runs during decoding.
 - **`get_panoseti_packets`**: A generator function to stream packets from multiple files or glob patterns, optionally filtering based on GTIs.
 
 ### `eventbuilder.py`
 Tools for reconstructing full camera events from individual Quabo packets.
-- **`PanosetiCameraEvent`**: Groups packets from the four Quabos (quadrants) of a telescope that share the same hardware timestamp.
+- **`CameraEvent`**: Groups packets from the four Quabos (quadrants) of a telescope that share the same hardware timestamp.
 - **Image Reconstruction**: Provides a `get_image()` method that rotates and mosaics Quabo data into a 32x32 camera image.
-- **`PanosetiCameraImages`**: A container for holding stacks of camera images and associated metadata in memory, supporting GTI filtering and pedestal correction.
+- **`CameraImages`**: A container for holding stacks of camera images and associated metadata in memory, supporting GTI filtering and pedestal correction.
 - **`load_camera_images`**: High-level utility to load data directly into a 3D NumPy array (32x32xN).
 
 ### `pedestals.py`
@@ -38,7 +38,7 @@ Data Quality Monitoring (DQM) and visualization tools.
 ## Usage Example: decode Quabo packets from one file
 
 ```python
-from pypanodecoder.panodecoder import get_panoseti_packets
+from pypanodecoder.pcapdecoder import get_panoseti_packets
 # Stream packets from a single PCAP file
 for packet in get_panoseti_packets("data/20260110/onsky_20260110_050000.pcap"):
     print(f"Quabo: {packet.quabo_id}, timestamp: {packet.event_time}")
@@ -60,7 +60,7 @@ for camera_event in get_camera_events("data/202601*/onsky_*.pcap", gtis=GTIs):
 ```
 Here we demonstrate how to use the `get_camera_events` generator to read and merge Quabo packets into full camera events. The function takes a glob pattern to read multiple files  and an optional list of GTIs to filter the events. Here illustrate how to specify the while January 2026 dataset (assuming they are organized by date) and select only events that occur during two hypothetical Crab runs, each specified by a start and end time.
 
-Each call to `get_camera_events` yields a `PanosetiCameraEvent` containing the merged data from the four Quabos that correspond to the same hardware timestamp, allowing for easy manipulation of the full camera image.
+Each call to `get_camera_events` yields a `CameraEvent` containing the merged data from the four Quabos that correspond to the same hardware timestamp, allowing for easy manipulation of the full camera image.
 
 ## Usage Example: load camera images and plot DQM metrics
 
@@ -87,7 +87,7 @@ fig_dt, _ = plot_delta_t(data, fit=True)
 plt.show()
 ```
 
-Here we show how to load camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `PanosetiCameraImages` object containing the image data and metadata. Once the data is loaded, we can easily access the event data or process it.
+Here we show how to load camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `CameraImages` object containing the image data and metadata. Once the data is loaded, we can easily access the event data or process it.
 
 In this example we use the DQM plotting functions to plot the event rate and inter-event (Delta-T) time distribution. The `plot_event_rate` is configured to create subplots for each GTI and display time in absolute UT time. The `plot_delta_t` function fits an exponential model to the inter-event time distribution to estimate the random trigger rate.
 

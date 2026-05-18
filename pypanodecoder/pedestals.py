@@ -9,18 +9,9 @@ import os
 import sys
 import numpy as np
 
-# Ensure we can import from the current directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
+from .eventbuilder import CameraImages
 
-try:
-    from eventbuilder import get_camera_events, PanosetiCameraEvent, PanosetiCameraImages
-except ImportError:
-    # Fallback if imported from outside the package
-    from .eventbuilder import get_camera_events, PanosetiCameraEvent, PanosetiCameraImages
-
-class PanosetiChargeHistogram:
+class ChargeHistogram:
     """
     Represents a multi-dimensional histogram of charge values.
     """
@@ -157,7 +148,7 @@ class PanosetiChargeHistogram:
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.sum(self.qhist * (centers_clipped - wm[..., np.newaxis])**2, axis=-1) / total
 
-class PanosetiChargeSpectra:
+class ChargeSpectra:
     """
     Container for PANOSETI charge spectra (pedestal histograms).
     Allows access via attributes (e.g., .pix) or keys (e.g., ['pix']).
@@ -173,7 +164,7 @@ class PanosetiChargeSpectra:
         return getattr(self, key)
 
     def __repr__(self):
-        return f"<PanosetiChargeSpectra events={self.num_events}>"
+        return f"<ChargeSpectra events={self.num_events}>"
 
 def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
     """Internal helper to build spectra from a 3D numpy array of images (32, 32, N)."""
@@ -232,21 +223,21 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
         idx_camera = np.clip(idx_camera, 0, len(qcenter_camera) - 1)
         qhist_camera[idx_camera] += 1
 
-    return PanosetiChargeSpectra(
+    return ChargeSpectra(
         num_events=num_events,
-        pix=PanosetiChargeHistogram(qcenter_pix, qhist_pix, w_pix),
-        sipm=PanosetiChargeHistogram(qcenter_sipm, qhist_sipm, w_sipm),
-        quabo=PanosetiChargeHistogram(qcenter_quabo, qhist_quabo, w_quabo),
-        camera=PanosetiChargeHistogram(qcenter_camera, qhist_camera, w_camera)
+        pix=ChargeHistogram(qcenter_pix, qhist_pix, w_pix),
+        sipm=ChargeHistogram(qcenter_sipm, qhist_sipm, w_sipm),
+        quabo=ChargeHistogram(qcenter_quabo, qhist_quabo, w_quabo),
+        camera=ChargeHistogram(qcenter_camera, qhist_camera, w_camera)
     )
 
 def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True, 
                              qmin_pix=-512, qmax_pix=4096, downsample=False):
     """
-    Calculate the charge spectrum for each pixel from a PanosetiCameraImages object.
+    Calculate the charge spectrum for each pixel from a CameraImages object.
     
     Args:
-        camera_images (PanosetiCameraImages): The loaded camera images and metadata.
+        camera_images (CameraImages): The loaded camera images and metadata.
         gti_indexes (list, optional): List of GTI indexes to include. If None, all are included.
         combine_gtis (bool): If True, combine all selected GTIs into one spectra object.
                             If False, return a dict of spectra objects keyed by GTI index.
@@ -255,7 +246,7 @@ def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True,
         downsample (bool): If True, use larger bins for SiPM, Quabo, and camera histograms.
 
     Returns:
-        PanosetiChargeSpectra or dict: The calculated spectra.
+        ChargeSpectra or dict: The calculated spectra.
     """
     if gti_indexes is None:
         mask = np.ones(len(camera_images.gti_indexes), dtype=bool)
@@ -281,12 +272,12 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
     Events outside the specified quantiles are excluded from the fit for robustness.
     
     Args:
-        camera_images (PanosetiCameraImages): The image container.
+        camera_images (CameraImages): The image container.
         norder (int): The order of the polynomial to fit (0=constant, 1=linear, etc.).
         quantiles (tuple): The (low, high) quantile limits for including data in the fit.
         
     Returns:
-        PanosetiCameraImages: A new container with pedestal-subtracted images.
+        CameraImages: A new container with pedestal-subtracted images.
     """
     results = []
     for gti_idx in camera_images.unique_gti_indexes:
@@ -313,5 +304,5 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
         # Use the class method to apply the subtraction
         results.append(gti_images.apply_pedestal_corrections(pcorr))
         
-    return PanosetiCameraImages.concatenate(results)
+    return CameraImages.concatenate(results)
 

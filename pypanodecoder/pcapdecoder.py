@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# panodecoder.py: A pure Python decoder for PANOSETI data stored in PCAP format.
+# pcapdecoder.py: A pure Python decoder for PANOSETI data stored in PCAP format.
 # Does not rely on any external packages.
 
 # Author: Stephen Fegan <sfegan@llr.in2p3.fr> (2026-05-10)
@@ -158,7 +158,7 @@ def wr_to_unix(pkt_tai, pkt_nsec, tv_sec, ignore_clock_desync=False):
         else:
             raise Exception('WR and Unix times differ by > 1 sec: pkt_tai %d tv_sec %d d %d' % (pkt_tai, tv_sec, d))
 
-class PanosetiPcapDecoder:
+class PcapDecoder:
     """
     A pure Python decoder for PANOSETI data stored in PCAP format.
     Does not rely on any external packages.
@@ -417,7 +417,7 @@ def get_panoseti_packets(filenames, gtis=None, verbose=False):
     for filename in sorted(files):
         if(verbose):
             print(f"Processing file: {filename} (size: {os.path.getsize(filename)} bytes)")
-        decoder = PanosetiPcapDecoder(filename)
+        decoder = PcapDecoder(filename)
         try:
             for packet in decoder:
                 is_good, gti_idx, gti_start_time = gti_filter.get_info(packet.event_time)

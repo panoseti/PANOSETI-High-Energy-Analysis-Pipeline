@@ -9,11 +9,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import datetime
-import os
-import sys
 from scipy.optimize import curve_fit
 
-from ..eventbuilder import PanosetiCameraImages
+from ..eventbuilder import CameraImages
 
 def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, **kwargs):
     """
@@ -23,7 +21,7 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
     Multiple GTIs are plotted overlaid with a legend, or in separate subplots.
 
     Args:
-        camera_images (PanosetiCameraImages): The images and metadata container.
+        camera_images (CameraImages): The images and metadata container.
         bin_width_min (float): Bin width in minutes for rate calculation.
         subplots (bool): If True, each GTI is plotted in its own subplot with a shared X-axis.
         figsize (tuple): Size of the figure (width, height).
@@ -208,7 +206,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
     Optionally fits an exponential model to the data.
 
     Args:
-        camera_images (PanosetiCameraImages): The images and metadata container.
+        camera_images (CameraImages): The images and metadata container.
         combine_gtis (bool): If True, combine delta_t from all GTIs into one distribution.
         semilog (bool): If True, bin by dt linearly and plot semilog-y. 
                         If False (default), bin by log(dt) and plot log-log.

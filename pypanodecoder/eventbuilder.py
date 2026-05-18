@@ -10,9 +10,9 @@ import os
 import sys
 import numpy as np
 
-from .panodecoder import get_panoseti_packets, SciencePacket, GTIFilter
+from .pcapdecoder import get_panoseti_packets, SciencePacket, GTIFilter
 
-class PanosetiCameraEvent:
+class CameraEvent:
     """
     Represents a full or partial camera event consisting of packets from up to 4 quabos.
     A camera event is defined as a group of packets from the same telescope (scope)
@@ -97,9 +97,9 @@ class PanosetiCameraEvent:
 
     def __repr__(self):
         quabos = sorted(list(self.packets.keys()))
-        return f"<PanosetiCameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.start_pcap_time:.6f}>"
+        return f"<CameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.start_pcap_time:.6f}>"
 
-class PanosetiCameraImages:
+class CameraImages:
     """
     Container for PANOSETI camera images and metadata.
     Allows access via attributes (e.g., .images) or keys (e.g., ['images']).
@@ -116,9 +116,9 @@ class PanosetiCameraImages:
 
     @classmethod
     def concatenate(cls, objects):
-        """Concatenates multiple PanosetiCameraImages objects into one."""
+        """Concatenates multiple CameraImages objects into one."""
         if not objects:
-            raise ValueError("concatenate() requires a non-empty list of PanosetiCameraImages objects")
+            raise ValueError("concatenate() requires a non-empty list of CameraImages objects")
         
         merged_gtis = {}
         for o in objects:
@@ -140,14 +140,14 @@ class PanosetiCameraImages:
         return np.unique(self.gti_indexes)
 
     def filter_gtis(self, gti_index):
-        """Returns a new PanosetiCameraImages object filtered for a specific GTI index."""
+        """Returns a new CameraImages object filtered for a specific GTI index."""
         mask = (self.gti_indexes == gti_index)
         
         filtered_events = []
         if self.events:
             filtered_events = [self.events[i] for i, m in enumerate(mask) if m]
             
-        return PanosetiCameraImages(
+        return CameraImages(
             images=self.images[:, :, mask],
             event_times=self.event_times[mask],
             gti_indexes=self.gti_indexes[mask],
@@ -167,7 +167,7 @@ class PanosetiCameraImages:
                                 polynomial coefficients (highest degree first).
                                 
         Returns:
-            PanosetiCameraImages: A new object with adjusted images (dtype float).
+            CameraImages: A new object with adjusted images (dtype float).
         """
         num_coeffs = pcorr.shape[2]
         
@@ -177,7 +177,7 @@ class PanosetiCameraImages:
         for k in range(1, num_coeffs):
             res = res * self.gti_event_times + pcorr[:, :, k][..., np.newaxis]
             
-        return PanosetiCameraImages(
+        return CameraImages(
             images=self.images - res,
             event_times=self.event_times,
             gti_indexes=self.gti_indexes,
@@ -191,7 +191,7 @@ class PanosetiCameraImages:
         return getattr(self, key)
 
     def __repr__(self):
-        return f"<PanosetiCameraImages events={len(self.event_times)} gtis={list(self.gtis.keys())}>"
+        return f"<CameraImages events={len(self.event_times)} gtis={list(self.gtis.keys())}>"
 
 class PanosetiEventBuilder:
     """
@@ -210,12 +210,12 @@ class PanosetiEventBuilder:
         """
         self.max_pcap_tdiff = max_pcap_tdiff
         self.max_event_tdiff = max_event_tdiff
-        # active_events maps telescope_id -> { event_time -> PanosetiCameraEvent }
+        # active_events maps telescope_id -> { event_time -> CameraEvent }
         self.active_events = {}
 
     def process_packet(self, packet):
         """
-        Process a single SciencePacket and yield any completed PanosetiCameraEvents.
+        Process a single SciencePacket and yield any completed CameraEvents.
         """
         pcap_time = packet.pcap_sec + packet.pcap_usec / 1e6
         event_time = packet.event_time
@@ -256,7 +256,7 @@ class PanosetiEventBuilder:
                 yield self.active_events[telescope_id].pop(matched_event_et)
         else:
             # No matching event, start a new one
-            self.active_events[telescope_id][event_time] = PanosetiCameraEvent(telescope_id, packet)
+            self.active_events[telescope_id][event_time] = CameraEvent(telescope_id, packet)
 
     def flush(self):
         """
@@ -278,7 +278,7 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=
         gtis (GTIFilter, dict or list): Good Time Intervals for filtering events.
         
     Yields:
-        PanosetiCameraEvent: Reconstructed camera events.
+        CameraEvent: Reconstructed camera events.
     """
     builder = PanosetiEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff)
     for packet in get_panoseti_packets(filenames, gtis=gtis, verbose=verbose):
@@ -295,10 +295,10 @@ def load_camera_images(filenames, gtis=None, min_packets=4, store_camera_events=
         filenames (str or list): One or more paths to .pcap or .pcapng files, or a glob pattern.
         gtis (GTIFilter, dict or list, optional): Good Time Intervals.
         min_packets (int): Minimum number of quabo packets required to form an image.
-        store_camera_events (bool): If True, store the PanosetiCameraEvent instances.
+        store_camera_events (bool): If True, store the CameraEvent instances.
 
     Returns:
-        PanosetiCameraImages: Object containing the 32x32xNevent images and metadata.
+        CameraImages: Object containing the 32x32xNevent images and metadata.
     """
     images = []
     event_times = []
@@ -330,7 +330,7 @@ def load_camera_images(filenames, gtis=None, min_packets=4, store_camera_events=
             if store_camera_events:
                 events_list.append(event)
 
-    return PanosetiCameraImages(
+    return CameraImages(
         images=np.stack(images, axis=2) if images else np.zeros((32, 32, 0)),
         event_times=np.array(event_times),
         gti_indexes=np.array(gti_indexes),
