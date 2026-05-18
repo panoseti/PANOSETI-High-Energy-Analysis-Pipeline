@@ -41,7 +41,7 @@ Data Quality Monitoring (DQM) subpackage and visualization tools.
 ```python
 from pypanodecoder.pcapdecoder import get_panoseti_packets
 # Stream packets from a single PCAP file
-for packet in get_panoseti_packets("data/20260110/onsky_20260110_050000.pcap"):
+for packet in get_panoseti_packets("data/20260110/onsky_20260110_050000.pcapng"):
     print(f"Quabo: {packet.quabo_id}, timestamp: {packet.event_time}")
 ```
 
@@ -56,7 +56,7 @@ GTIs = [
     { "start": "2026-01-11 05:30:00", "end": "2026-01-11 07:45:00" }
 ]
 # Stream camera events from multiple PCAP files
-for camera_event in get_camera_events("data/202601*/onsky_*.pcap", gtis=GTIs):
+for camera_event in get_camera_events("data/202601*/onsky_*.pcapng", gtis=GTIs):
     print(f"Camera event at {camera_event.event_time} with {len(camera_event.packets)} packets")
 ```
 Here we demonstrate how to use the `get_camera_events` generator to read and merge Quabo packets into full camera events. The function takes a glob pattern to read multiple files  and an optional list of GTIs to filter the events. Here illustrate how to specify the while January 2026 dataset (assuming they are organized by date) and select only events that occur during two hypothetical Crab runs, each specified by a start and end time.
@@ -77,7 +77,7 @@ GTIs = [
 ]
 
 # Load images from multiple PCAP files with GTI filtering
-data = load_camera_images("data/202601*/onsky_*.pcap", gtis=GTIs)
+data = load_camera_images("data/202601*/onsky_*.pcapng", gtis=GTIs)
 
 # Plot the event rate
 fig_rate, _ = plot_event_rate(data, subplots=True, uttime=True)
