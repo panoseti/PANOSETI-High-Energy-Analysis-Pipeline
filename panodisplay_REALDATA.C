@@ -486,7 +486,7 @@ TMultiGraph* eventMap(int eventNumber){
     telescopes->SetMarkerSize(3);
 
     // Hard-wired for now, probably better to read in a .cfg file in the long term
-    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // Heli, Fern, Winter
+    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
     double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
     for(int i=0;i<Ntel;i++){
         double x=TelX[i];
@@ -496,7 +496,7 @@ TMultiGraph* eventMap(int eventNumber){
         TString label="";
         switch(i){
             case 0:
-                label="Heli";
+                label="PTI";
                 break;
             case 1:
                 label="Fern";
@@ -1244,16 +1244,20 @@ TH2D* telEvent(int telNumber, int eventNumber){
         return nullptr;
     }
 
+    double rel_tel_efficiency = 1.0;
     TString label="";
     switch(telNumber){
         case 1:
-            label="Heli";
+            label="PTI";
+            rel_tel_efficiency = 0.46; // January 2026 data
             break;
         case 2:
             label="Fern";
+            rel_tel_efficiency = 1.49; // January 2026 data
             break;
         case 3:
             label="Winter";
+            rel_tel_efficiency = 1.0; // January 2026 data
             break;
     }
 
@@ -1328,11 +1332,8 @@ TH2D* telEvent(int telNumber, int eventNumber){
             if (array_scope_id[telNumber-1]>0)
             {
                 double gainscorr = gains_2D_hist->GetBinContent(i+1,j+1);
-                double pixdiff=(double)(array_pix_data[telNumber-1][i][j]-peds_2D_hist->GetBinContent(i+1,j+1)); //update with gain correction here
+                double pixdiff=(double)(array_pix_data[telNumber-1][i][j]-peds_2D_hist->GetBinContent(i+1,j+1));
                 pixval=pixdiff/(gainscorr*gainscorr);
-                //pixval=array_pix_data[telNumber][i][j];
-                //pixval=(array_pix_data[telNumber][i][j]-peds_2D_hist->GetBinContent(i+1,j+1))/pedvars_2D_hist->GetBinContent(i+1,j+1);
-                //pixval=pixval;
                 image->SetBinContent(i+1,j+1,pixval);
             }
         }
@@ -1340,6 +1341,14 @@ TH2D* telEvent(int telNumber, int eventNumber){
     //image[jtel]->Draw("COLZ");
 
     image = clean(image, pedvars_2D_hist, gains_2D_hist);
+    
+    // Apply relative telescope efficiency scaling last (after cleaning)
+    for (int i=1; i<=image->GetNbinsX(); i++) {
+        for (int j=1; j<=image->GetNbinsY(); j++) {
+            double pixval = image->GetBinContent(i, j);
+            image->SetBinContent(i, j, pixval / rel_tel_efficiency);
+        }
+    }
     
     image->Draw("COLZ");
     
@@ -1370,7 +1379,7 @@ void paramCSV(bool reconstruct=false){
     // openfile
     std::ofstream datafile;
     std::string output = prefix;
-    datafile.open(output + ".gaincorrected.csv");
+    datafile.open(output + ".corrected.csv");
 
     if(!reconstruct){
         datafile << "Event,Telescope,Timestamp,MeanX,StdX,MeanY,StdY,Phi,Size,Npix,Length,Width,Miss,Distance,Azwidth,Alpha" << std::endl;
@@ -1380,11 +1389,8 @@ void paramCSV(bool reconstruct=false){
 
     // make images and paramaterize every event in each telescope
     int N = t->GetEntries();
-    // find event numbers
-    t->Draw("eventNumber","","goff");
-    int start = (int) t->GetV1()[0];
-    int stop = (int) t->GetV1()[N-1];
-    for(int eventNumber=start; eventNumber<=stop; eventNumber++){
+
+    for(int eventNumber=1; eventNumber<=N+1; eventNumber++){
         std::cout << "Parameterizing event "<< eventNumber << std::endl;
 
         double* meanx = new double[Ntel];
@@ -1403,7 +1409,7 @@ void paramCSV(bool reconstruct=false){
         int* npix = new int[Ntel];
 
         // Hard-wired for now, probably better to read in a .cfg file in the long term
-        double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // Heli, Fern, Winter
+        double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
         double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
         double* TelZ = new double[Ntel]{5.04, 0.00, 14.51};
 
@@ -1512,7 +1518,7 @@ void arraydisplay(int eventNumber){
     int* npix = new int[Ntel];
 
     // Hard-wired for now, probably better to read in a .cfg file in the long term
-    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // Heli, Fern, Winter
+    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
     double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
     double* TelZ = new double[Ntel]{5.04, 0.00, 14.51};
 
@@ -1611,7 +1617,7 @@ void arraydisplay(int eventNumber){
         TString label="";
         switch(i){
             case 0:
-                label="Heli";
+                label="PTI";
                 break;
             case 1:
                 label="Fern";
@@ -1710,7 +1716,7 @@ void panodisplay(int eventNumber){
     int* npix = new int[Ntel];
 
     // Hard-wired for now, probably better to read in a .cfg file in the long term
-    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // Heli, Fern, Winter
+    double* TelX = new double[Ntel]{-22.20, 97.56, -75.36}; // PTI, Fern, Winter
     double* TelY = new double[Ntel]{-76.58, 11.55, 67.04};
     double* TelZ = new double[Ntel]{5.04, 0.00, 14.51};
 
