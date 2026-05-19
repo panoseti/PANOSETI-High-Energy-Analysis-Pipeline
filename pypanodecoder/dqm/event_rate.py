@@ -252,7 +252,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
         ylabel = r"dN/dlog($\Delta t$) [1]" if normalize else "Counts"
 
     if combine_gtis:
-        data_to_plot = {'Combined GTIs': all_dts}
+        data_to_plot = {'Combined': all_dts}
     else:
         data_to_plot = gti_dts
 
@@ -297,7 +297,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
         all_y_values.extend(y_plot[counts > 0])
 
         # Construct base label
-        label = f"GTI {gti_idx}" if gti_idx != 'Combined' else 'Combined'
+        label = f"GTI {gti_idx}" if gti_idx != 'Combined' else 'Combined GTIs'
         if gti_idx != 'Combined' and camera_images.gtis:
             try:
                 if gti_idx in camera_images.gtis:
