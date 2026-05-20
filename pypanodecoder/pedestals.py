@@ -25,6 +25,129 @@ class ChargeHistogram:
         """Returns the shape of the histogram grid (e.g., (32, 32))."""
         return self.qhist.shape[:-1]
 
+    def extract(self, *index):
+        """
+        Extracts a single element (or sub-grid) from the histogram grid.
+        
+        Args:
+            index: The index or slice to extract.
+            
+        Returns:
+            ChargeHistogram: A new histogram containing only the selected elements.
+        """
+        # qhist is (grid_shape..., num_bins)
+        # We slice the grid dimensions; the last dimension (bins) is preserved.
+        new_qhist = self.qhist[index]
+        return ChargeHistogram(self.qcenter, new_qhist, self.bin_width)
+
+    def __add__(self, other):
+        """
+        Sums two ChargeHistograms together.
+        The histograms must have the same grid shape, bin centers, and bin width.
+        """
+        if not isinstance(other, ChargeHistogram):
+            return NotImplemented
+        
+        if self.shape != other.shape:
+            raise ValueError(f"Incompatible shapes: {self.shape} vs {other.shape}")
+        
+        if self.bin_width != other.bin_width:
+            raise ValueError(f"Incompatible bin widths: {self.bin_width} vs {other.bin_width}")
+
+        if not np.array_equal(self.qcenter, other.qcenter):
+            # Fallback to check if they are "close enough" if needed, 
+            # but usually they should be identical.
+            raise ValueError("Bin centers do not match")
+            
+        return ChargeHistogram(self.qcenter, self.qhist + other.qhist, self.bin_width)
+
+    def __mul__(self, other):
+        """
+        Performs a numerical convolution of two ChargeHistograms across the grid.
+        This is mapped to the multiplication operator (*).
+        
+        The result represents the distribution of the sum of two independent 
+        random variables, each distributed according to one of the histograms.
+        
+        Note: This assumes the binning is uniform and identical. 
+        The resulting histogram will be centered around the sum of the means,
+        but since we force it back into the same qcenter range, 
+        values falling outside the range will be lost (truncated).
+        """
+        if not isinstance(other, ChargeHistogram):
+            return NotImplemented
+        
+        if self.shape != other.shape:
+            raise ValueError(f"Incompatible shapes: {self.shape} vs {other.shape}")
+
+        if self.bin_width != other.bin_width:
+            raise ValueError(f"Incompatible bin widths: {self.bin_width} vs {other.bin_width}")
+
+        if not np.array_equal(self.qcenter, other.qcenter):
+            raise ValueError("Bin centers do not match")
+
+        # Numerical convolution along the last axis (the histogram bins)
+        from scipy.signal import fftconvolve
+        
+        # qhist is (grid..., bins)
+        new_qhist = fftconvolve(self.qhist, other.qhist, mode='full', axes=-1)
+        
+        # Clip small negative values from FFT floating-point artifacts
+        new_qhist = np.maximum(new_qhist, 0)
+        
+        n_bins = len(self.qcenter)
+        q0 = self.qcenter[0]
+        
+        # Alignment logic:
+        # The first bin of 'full' convolution corresponds to value 2*q0.
+        # We want to extract bins starting at value q0.
+        # The index of value q0 in the 'full' array is (q0 - 2*q0) / bin_width = -q0 / bin_width.
+        # This ensures that a delta function at value 0 (if present) acts as the identity.
+        offset = int(round(-q0 / self.bin_width))
+        
+        if offset < 0:
+            crop_start = 0
+            fill_start = -offset
+        else:
+            crop_start = offset
+            fill_start = 0
+            
+        final_qhist = np.zeros_like(self.qhist, dtype=float)
+        
+        crop_end = min(crop_start + n_bins - fill_start, new_qhist.shape[-1])
+        fill_end = fill_start + (crop_end - crop_start)
+        
+        if fill_start < n_bins:
+            final_qhist[..., fill_start:fill_end] = new_qhist[..., crop_start:crop_end]
+            
+        # Normalization to keep the y-scale (counts) roughly consistent.
+        # Dividing by the sum of 'other' ensures that if 'other' is a delta-like
+        # kernel, the total counts of 'self' are preserved.
+        total_other = np.sum(other.qhist, axis=-1, keepdims=True)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            final_qhist = np.where(total_other > 0, final_qhist / total_other, final_qhist)
+
+        return ChargeHistogram(self.qcenter, final_qhist, self.bin_width)
+
+    def normalize(self, density=True):
+        """
+        Normalizes the histogram.
+        
+        Args:
+            density (bool): If True, the integral of the histogram will be 1 
+                            (divided by sum and bin width).
+                            If False, the sum of the bins will be 1.
+                            
+        Returns:
+            ChargeHistogram: A new normalized histogram.
+        """
+        total = np.sum(self.qhist, axis=-1, keepdims=True)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            new_qhist = np.where(total > 0, self.qhist / total, self.qhist).astype(float)
+            if density:
+                new_qhist /= self.bin_width
+        return ChargeHistogram(self.qcenter, new_qhist, self.bin_width)
+
     def cdf(self):
         """
         Returns the normalized cumulative distribution function (CDF) for all elements.
@@ -166,6 +289,22 @@ class ChargeSpectra:
     def __repr__(self):
         return f"<ChargeSpectra events={self.num_events}>"
 
+    def normalize(self, density=True):
+        """
+        Normalizes all histograms in the container.
+        
+        Args:
+            density (bool): If True, normalizes to a density (integral is 1).
+                            If False, normalizes so the sum is 1.
+        """
+        return ChargeSpectra(
+            self.num_events,
+            self.pix.normalize(density=density),
+            self.sipm.normalize(density=density),
+            self.quabo.normalize(density=density),
+            self.camera.normalize(density=density)
+        )
+
 def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
     """Internal helper to build spectra from a 3D numpy array of images (32, 32, N)."""
     
@@ -232,7 +371,8 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
     )
 
 def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True, 
-                             qmin_pix=-512, qmax_pix=4096, downsample=False):
+                             qmin_pix=-512, qmax_pix=4096, downsample=False,
+                             density=False):
     """
     Calculate the charge spectrum for each pixel from a CameraImages object.
     
@@ -244,6 +384,7 @@ def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True,
         qmin_pix (int): Minimum charge for pixel histograms.
         qmax_pix (int): Maximum charge for pixel histograms.
         downsample (bool): If True, use larger bins for SiPM, Quabo, and camera histograms.
+        density (bool): If True, normalize histograms to a density (integral is 1).
 
     Returns:
         ChargeSpectra or dict: The calculated spectra.
@@ -254,15 +395,21 @@ def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True,
         mask = np.isin(camera_images.gti_indexes, gti_indexes)
 
     if combine_gtis:
-        return _build_spectra(camera_images.images[:, :, mask], 
-                              qmin_pix=qmin_pix, qmax_pix=qmax_pix, downsample=downsample)
+        res = _build_spectra(camera_images.images[:, :, mask], 
+                             qmin_pix=qmin_pix, qmax_pix=qmax_pix, downsample=downsample)
+        if density:
+            res = res.normalize(density=True)
+        return res
     else:
         results = {}
         unique_gtis = np.unique(camera_images.gti_indexes[mask])
         for gti_idx in unique_gtis:
             gti_mask = (camera_images.gti_indexes == gti_idx)
-            results[gti_idx] = _build_spectra(camera_images.images[:, :, gti_mask],
-                                              qmin_pix=qmin_pix, qmax_pix=qmax_pix, downsample=downsample)
+            res = _build_spectra(camera_images.images[:, :, gti_mask],
+                                 qmin_pix=qmin_pix, qmax_pix=qmax_pix, downsample=downsample)
+            if density:
+                res = res.normalize(density=True)
+            results[gti_idx] = res
         return results
 
 def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.15, 0.85)):
