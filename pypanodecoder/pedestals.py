@@ -20,6 +20,45 @@ class ChargeHistogram:
         self.qhist = qhist
         self.bin_width = bin_width
 
+    @classmethod
+    def gaussian(cls, sigma, qcenter, mean=None):
+        """
+        Generates a Gaussian ChargeHistogram.
+        
+        Args:
+            sigma (array-like): Standard deviation(s) of the Gaussian(s).
+            qcenter (array-like): Bin centers for the histogram.
+            mean (array-like, optional): Mean(s) of the Gaussian(s). 
+                                       Defaults to None (all zeros).
+            
+        Returns:
+            ChargeHistogram: A new histogram containing Gaussian densities.
+        """
+        from scipy.stats import norm
+        sigma = np.asanyarray(sigma)
+        if mean is None:
+            mean = np.zeros_like(sigma)
+        else:
+            mean = np.asanyarray(mean)
+
+        if len(qcenter) < 2:
+            raise ValueError("qcenter must have at least two values to determine bin_width")
+        
+        bin_width = qcenter[1] - qcenter[0]
+        edges = np.append(qcenter - 0.5 * bin_width, qcenter[-1] + 0.5 * bin_width)
+        
+        # Broadcast mean and sigma to (grid..., 1) and edges to (N+1,)
+        # scipy.stats.norm.cdf handles the broadcasting
+        cdf_edges = norm.cdf(edges, loc=mean[..., np.newaxis], scale=sigma[..., np.newaxis])
+        
+        # Probabilities in each bin
+        probabilities = np.diff(cdf_edges, axis=-1)
+        
+        # Normalize as density: divide by bin_width
+        qhist = probabilities / bin_width
+        
+        return cls(qcenter, qhist, bin_width)
+
     @property
     def shape(self):
         """Returns the shape of the histogram grid (e.g., (32, 32))."""
