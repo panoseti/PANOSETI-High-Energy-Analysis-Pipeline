@@ -196,7 +196,7 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
     
     return fig, axes
 
-def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=True, fit=False, num_bins=100, figsize=(10, 6), **kwargs):
+def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), **kwargs):
     """
     Plots the distribution of times between consecutive events (delta_t).
     
@@ -210,7 +210,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
         combine_gtis (bool): If True, combine delta_t from all GTIs into one distribution.
         semilog (bool): If True, bin by dt linearly and plot semilog-y. 
                         If False (default), bin by log(dt) and plot log-log.
-        normalize (bool): If True, normalize the distribution (integral = 1).
+        density (bool): If True, normalize the distribution (integral = 1).
         fit (bool): If True, fit an exponential model to each distribution.
         num_bins (int): Number of bins for the histogram.
         figsize (tuple): Size of the figure (width, height).
@@ -245,11 +245,11 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
     min_dt, max_dt = np.min(all_dts), np.max(all_dts)
     if semilog:
         bins = np.linspace(min_dt, max_dt, num_bins + 1)
-        ylabel = r"dN/dt [s$^{-1}$]" if normalize else "Counts"
+        ylabel = r"dN/dt [s$^{-1}$]" if density else "Counts"
     else:
         log_min, log_max = np.log(min_dt), np.log(max_dt)
         bins = np.linspace(log_min, log_max, num_bins + 1)
-        ylabel = r"dN/dlog($\Delta t$) [1]" if normalize else "Counts"
+        ylabel = r"dN/dlog($\Delta t$) [1]" if density else "Counts"
 
     if combine_gtis:
         data_to_plot = {'Combined': all_dts}
@@ -281,9 +281,9 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, normalize=Tru
         y_plot = counts.astype(float)
         # Calculate normalization factor: 1.0 / (total * bin_width)
         # This is used to find the value of "0.5 events" in the density space
-        norm_factor = 1.0 / (np.sum(counts) * bw) if normalize else 1.0
+        norm_factor = 1.0 / (np.sum(counts) * bw) if density else 1.0
         
-        if normalize:
+        if density:
             y_plot = y_plot * norm_factor
 
         # Set min_normalized_y to the value of 0.5 events for this GTI
