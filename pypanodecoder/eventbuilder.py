@@ -99,13 +99,24 @@ class CameraEvent:
         quabos = sorted(list(self.packets.keys()))
         return f"<CameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.start_pcap_time:.6f}>"
 
+class FilterInfo(dict):
+    """
+    Dict-like object that records applied filters and is callable to apply new filters.
+    """
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._parent = parent
+
+    def __call__(self, min_quabos=None, min_delta_t=None):
+        return self._parent._apply_filter(min_quabos=min_quabos, min_delta_t=min_delta_t)
+
 class CameraImages:
     """
     Container for PANOSETI camera images and metadata.
     Allows access via attributes (e.g., .images) or keys (e.g., ['images']).
     """
     def __init__(self, images, event_times, gti_indexes, 
-                 gti_event_times, quabo_masks, gtis=None, events=None, dtype=None):
+                 gti_event_times, quabo_masks, gtis=None, events=None, dtype=None, filter=None):
         self.images = np.array(images, dtype=dtype) if dtype else images
         self.event_times = event_times
         self.gti_indexes = gti_indexes
@@ -113,6 +124,7 @@ class CameraImages:
         self.quabo_masks = quabo_masks
         self.gtis = gtis if gtis is not None else {}
         self.events = events if events is not None else []
+        self.filter = FilterInfo(self, filter or {})
 
     @classmethod
     def concatenate(cls, objects):
@@ -124,6 +136,16 @@ class CameraImages:
         for o in objects:
             merged_gtis.update(o.gtis)
             
+        merged_filter = {}
+        for o in objects:
+            f = getattr(o, 'filter', {})
+            for k, v in f.items():
+                if v is not None:
+                    if k in merged_filter:
+                        merged_filter[k] = min(merged_filter[k], v)
+                    else:
+                        merged_filter[k] = v
+
         return cls(
             images=np.concatenate([o.images for o in objects], axis=2),
             event_times=np.concatenate([o.event_times for o in objects]),
@@ -131,7 +153,8 @@ class CameraImages:
             gti_event_times=np.concatenate([o.gti_event_times for o in objects]),
             quabo_masks=np.concatenate([o.quabo_masks for o in objects]),
             gtis=merged_gtis,
-            events=[ev for o in objects for ev in o.events]
+            events=[ev for o in objects for ev in o.events],
+            filter=merged_filter
         )
 
     @property
@@ -154,7 +177,59 @@ class CameraImages:
             gti_event_times=self.gti_event_times[mask],
             quabo_masks=self.quabo_masks[mask],
             gtis={gti_index: self.gtis[gti_index]} if gti_index in self.gtis else {},
-            events=filtered_events
+            events=filtered_events,
+            filter=dict(self.filter)
+        )
+
+    def _apply_filter(self, min_quabos=None, min_delta_t=None):
+        """
+        Filter camera images based on specific cuts.
+        
+        Args:
+            min_quabos (int, optional): Minimum number of Quabos required in the image.
+            min_delta_t (float, optional): Minimum time (seconds) since the last event.
+                                           Used to filter out high-frequency spikes.
+                                           
+        Returns:
+            CameraImages: A new CameraImages object with filtered images and metadata.
+        """
+        keep = np.ones(len(self.event_times), dtype=bool)
+        
+        if min_quabos is not None:
+            masks = np.asarray(self.quabo_masks, dtype=int)
+            num_quabos = (
+                (masks & 1) + 
+                ((masks >> 1) & 1) + 
+                ((masks >> 2) & 1) + 
+                ((masks >> 3) & 1)
+            )
+            keep &= (num_quabos >= min_quabos)
+            
+        if min_delta_t is not None and len(self.event_times) > 0:
+            delta_ts = np.concatenate(([np.inf], np.diff(self.event_times)))
+            keep &= (delta_ts >= min_delta_t)
+            
+        filtered_events = []
+        if self.events:
+            filtered_events = [self.events[i] for i, m in enumerate(keep) if m]
+            
+        new_filter_dict = dict(self.filter)
+        if min_quabos is not None:
+            existing_mq = new_filter_dict.get('min_quabos')
+            new_filter_dict['min_quabos'] = max(existing_mq, min_quabos) if existing_mq is not None else min_quabos
+        if min_delta_t is not None:
+            existing_mdt = new_filter_dict.get('min_delta_t')
+            new_filter_dict['min_delta_t'] = max(existing_mdt, min_delta_t) if existing_mdt is not None else min_delta_t
+
+        return CameraImages(
+            images=self.images[:, :, keep],
+            event_times=self.event_times[keep],
+            gti_indexes=self.gti_indexes[keep],
+            gti_event_times=self.gti_event_times[keep],
+            quabo_masks=self.quabo_masks[keep],
+            gtis=self.gtis,
+            events=filtered_events,
+            filter=new_filter_dict
         )
 
     def apply_pedestal_corrections(self, pcorr):
@@ -184,7 +259,8 @@ class CameraImages:
             gti_event_times=self.gti_event_times,
             quabo_masks=self.quabo_masks,
             gtis=self.gtis,
-            events=self.events
+            events=self.events,
+            filter=dict(self.filter)
         )
 
     def __getitem__(self, key):
@@ -287,14 +363,14 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=
     for event in builder.flush():
         yield event
 
-def load_camera_images(filenames, gtis=None, min_packets=4, store_camera_events=False, **kwargs):
+def load_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, **kwargs):
     """
     Load all camera images from one or more PANOSETI pcap files.
     
     Args:
         filenames (str or list): One or more paths to .pcap or .pcapng files, or a glob pattern.
         gtis (GTIFilter, dict or list, optional): Good Time Intervals.
-        min_packets (int): Minimum number of quabo packets required to form an image.
+        min_quabos (int, optional): Minimum number of quabo packets required to form an image.
         store_camera_events (bool): If True, store the CameraEvent instances.
 
     Returns:
@@ -315,7 +391,7 @@ def load_camera_images(filenames, gtis=None, min_packets=4, store_camera_events=
             gtis_dict[idx] = {'start': start, 'stop': stop}
 
     for event in get_camera_events(filenames, gtis=gti_filter, **kwargs):
-        if(len(event.packets) >= min_packets):
+        if min_quabos is None or len(event.packets) >= min_quabos:
             images.append(event.get_image())
             event_times.append(event.event_time)
             gti_indexes.append(event.gti_index)
@@ -330,12 +406,36 @@ def load_camera_images(filenames, gtis=None, min_packets=4, store_camera_events=
             if store_camera_events:
                 events_list.append(event)
 
+    if images:
+        sort_idx = np.argsort(event_times)
+        images = np.stack(images, axis=2)[:, :, sort_idx]
+        event_times = np.array(event_times)[sort_idx]
+        gti_indexes = np.array(gti_indexes)[sort_idx]
+        gti_event_times = np.array(gti_event_times)[sort_idx]
+        quabo_masks = np.array(quabo_masks)[sort_idx]
+        if store_camera_events:
+            events_list = [events_list[i] for i in sort_idx]
+        else:
+            events_list = None
+    else:
+        images = np.zeros((32, 32, 0))
+        event_times = np.array([])
+        gti_indexes = np.array([])
+        gti_event_times = np.array([])
+        quabo_masks = np.array([])
+        events_list = None
+
+    filter_dict = {}
+    if min_quabos is not None:
+        filter_dict['min_quabos'] = min_quabos
+
     return CameraImages(
-        images=np.stack(images, axis=2) if images else np.zeros((32, 32, 0)),
-        event_times=np.array(event_times),
-        gti_indexes=np.array(gti_indexes),
-        gti_event_times=np.array(gti_event_times),
-        quabo_masks=np.array(quabo_masks),
+        images=images,
+        event_times=event_times,
+        gti_indexes=gti_indexes,
+        gti_event_times=gti_event_times,
+        quabo_masks=quabo_masks,
         gtis=gtis_dict,
-        events=events_list if store_camera_events else None
+        events=events_list,
+        filter=filter_dict
     )
