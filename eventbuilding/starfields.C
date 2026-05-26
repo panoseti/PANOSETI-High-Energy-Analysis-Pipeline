@@ -23,9 +23,9 @@ void starfields(const char *infile1, const char *infile2)
   TH2D myafter=*after;
   myafter.SetTitle("After");
 
-  TCanvas *cjh=new TCanvas("cjh","cjh",800,800);
+  TCanvas *cjh=new TCanvas("cjh","cjh",1200,600);
   cjh->Draw();
-  //cjh->Divide(2,2);
+  cjh->Divide(2,1);
   //cjh->cd(1);
   //before->Draw("COLZ");
   //cjh->cd(2);
@@ -53,18 +53,18 @@ void starfields(const char *infile1, const char *infile2)
   //hdiff->SetMinimum(-5);
   //hdiff->SetMaximum(5);
   hratio->SetStats(0);
-  hratio->SetMinimum(0.7);
-  hratio->SetMaximum(1.7);
+  hratio->SetMinimum(0.9);
+  hratio->SetMaximum(1.8);
   cjh->cd(1);
   hdiff->Draw("COLZ");
-  /*cjh->cd(2);
+  cjh->cd(2);
   hratio->Draw("COLZ");
   //  cjh->cd();
   //  TLatex *t =new TLatex(10,0,infile1);
   //  t->Draw();
   cjh->SetTitle(infile1);
   cjh->Print("./test.png");
-
+  /*
   TH2D *hdiff_flipX=flipX(hdiff);
   TH2D *hdiff_rotated180=flipY(hdiff_flipX);
 
@@ -139,7 +139,7 @@ void fitstar(double xstar=-100,double ystar=-100)
   hdiff->GetBinXYZ(starbin,starxbin,starybin,starzbin);
   double maxbincontent=hdiff->GetBinContent(starbin);
   double range=2.5;
-  if (maxbincontent<12) range=1.5;
+  if (maxbincontent<5) range=1.5;
   cout << maxbincontent << " " << range << endl;
   TF2 *f2 = new TF2("f2", "[0]*TMath::Gaus(x,[1],[2])*TMath::Gaus(y,[3],[2])", starxbin-0.5-range, starxbin-0.5+range, starybin-0.5-range, starybin-0.5+range);
   cout << "here: " <<  starxbin-0.5 << " " << starybin-0.5 << endl ;
@@ -149,6 +149,9 @@ void fitstar(double xstar=-100,double ystar=-100)
 // 4. Fit the Histogram
   hdiff->Fit(f2,"R");
   cout << f2->GetParameter(1) << " " <<  f2->GetParameter(3) << endl;
+
+  cout << maxbincontent << " " << range <<  " " << f2->GetParameter(2) << " " << f2->GetParError(2) << endl;
+  
   
 
 }

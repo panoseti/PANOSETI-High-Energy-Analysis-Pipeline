@@ -12,6 +12,7 @@ TH2D * cam_2D_hist;
 
 double ped[32][32];
 double pedvar[32][32];
+double gain[32][32];
 TTree *camdata;
 
 TTree * loadcamdata(const char *infile)

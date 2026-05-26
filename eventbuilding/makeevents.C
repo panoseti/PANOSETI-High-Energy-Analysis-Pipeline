@@ -17,7 +17,7 @@ TH2D *  averageaquabo(const char *infile, int quabo_id, bool rotate)
 // mostly useful for imaging mode
 {
   char full_infile[200];
-  snprintf(full_infile,200,"d20241101/ima/%s",infile);
+  snprintf(full_infile,200,"%s",infile);
   TTree *pdata=loadpdata(full_infile);
   pdata->GetEntry(0);
   TH2D *hq = makequabohist(pdata,rotate,0,8500);
@@ -29,7 +29,8 @@ TH2D *  averageaquabo(const char *infile, int quabo_id, bool rotate)
   hq_ave->SetTitle(hq_ave_name);
   
   int npackets=0;
-  for (int i=0;i<pdata->GetEntries();i++)
+  for (int i=10000;i<11000;i++)
+    //for (int i=0;i<pdata->GetEntries();i++)
     {
       pdata->GetEntry(i);
       if (boardloc!=quabo_id) continue;
@@ -57,16 +58,16 @@ TH2D *  averageaquabo(const char *infile, int quabo_id, bool rotate)
 void makeavecameraimage(const char *infile, int scope)
 {
   
-  char bg_filename[200];
-  snprintf(bg_filename,200,"d20241101/T%d_mid.root",scope);
-  cout << "opening " << bg_filename << endl;
-  TFile *_file0 = TFile::Open(bg_filename);
-  TCanvas *mycanv= (TCanvas*)_file0->Get("mycanv2");
-  TH2D *hbg=(TH2D*)mycanv->GetPrimitive("cam_2D_hist");
-  hbg->SetName("hbg");
-  hbg->SetTitle("hbg");
-  mycanv->Draw();
-  hbg->Draw("COLZ");
+  //char bg_filename[200];
+  //snprintf(bg_filename,200,"d20241101/T%d_mid.root",scope);
+  //cout << "opening " << bg_filename << endl;
+  //TFile *_file0 = TFile::Open(bg_filename);
+  //TCanvas *mycanv= (TCanvas*)_file0->Get("mycanv2");
+  //TH2D *hbg=(TH2D*)mycanv->GetPrimitive("cam_2D_hist");
+  //hbg->SetName("hbg");
+  //hbg->SetTitle("hbg");
+  //mycanv->Draw();
+  //hbg->Draw("COLZ");
   
   
   TH2D *hq_ave;
@@ -80,8 +81,8 @@ void makeavecameraimage(const char *infile, int scope)
     {
       for (int k=1;k<cam_2D_hist->GetNbinsY()+1;k++)
 	{
-	  //int bin_content=cam_2D_hist->GetBinContent(j,k);
-	  int bin_content=cam_2D_hist->GetBinContent(j,k)-hbg->GetBinContent(j,k);
+	  int bin_content=cam_2D_hist->GetBinContent(j,k);
+	  //int bin_content=cam_2D_hist->GetBinContent(j,k)-hbg->GetBinContent(j,k);
 	  //do this to fill with sqrt
 	  //if (bin_content>0) bin_content=sqrt(bin_content);
 	  //if (bin_content<0) bin_content=-1*sqrt(-1*bin_content);	  
@@ -93,9 +94,9 @@ void makeavecameraimage(const char *infile, int scope)
   mycanv2->cd();
   cam_2D_hist->SetStats(0);
   cam_2D_hist->Draw("COLZ");
-  char full_outfile[200];
-  snprintf(full_outfile,200,"d20241031/ima/images_nobg/T%d/%s.png",scope,infile);
-  mycanv2->SaveAs(full_outfile);
+  //char full_outfile[200];
+  //snprintf(full_outfile,200,"d20241031/ima/images_nobg/T%d/%s.png",scope,infile);
+  //mycanv2->SaveAs(full_outfile);
 }
 
 // There are three scopes in the triangle data. IDs are: 760 (dorm), 12 (kron) and 1016 (crocker)
@@ -447,8 +448,8 @@ void makeevents_timematch(const char *infile, int this_scope_id)
  
       int upper_bound_packets=packet+max_search_range_packets;
 
-      //if (acq_mode==3) // might need to make this time difference acquisition-mode-dependent
       double max_tdiff=0.004; // this is the maximum time difference between QUABO packets within the same camera for an event
+      if (acq_mode==3) max_tdiff=0.01; // might need to make this time difference acquisition-mode-dependent
       initializeCamera();
       bool foundfirst=false;
       if (getScopeID(boardloc)==this_scope_id)
