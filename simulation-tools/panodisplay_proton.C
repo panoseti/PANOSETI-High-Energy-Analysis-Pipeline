@@ -1449,7 +1449,7 @@ void paramCSV(bool reconstruct=false){
     // openfile
     std::ofstream datafile;
     std::string output = f->GetName();
-    output = output.substr(0,output.size()-5)+".threshold_clean.csv";
+    output = output.substr(0,output.size()-5)+".csv";
     datafile.open(output);
 
     if(!reconstruct){
