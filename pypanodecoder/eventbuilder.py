@@ -99,17 +99,6 @@ class CameraEvent:
         quabos = sorted(list(self.packets.keys()))
         return f"<CameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.start_pcap_time:.6f}>"
 
-class FilterInfo(dict):
-    """
-    Dict-like object that records applied filters and is callable to apply new filters.
-    """
-    def __init__(self, parent, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._parent = parent
-
-    def __call__(self, min_quabos=None, min_delta_t=None):
-        return self._parent._apply_filter(min_quabos=min_quabos, min_delta_t=min_delta_t)
-
 class CameraImages:
     """
     Container for PANOSETI camera images and metadata.
@@ -124,7 +113,7 @@ class CameraImages:
         self.quabo_masks = quabo_masks
         self.gtis = gtis if gtis is not None else {}
         self.events = events if events is not None else []
-        self.filter = FilterInfo(self, filter or {})
+        self.filter = dict(filter) if filter is not None else {}
 
     @classmethod
     def concatenate(cls, objects):
@@ -181,7 +170,7 @@ class CameraImages:
             filter=dict(self.filter)
         )
 
-    def _apply_filter(self, min_quabos=None, min_delta_t=None):
+    def filter_events(self, min_quabos=None, min_delta_t=None):
         """
         Filter camera images based on specific cuts.
         
