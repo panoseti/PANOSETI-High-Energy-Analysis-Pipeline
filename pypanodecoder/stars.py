@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+
+# stars.py: Functions to query the Yale Bright Star Catalog for bright stars near a given position.
+
+# Author: Stephen Fegan <sfegan@llr.in2p3.fr> (2026-05-28)
+# Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytechnique de Paris
+
+import math
+import urllib.request
+import gzip
+import io
+
+YBSC5_URL = "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz"
+
+def _rad(x):
+    return math.radians(x)
+
+def _angular_sep(ra1, dec1, ra2, dec2):
+    ra1, dec1, ra2, dec2 = map(_rad, [ra1, dec1, ra2, dec2])
+    cosv = (
+        math.sin(dec1) * math.sin(dec2)
+        + math.cos(dec1) * math.cos(dec2) * math.cos(ra1 - ra2)
+    )
+    cosv = max(-1.0, min(1.0, cosv))
+    return math.degrees(math.acos(cosv))
+
+_ybsc_cache = None
+
+def _load_ybsc():
+    global _ybsc_cache
+    if _ybsc_cache is not None:
+        return _ybsc_cache
+
+    req = urllib.request.Request(
+        YBSC5_URL,
+        headers={"User-Agent": "Mozilla/5.0"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        raw = r.read()
+    with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
+        text = gz.read().decode("latin-1", errors="ignore")
+
+    ybsc = []
+    for line in text.splitlines():
+        # Lines shorter than 107 chars can't have all required fields
+        if len(line) < 107:
+            continue
+        try:
+            hr = line[0:4].strip()
+
+            # --- J2000 RA: bytes 75-76 (H), 77-78 (M), 79-82 (S, F4.1) ---
+            rah_s  = line[75:77].strip()
+            ram_s  = line[77:79].strip()
+            ras_s  = line[79:83].strip()
+
+            # --- J2000 Dec: byte 83 (sign), 84-85 (D), 86-87 (M), 88-89 (S) ---
+            de_sign = line[83]
+            ded_s   = line[84:86].strip()
+            dem_s   = line[86:88].strip()
+            des_s   = line[88:90].strip()
+
+            # --- Vmag: bytes 102-106 (F5.2) ---
+            vmag_s = line[102:107].strip()
+
+            if not rah_s or not ded_s or not vmag_s:
+                continue
+
+            rah  = float(rah_s)
+            ram  = float(ram_s) if ram_s else 0.0
+            ras  = float(ras_s) if ras_s else 0.0
+            ra   = 15.0 * (rah + ram / 60.0 + ras / 3600.0)
+
+            ded  = float(ded_s)
+            dem  = float(dem_s) if dem_s else 0.0
+            des  = float(des_s) if des_s else 0.0
+            dec  = ded + dem / 60.0 + des / 3600.0
+            if de_sign == '-':
+                dec = -dec
+
+            vmag = float(vmag_s)
+
+            ybsc.append({
+                "hr":     hr,
+                "ra_deg": ra,
+                "dec_deg": dec,
+                "vmag":   vmag,
+            })
+
+        except (ValueError, IndexError):
+            continue
+
+    _ybsc_cache = ybsc
+    return ybsc
+
+def get_bright_stars(ra_deg, dec_deg, radius_deg=8.0, max_magnitude=8.0):
+    ybsc = _load_ybsc()
+    results = []
+    for star in ybsc:
+        sep = _angular_sep(ra_deg, dec_deg, star["ra_deg"], star["dec_deg"])
+        if sep <= radius_deg and star["vmag"] <= max_magnitude:
+            results.append({
+                "hr":             star["hr"],
+                "ra_deg":         star["ra_deg"],
+                "dec_deg":        star["dec_deg"],
+                "vmag":           star["vmag"],
+                "separation_deg": sep,
+            })
+    results.sort(key=lambda x: x["vmag"])
+    return results
