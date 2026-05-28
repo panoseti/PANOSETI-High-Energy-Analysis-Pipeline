@@ -489,3 +489,33 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
         
     return camera_images.map_gtis(_correct_gti_images)
 
+def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwargs):
+    """
+    Calculates a constant pedestal correction value for each pixel and subtracts it.
+    The calculation is performed independently for each GTI.
+    
+    Args:
+        images (CameraImages): The image container.
+        pedestal_calculator (callable, optional): A function that takes a CameraImages 
+                                                object (for a single GTI) and **kwargs 
+                                                and returns a (32, 32) array of pedestal values.
+                                                If None, uses a default that calculates the 
+                                                specified quantile.
+        **kwargs: Arguments passed to pedestal_calculator. If the default calculator is 
+                  used, kwargs should allow the quantile to be set (default is 0.5).
+                  
+    Returns:
+        CameraImages: A new container with pedestal-subtracted images.
+    """
+    if pedestal_calculator is None:
+        def default_pedestal_calculator(gti_images, quantile=0.5, **unused_kwargs):
+            charge_spectra = calculate_charge_spectra(gti_images, combine_gtis=True)
+            return charge_spectra.pix.quantiles(quantile)
+        pedestal_calculator = default_pedestal_calculator
+
+    def _correct_gti_images(gti_images):
+        pedestal_val = pedestal_calculator(gti_images, **kwargs)
+        pcorr = pedestal_val[:, :, np.newaxis]
+        return gti_images.apply_pedestal_corrections(pcorr)
+        
+    return images.map_gtis(_correct_gti_images)
