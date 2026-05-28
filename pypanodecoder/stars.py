@@ -42,11 +42,12 @@ def _load_ybsc():
 
     ybsc = []
     for line in text.splitlines():
-        # Lines shorter than 107 chars can't have all required fields
-        if len(line) < 107:
+        # Lines shorter than 114 chars can't have all requested fields
+        if len(line) < 114:
             continue
         try:
-            hr = line[0:4].strip()
+            hr   = line[0:4].strip()
+            name = line[4:14].strip()
 
             # --- J2000 RA: bytes 75-76 (H), 77-78 (M), 79-82 (S, F4.1) ---
             rah_s  = line[75:77].strip()
@@ -61,6 +62,9 @@ def _load_ybsc():
 
             # --- Vmag: bytes 102-106 (F5.2) ---
             vmag_s = line[102:107].strip()
+
+            # --- B-V: bytes 110-114 (F5.2) ---
+            bv_s = line[109:114].strip()
 
             if not rah_s or not ded_s or not vmag_s:
                 continue
@@ -78,12 +82,15 @@ def _load_ybsc():
                 dec = -dec
 
             vmag = float(vmag_s)
+            bv   = float(bv_s) if bv_s else None
 
             ybsc.append({
                 "hr":     hr,
+                "name":   name,
                 "ra_deg": ra,
                 "dec_deg": dec,
                 "vmag":   vmag,
+                "bv":     bv,
             })
 
         except (ValueError, IndexError):
@@ -100,9 +107,11 @@ def get_bright_stars(ra_deg, dec_deg, radius_deg=8.0, max_magnitude=8.0):
         if sep <= radius_deg and star["vmag"] <= max_magnitude:
             results.append({
                 "hr":             star["hr"],
+                "name":           star["name"],
                 "ra_deg":         star["ra_deg"],
                 "dec_deg":        star["dec_deg"],
                 "vmag":           star["vmag"],
+                "bv":             star["bv"],
                 "separation_deg": sep,
             })
     results.sort(key=lambda x: x["vmag"])
