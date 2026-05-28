@@ -310,6 +310,84 @@ class ChargeHistogram:
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.sum(self.qhist * (centers_clipped - wm[..., np.newaxis])**2, axis=-1) / total
 
+    def huber_location(self, loss='huber', scale=None):
+        """
+        Estimates the location (center) of the distribution using a robust loss function.
+        
+        Args:
+            loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'arctan').
+                        Defaults to 'huber'.
+            scale (array-like, optional): The scale parameter for the loss function.
+                                          Defaults to the square root of the Winsorized variance.
+                                          
+        Returns:
+            np.ndarray: The estimated location for each point in the grid.
+        """
+        from scipy.optimize import minimize_scalar
+        
+        grid_shape = self.shape
+        num_elements = int(np.prod(grid_shape)) if grid_shape else 1
+        
+        # Flatten for iteration
+        flat_qhist = self.qhist.reshape(num_elements, -1)
+        
+        # Get initial guesses and scales
+        x0_all = np.atleast_1d(self.median()).flatten()
+        if scale is None:
+            # Use a combination of IQR and Winsorized variance for scale
+            # IQR / 1.349 is a robust estimate of sigma for Gaussian
+            iqr_all = np.atleast_1d(self.iqr()).flatten() / 1.349
+            wvar_all = np.sqrt(np.atleast_1d(self.winsorized_var())).flatten()
+            
+            # Take the smaller of the two, but ensure it's not zero
+            scale_all = np.where((iqr_all > 0) & (iqr_all < wvar_all), iqr_all, wvar_all)
+        else:
+            scale_all = np.asanyarray(scale).flatten()
+            if scale_all.size == 1:
+                scale_all = np.full(num_elements, scale_all[0])
+
+        # Loss functions rho(z) where z = (x - mu) / scale
+        if loss == 'huber':
+            rho = lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5)
+        elif loss == 'soft_l1':
+            rho = lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1)
+        elif loss == 'cauchy':
+            rho = lambda z: np.log(1 + 0.5 * z**2)
+        elif loss == 'arctan':
+            rho = lambda z: np.arctan(0.5 * z**2)
+        else: # linear / squared
+            rho = lambda z: 0.5 * z**2
+
+        results = np.full(num_elements, np.nan)
+        
+        for i in range(num_elements):
+            s_val = scale_all[i]
+            if np.isnan(s_val) or s_val <= 0:
+                s_val = self.bin_width
+                
+            x0 = x0_all[i]
+            if np.isnan(x0):
+                continue
+            
+            mask = flat_qhist[i] > 0
+            if not np.any(mask):
+                continue
+                
+            w = flat_qhist[i, mask]
+            c = self.qcenter[mask]
+            
+            def objective(mu):
+                return np.sum(w * rho((c - mu) / s_val))
+            
+            try:
+                # Bracket around the median
+                res = minimize_scalar(objective, bracket=(x0 - 5*s_val, x0, x0 + 5*s_val))
+                results[i] = res.x
+            except Exception:
+                results[i] = x0
+            
+        return results.reshape(grid_shape) if grid_shape else results[0]
+
 class ChargeSpectra:
     """
     Container for PANOSETI charge spectra (pedestal histograms).
@@ -496,22 +574,30 @@ def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwarg
     
     Args:
         images (CameraImages): The image container.
-        pedestal_calculator (callable, optional): A function that takes a CameraImages 
-                                                object (for a single GTI) and **kwargs 
-                                                and returns a (32, 32) array of pedestal values.
-                                                If None, uses a default that calculates the 
-                                                specified quantile.
-        **kwargs: Arguments passed to pedestal_calculator. If the default calculator is 
-                  used, kwargs should allow the quantile to be set (default is 0.5).
+        pedestal_calculator (str or callable, optional): 
+            If a string, one of:
+                - "quantile": Uses the specified quantile (default 0.5/median).
+                - "huber", "cauchy", "soft_l1", "arctan": Uses the corresponding 
+                  robust location estimator from ChargeHistogram.
+            If None, defaults to "quantile".
+            If a callable, it should take a CameraImages object and **kwargs 
+            and return a (32, 32) array of pedestal values.
+        **kwargs: Arguments passed to the calculator (e.g., quantile=0.5 or scale=1.0).
                   
     Returns:
         CameraImages: A new container with pedestal-subtracted images.
     """
-    if pedestal_calculator is None:
-        def default_pedestal_calculator(gti_images, quantile=0.5, **unused_kwargs):
+    if pedestal_calculator is None or pedestal_calculator == "quantile":
+        def internal_pedestal_calculator(gti_images, quantile=0.5, **unused_kwargs):
             charge_spectra = calculate_charge_spectra(gti_images, combine_gtis=True)
             return charge_spectra.pix.quantiles(quantile)
-        pedestal_calculator = default_pedestal_calculator
+        pedestal_calculator = internal_pedestal_calculator
+    elif isinstance(pedestal_calculator, str) and pedestal_calculator in ["huber", "cauchy", "soft_l1", "arctan"]:
+        loss_name = pedestal_calculator
+        def robust_pedestal_calculator(gti_images, **kwargs):
+            charge_spectra = calculate_charge_spectra(gti_images, combine_gtis=True)
+            return charge_spectra.pix.huber_location(loss=loss_name, **kwargs)
+        pedestal_calculator = robust_pedestal_calculator
 
     def _correct_gti_images(gti_images):
         pedestal_val = pedestal_calculator(gti_images, **kwargs)
