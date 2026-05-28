@@ -252,6 +252,29 @@ class CameraImages:
             filter=dict(self.filter)
         )
 
+    def map_gtis(self, functor, *args, **kwargs):
+        """
+        Applies a functor (callable) to each GTI-filtered CameraImages subset,
+        and concatenates the results.
+        
+        Args:
+            functor (callable): A function or callable object that takes a 
+                                CameraImages instance as its first argument and 
+                                returns a modified/new CameraImages instance.
+            *args: Additional positional arguments passed to the functor.
+            **kwargs: Additional keyword arguments passed to the functor.
+            
+        Returns:
+            CameraImages: The concatenated result of applying the functor 
+                           to each GTI.
+        """
+        results = []
+        for gti_idx in self.unique_gti_indexes:
+            gti_images = self.filter_gtis(gti_idx)
+            res = functor(gti_images, *args, **kwargs)
+            results.append(res)
+        return CameraImages.concatenate(results)
+
     def __getitem__(self, key):
         return getattr(self, key)
 

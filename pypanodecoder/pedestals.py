@@ -465,10 +465,7 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
     Returns:
         CameraImages: A new container with pedestal-subtracted images.
     """
-    results = []
-    for gti_idx in camera_images.unique_gti_indexes:
-        gti_images = camera_images.filter_gtis(gti_idx)
-        
+    def _correct_gti_images(gti_images):
         # Calculate bounds for fitting (robust estimation of the quiet pedestal)
         charge_spectra = calculate_charge_spectra(gti_images, combine_gtis=True)
         q_low, q_high = charge_spectra.pix.quantiles(quantiles)
@@ -488,7 +485,7 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
                     pcorr[i, j, -1] = np.mean(y)
                     
         # Use the class method to apply the subtraction
-        results.append(gti_images.apply_pedestal_corrections(pcorr))
+        return gti_images.apply_pedestal_corrections(pcorr)
         
-    return CameraImages.concatenate(results)
+    return camera_images.map_gtis(_correct_gti_images)
 
