@@ -47,7 +47,7 @@ def plot_image(image, transpose=True, ax=None, fig=None, colorbar_label=None, sh
         
     if ax is None:
         if fig is None:
-            fig = plt.figure(dpi=200)
+            fig = plt.figure()
             ax = fig.add_subplot(111)
         else:
             ax = fig.gca()

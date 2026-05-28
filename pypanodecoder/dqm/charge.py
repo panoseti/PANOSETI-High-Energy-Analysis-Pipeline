@@ -29,7 +29,7 @@ def plot_charge_spectra(qspecs, fig=None, title=None, pixel=None, **kwargs):
         qspecs_dict = qspecs
 
     if fig is None:
-        fig = plt.figure(figsize=(15, 5))
+        fig = plt.figure(figsize=(12, 4))
     
     # Check if axes already exist in the figure
     if fig.axes:
