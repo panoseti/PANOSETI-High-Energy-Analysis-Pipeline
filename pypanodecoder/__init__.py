@@ -29,6 +29,10 @@ from .pedestals import (
     apply_polynomial_pedestal_correction
 )
 
+from .plotting import (
+    plot_image
+)
+
 from . import dqm
 
 __all__ = [
@@ -45,5 +49,6 @@ __all__ = [
     'ChargeSpectra',
     'calculate_charge_spectra',
     'apply_polynomial_pedestal_correction',
+    'plot_image',
     'dqm'
 ]
