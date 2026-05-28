@@ -26,11 +26,16 @@ from .pedestals import (
     ChargeHistogram,
     ChargeSpectra,
     calculate_charge_spectra,
-    apply_polynomial_pedestal_correction
+    apply_polynomial_pedestal_correction,
+    apply_constant_pedestal_correction
 )
 
 from .plotting import (
     plot_image
+)
+
+from .stars import (
+    get_bright_stars
 )
 
 from . import dqm
@@ -49,6 +54,8 @@ __all__ = [
     'ChargeSpectra',
     'calculate_charge_spectra',
     'apply_polynomial_pedestal_correction',
+    'apply_constant_pedestal_correction',
     'plot_image',
+    'get_bright_stars',
     'dqm'
 ]
