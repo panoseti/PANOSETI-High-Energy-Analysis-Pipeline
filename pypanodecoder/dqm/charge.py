@@ -78,8 +78,8 @@ def plot_charge_spectra(qspecs, fig=None, title=None, pixel=None, **kwargs):
             xlo, xmid, xhi = first_qspec.quantiles([0.25, 0.5, 0.75])
             dx = xhi - xlo
 
-            ax1.set_xlim(xlo - 2*dx, xhi + 2*dx)
-            ax2.set_xlim(xlo - 4*dx, xhi + 4*dx)
+            ax1.set_xlim(xlo - 2.5*dx, xhi + 2.5*dx)
+            ax2.set_xlim(xlo - 5.0*dx, xhi + 5.0*dx)
         except (ValueError, IndexError):
             pass
 
