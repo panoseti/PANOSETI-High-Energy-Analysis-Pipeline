@@ -284,32 +284,59 @@ class ChargeHistogram:
         
         return ChargeHistogram(new_qcenter, new_qhist, log_bin_width)
 
-    def cdf(self):
+    def cdf(self, reverse=False):
         """
         Returns the normalized cumulative distribution function (CDF) for all elements.
         
+        Args:
+            reverse (bool): If True, returns the reversed CDF (1 to 0), 
+                            representing the probability P(X >= x).
+
         Returns:
             tuple: (edges, cdf)
                 edges: np.ndarray of bin edges (length N+1)
                 cdf: np.ndarray of normalized cumulative counts (shape: grid_shape + (N+1))
         """
-        # Cumulative sum along the range axis
-        cumsum = np.cumsum(self.qhist, axis=-1)
-        total_counts = cumsum[..., -1]
-        
         # If qcenter are centers, left edges are qcenter - 0.5 * bin_width
         left_edges = self.qcenter - 0.5 * self.bin_width
         edges = np.append(left_edges, left_edges[-1] + self.bin_width)
+        
+        total_counts = np.sum(self.qhist, axis=-1)
         
         # Result CDF array
         cdf_shape = self.qhist.shape[:-1] + (self.qhist.shape[-1] + 1,)
         cdf = np.zeros(cdf_shape)
         
         good_mask = total_counts > 0
-        if good_mask.any():
+        if not good_mask.any():
+            return edges, cdf
+
+        if reverse:
+            # P(X >= x)
+            # cumsum from the right
+            cumsum = np.cumsum(self.qhist[..., ::-1], axis=-1)[..., ::-1]
+            cdf[good_mask, :-1] = cumsum[good_mask] / total_counts[good_mask, np.newaxis]
+            # cdf[..., -1] is already 0
+        else:
+            # P(X <= x)
+            # Cumulative sum along the range axis
+            cumsum = np.cumsum(self.qhist, axis=-1)
             cdf[good_mask, 1:] = cumsum[good_mask] / total_counts[good_mask, np.newaxis]
+            # cdf[..., 0] is already 0
             
         return edges, cdf
+
+    def sf(self):
+        """
+        Returns the survival function (SF) for all elements in the histogram grid.
+        SF is defined as 1 - CDF, representing P(X >= x).
+        
+        Returns:
+            tuple: (edges, sf)
+                edges: np.ndarray of bin edges (length N+1)
+                sf: np.ndarray of normalized survival function values (shape: grid_shape + (N+1))
+        """
+        return self.cdf(reverse=True)
 
     def quantiles(self, q):
         """
@@ -482,6 +509,86 @@ class ChargeHistogram:
                 results[i] = res.x
             except Exception:
                 results[i] = x0
+            
+        return results.reshape(grid_shape) if grid_shape else results[0]
+
+    def huber_scale(self, loss='huber', location=None):
+        """
+        Estimates the scale (standard deviation) of the distribution using a robust loss function.
+        
+        Args:
+            loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'arctan').
+                        Defaults to 'huber'.
+            location (array-like, optional): The location (center) parameter for the loss function.
+                                             Defaults to the median.
+                                             
+        Returns:
+            np.ndarray: The estimated scale for each point in the grid.
+        """
+        from scipy.optimize import minimize_scalar
+        
+        grid_shape = self.shape
+        num_elements = int(np.prod(grid_shape)) if grid_shape else 1
+        
+        # Flatten for iteration
+        flat_qhist = self.qhist.reshape(num_elements, -1)
+        
+        # Get initial locations and guesses for scale
+        if location is None:
+            mu_all = np.atleast_1d(self.median()).flatten()
+        else:
+            mu_all = np.asanyarray(location).flatten()
+            if mu_all.size == 1:
+                mu_all = np.full(num_elements, mu_all[0])
+
+        # Robust initial scale guess
+        iqr_all = np.atleast_1d(self.iqr()).flatten() / 1.349
+        wvar_all = np.sqrt(np.atleast_1d(self.winsorized_var())).flatten()
+        s0_all = np.where((iqr_all > 0) & (iqr_all < wvar_all), iqr_all, wvar_all)
+
+        # Loss functions rho(z) where z = (x - mu) / scale
+        if loss == 'huber':
+            rho = lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5)
+        elif loss == 'soft_l1':
+            rho = lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1)
+        elif loss == 'cauchy':
+            rho = lambda z: np.log(1 + 0.5 * z**2)
+        elif loss == 'arctan':
+            rho = lambda z: np.arctan(0.5 * z**2)
+        else: # linear / squared
+            rho = lambda z: 0.5 * z**2
+
+        results = np.full(num_elements, np.nan)
+        
+        for i in range(num_elements):
+            s0 = s0_all[i]
+            if np.isnan(s0) or s0 <= 0:
+                s0 = self.bin_width
+                
+            mu = mu_all[i]
+            if np.isnan(mu):
+                continue
+            
+            mask = flat_qhist[i] > 0
+            if not np.any(mask):
+                continue
+                
+            w = flat_qhist[i, mask]
+            c = self.qcenter[mask]
+            w_sum = np.sum(w)
+            
+            # The objective function minimizes J(s) = sum(w * rho((c - mu) / s)) + sum(w) * log(s)
+            def objective(s):
+                if s <= 0:
+                    return np.inf
+                return np.sum(w * rho((c - mu) / s)) + w_sum * np.log(s)
+            
+            try:
+                # Bounded optimization is more reliable for scale
+                res = minimize_scalar(objective, bounds=(1e-6 * s0, 100 * s0), method='bounded')
+                results[i] = res.x
+            except Exception:
+                results[i] = s0
             
         return results.reshape(grid_shape) if grid_shape else results[0]
 
