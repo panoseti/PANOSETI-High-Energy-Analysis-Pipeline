@@ -8,7 +8,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_image(image, transpose=True, ax=None, fig=None, colorbar_label=None, show_colorbar=True, cmap='viridis', **kwargs):
+def plot_image(image, transpose=True, ax=None, fig=None, colorbar_label=None, show_colorbar=True, cmap='viridis', plate_scale=None, **kwargs):
     """
     Plots a PANOSETI module image (pixels, SiPMs, or Quabos).
     
@@ -26,6 +26,10 @@ def plot_image(image, transpose=True, ax=None, fig=None, colorbar_label=None, sh
         colorbar_label (str, optional): Label for the colorbar.
         show_colorbar (bool): If True (default), adds a colorbar to the plot.
         cmap (str): Colormap to use (default: 'viridis').
+        plate_scale (float, optional): If provided, the axes will be scaled by this value
+                                       and centered at (0, 0). For example, 1.0 gives
+                                       centered pixel indices, while 0.31 could give
+                                       degrees on the sky.
         **kwargs: Additional keyword arguments passed to ax.imshow().
         
     Returns:
@@ -60,22 +64,68 @@ def plot_image(image, transpose=True, ax=None, fig=None, colorbar_label=None, sh
     if 'cmap' not in kwargs:
         kwargs['cmap'] = cmap
 
+    # Handle coordinate scaling
+    ny, nx = image.shape
+    if plate_scale is not None:
+        # Effective scale depends on the resolution of the image
+        # plate_scale refers to a single pixel (1/32 of the module)
+        if shape == (32, 32):
+            eff_scale = plate_scale
+        elif shape == (4, 4):
+            eff_scale = 8 * plate_scale
+        elif shape == (2, 2):
+            eff_scale = 16 * plate_scale
+        else:
+            eff_scale = plate_scale
+
+        # Calculate extent to center the image at (0,0)
+        half_width = 0.5 * nx * eff_scale
+        half_height = 0.5 * ny * eff_scale
+        extent = [-half_width, half_width, -half_height, half_height]
+        kwargs['extent'] = extent
+        
+        # Line positions in scaled coordinates
+        x_min, x_max = -half_width, half_width
+        y_min, y_max = -half_height, half_height
+        
+        # Step size for lines in scaled units
+        if shape == (32, 32):
+            # Lines every 8 pixels (SiPM boundaries)
+            line_step = 8 * plate_scale
+            line_start = -half_width + line_step
+            lines = np.arange(line_start, half_width - 1e-9, line_step)
+        elif shape == (4, 4):
+            # Lines every 2 SiPMs (Quabo boundaries)
+            line_step = 2 * eff_scale
+            line_start = -half_width + line_step
+            lines = np.arange(line_start, half_width - 1e-9, line_step)
+        else:
+            lines = []
+    else:
+        x_min, x_max = -0.5, nx - 0.5
+        y_min, y_max = -0.5, ny - 0.5
+        if shape == (32, 32):
+            lines = np.arange(7.5, 32, 8)
+        elif shape == (4, 4):
+            lines = [1.5]
+        else:
+            lines = []
+
     pc = ax.imshow(image, **kwargs)
 
     # Delineate individual components with white lines
-    if shape == (32, 32):
-        # 32x32 pixels: 4x4 SiPMs of 8x8 pixels each.
-        # Lines at boundaries 7.5, 15.5, 23.5 spanning from -0.5 to 31.5.
-        ax.hlines(np.arange(7.5, 32, 8), -0.5, 31.5, color='w', lw=0.5)
-        ax.vlines(np.arange(7.5, 32, 8), -0.5, 31.5, color='w', lw=0.5)
-    elif shape == (4, 4):
-        # 4x4 SiPMs: 2x2 Quabos of 2x2 SiPMs each.
-        # Lines at boundary 1.5 spanning from -0.5 to 3.5.
-        ax.hlines([1.5], -0.5, 3.5, color='w', lw=0.5)
-        ax.vlines([1.5], -0.5, 3.5, color='w', lw=0.5)
-    elif shape == (2, 2):
-        # 2x2 Quabos: no internal divisions.
-        pass
+    if len(lines) > 0:
+        ax.hlines(lines, x_min, x_max, color='w', lw=0.5)
+        ax.vlines(lines, y_min, y_max, color='w', lw=0.5)
+
+    # Set integer ticks for SiPM and Quabo images in index mode
+    if plate_scale is None:
+        if shape == (4, 4):
+            ax.set_xticks(np.arange(4))
+            ax.set_yticks(np.arange(4))
+        elif shape == (2, 2):
+            ax.set_xticks(np.arange(2))
+            ax.set_yticks(np.arange(2))
 
     if show_colorbar or colorbar_label is not None:
         cbar = fig.colorbar(pc, ax=ax)
