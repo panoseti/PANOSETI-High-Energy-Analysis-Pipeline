@@ -79,6 +79,38 @@ class ChargeHistogram:
         new_qhist = self.qhist[index]
         return ChargeHistogram(self.qcenter, new_qhist, self.bin_width)
 
+    def downsample(self, factor):
+        """
+        Downsamples the histogram by combining adjacent bins.
+        
+        Args:
+            factor (int): The number of bins to combine.
+            
+        Returns:
+            ChargeHistogram: A new downsampled histogram.
+        """
+        if factor <= 1:
+            return self
+            
+        n_bins = self.qhist.shape[-1]
+        n_new_bins = n_bins // factor
+        
+        if n_new_bins == 0:
+            # Return a single bin covering everything if factor > n_bins
+            new_qcenter = np.array([self.qcenter.mean()])
+            new_qhist = self.qhist.sum(axis=-1, keepdims=True)
+            return ChargeHistogram(new_qcenter, new_qhist, self.bin_width * n_bins)
+
+        truncated_n = n_new_bins * factor
+        
+        # Reshape and sum the histogram
+        new_qhist = self.qhist[..., :truncated_n].reshape(self.shape + (n_new_bins, factor)).sum(axis=-1)
+        
+        # Reshape and average the bin centers
+        new_qcenter = self.qcenter[:truncated_n].reshape(n_new_bins, factor).mean(axis=-1)
+        
+        return ChargeHistogram(new_qcenter, new_qhist, self.bin_width * factor)
+
     def __add__(self, other):
         """
         Sums two ChargeHistograms together.
@@ -485,6 +517,43 @@ class ChargeSpectra:
             self.sipm.normalize(density=density),
             self.quabo.normalize(density=density),
             self.camera.normalize(density=density)
+        )
+
+    def to_log10(self, bins_per_decade=10, density=False):
+        """
+        Transforms all histograms in the container into log10 space.
+        
+        Args:
+            bins_per_decade (int): Number of bins per decade in log10 space.
+            density (bool): If True, the resulting histograms will be densities.
+                            
+        Returns:
+            ChargeSpectra: A new container with log-transformed histograms.
+        """
+        return ChargeSpectra(
+            self.num_events,
+            self.pix.to_log10(bins_per_decade=bins_per_decade, density=density),
+            self.sipm.to_log10(bins_per_decade=bins_per_decade, density=density),
+            self.quabo.to_log10(bins_per_decade=bins_per_decade, density=density),
+            self.camera.to_log10(bins_per_decade=bins_per_decade, density=density)
+        )
+
+    def downsample(self, factor):
+        """
+        Downsamples all histograms in the container.
+        
+        Args:
+            factor (int): The number of bins to combine.
+                            
+        Returns:
+            ChargeSpectra: A new container with downsampled histograms.
+        """
+        return ChargeSpectra(
+            self.num_events,
+            self.pix.downsample(factor),
+            self.sipm.downsample(factor),
+            self.quabo.downsample(factor),
+            self.camera.downsample(factor)
         )
 
 def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
