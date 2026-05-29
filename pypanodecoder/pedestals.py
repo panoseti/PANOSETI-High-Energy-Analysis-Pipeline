@@ -187,6 +187,71 @@ class ChargeHistogram:
                 new_qhist /= self.bin_width
         return ChargeHistogram(self.qcenter, new_qhist, self.bin_width)
 
+    def to_log10(self, bins_per_decade=10, density=False):
+        """
+        Transforms the histogram into log10 space.
+        
+        Args:
+            bins_per_decade (int): Number of bins per decade in log10 space.
+            density (bool): If True, the resulting histogram will be a density
+                            (divided by the log bin width).
+                            
+        Returns:
+            ChargeHistogram: A new histogram with log10(q) as bin centers.
+        """
+        # Filter positive qcenters
+        mask = self.qcenter > 0
+        if not np.any(mask):
+            # Return an empty histogram if no positive values
+            return ChargeHistogram(np.array([0.0]), 
+                                   np.zeros(self.shape + (1,)), 
+                                   1.0 / bins_per_decade)
+
+        q_pos = self.qcenter[mask]
+        log_q = np.log10(q_pos)
+        
+        log_bin_width = 1.0 / bins_per_decade
+        
+        # Define log10 edges covering the range of positive qcenters
+        min_log = np.floor(np.min(log_q) * bins_per_decade) / bins_per_decade
+        max_log = np.ceil(np.max(log_q) * bins_per_decade) / bins_per_decade
+        log_edges = np.arange(min_log, max_log + 0.5 * log_bin_width, log_bin_width)
+        
+        if len(log_edges) < 2:
+             log_edges = np.array([min_log, min_log + log_bin_width])
+
+        new_qcenter = 0.5 * (log_edges[:-1] + log_edges[1:])
+        
+        # Original edges and CDF
+        edges_orig, cdf_orig = self.cdf()
+        
+        # Interpolate CDF at target edges (in linear space)
+        target_edges = 10**log_edges
+        
+        grid_shape = self.shape
+        num_elements = int(np.prod(grid_shape)) if grid_shape else 1
+        
+        # Flatten for interpolation
+        flat_cdf = cdf_orig.reshape(num_elements, -1)
+        new_flat_cdf = np.zeros((num_elements, len(log_edges)))
+        
+        for i in range(num_elements):
+            new_flat_cdf[i] = np.interp(target_edges, edges_orig, flat_cdf[i])
+            
+        # Probability in each log bin
+        new_qhist_flat = np.diff(new_flat_cdf, axis=-1)
+        
+        # Multiply by original total sum to preserve scale (e.g. counts)
+        total_sum = np.sum(self.qhist, axis=-1).reshape(num_elements, 1)
+        new_qhist_flat *= total_sum
+        
+        if density:
+            new_qhist_flat /= log_bin_width
+            
+        new_qhist = new_qhist_flat.reshape(grid_shape + (len(new_qcenter),))
+        
+        return ChargeHistogram(new_qcenter, new_qhist, log_bin_width)
+
     def cdf(self):
         """
         Returns the normalized cumulative distribution function (CDF) for all elements.
