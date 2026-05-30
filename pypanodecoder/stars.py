@@ -116,3 +116,32 @@ def get_bright_stars(ra_deg, dec_deg, radius_deg=8.0, max_magnitude=8.0):
             })
     results.sort(key=lambda x: x["vmag"])
     return results
+
+def print_stars(stars):
+    """
+    Prints a formatted table of stars.
+
+    Args:
+        stars (list): List of star dictionaries from get_bright_stars().
+    """
+    if not stars:
+        print("No stars found.")
+        return
+
+    # Table header
+    header = f"{'Idx':>3} {'HR':>4} {'Name':<12} {'RA [deg]':>10} {'Dec [deg]':>10} {'Vmag':>6} {'B-V':>6} {'Sep [deg]':>10}"
+    print(header)
+    print("-" * len(header))
+
+    for i, star in enumerate(stars):
+        hr = star.get('hr', '')
+        # Merge multiple whitespaces in name for cleaner printing
+        name = " ".join(star.get('name', '').split())
+        ra = star.get('ra_deg', 0.0)
+        dec = star.get('dec_deg', 0.0)
+        vmag = star.get('vmag', 0.0)
+        bv = star.get('bv')
+        bv_str = f"{bv:6.2f}" if bv is not None else f"{'':>6}"
+        sep = star.get('separation_deg', 0.0)
+
+        print(f"{i:3d} {hr:>4} {name:<12} {ra:10.4f} {dec:10.4f} {vmag:6.2f} {bv_str} {sep:10.4f}")
