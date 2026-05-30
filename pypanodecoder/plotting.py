@@ -133,3 +133,57 @@ def plot_image(image, transpose=True, ax=None, fig=None, colorbar_label=None, sh
             cbar.set_label(colorbar_label)
 
     return fig, ax, pc
+
+def overlay_stars(stars, p1, p2, flip=False, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None):
+    """
+    Overlays stars on a field and calculates the pointing solution.
+    
+    Args:
+        stars (list): List of star dictionaries from stars.get_bright_stars().
+        p1 (tuple): (index, x, y) for the first reference star.
+        p2 (tuple): (index, x, y) for the second reference star.
+        flip (bool): Parity flip for the image coordinates.
+        ax (matplotlib.axes.Axes, optional): Axes to plot on.
+        use_index (bool): If True, label stars with their index in the stars list.
+        clip_to_axes (bool): If True, only show stars within the current axes limits.
+        color (str): Color for the star markers and labels (default: 'r').
+        plate_scale (float, optional): If provided, force this plate scale (deg/pix).
+        
+    Returns:
+        PointingSolution: The calculated pointing solution.
+    """
+    from .pointing import PointingSolution
+    
+    i1, x1, y1 = p1
+    i2, x2, y2 = p2
+    
+    ps = PointingSolution(stars[i1], (x1, y1), stars[i2], (x2, y2), flip=flip, plate_scale=plate_scale)
+    
+    if ax is None:
+        ax = plt.gca()
+        
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    
+    # Plot stars
+    for i, star in enumerate(stars):
+        x, y = ps.sky_to_image(star['ra_deg'], star['dec_deg'])
+        
+        if clip_to_axes:
+            if not (min(xlim) <= x <= max(xlim) and min(ylim) <= y <= max(ylim)):
+                continue
+
+        # Use vmag for size
+        size = max(5, (10 - star['vmag'])**2)
+        ax.scatter(x, y, s=size, edgecolors=color, facecolors='none', alpha=0.7)
+        
+        if use_index:
+            label = str(i)
+        else:
+            name = star['name'] if star['name'] else f"HR{star['hr']}"
+            # Merge multiple whitespaces
+            label = " ".join(name.split())
+            
+        ax.text(x, y, label, color=color, fontsize=8, ha='left', va='bottom')
+        
+    return ps
