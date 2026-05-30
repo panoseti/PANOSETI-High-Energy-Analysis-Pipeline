@@ -127,3 +127,26 @@ class PointingSolution:
         eta = self.plate_scale * (dx * sin_th + f * dy * cos_th)
         
         return self._tangent_to_sky(xi, eta)
+
+    def __repr__(self):
+        return (f"<PointingSolution RA0={self.ra0:.4f} Dec0={self.dec0:.4f} "
+                f"scale={self.plate_scale:.6f} deg/pix theta={math.degrees(self.theta):.2f}deg "
+                f"flip={self.flip}>")
+
+OBSERVATION_TARGETS = {
+    "crab":   (83.63308, 22.01450),
+    "mrk421": (166.11379, 38.20883),
+    "mrk501": (253.46758, 39.76017)
+}
+
+def get_target_coordinates(name):
+    """
+    Returns the RA and Dec of an observation target in degrees.
+    
+    Args:
+        name (str): The name/key of the target (e.g., 'crab', 'mrk421').
+        
+    Returns:
+        tuple: (RA, Dec) in decimal degrees, or None if not found.
+    """
+    return OBSERVATION_TARGETS.get(name.lower())
