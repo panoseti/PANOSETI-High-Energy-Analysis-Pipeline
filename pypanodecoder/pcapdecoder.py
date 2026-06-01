@@ -17,11 +17,11 @@ import bisect
 # Using namedtuple for a "struct-like" behavior as requested.
 SciencePacket = namedtuple('SciencePacket', [
     'filename', 'file_offset', 'file_captured_packet_index', 'file_science_packet_index',
-    'pcap_sec', 'pcap_usec', 'incl_len',
+    'pcap_time', 'pcap_sec', 'pcap_nsec', 'incl_len', 'sender_ip',
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
-    'telescope_id', 'quabo_id',
-    'tai', 'nanosec', 'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
-    'flags', 'gti_index', 'gti_event_time', 'pix_data', 'sender_ip'
+    'telescope_id', 'quabo_id', 'tai', 'nanosec', 
+    'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
+    'flags', 'gti_index', 'gti_event_time', 'pix_data', 
 ])
 
 def parse_time(t):
@@ -132,7 +132,10 @@ class GTIFilter:
         start, _, good, idx = self.intervals[idx_bin]
         return good, idx, start
 
-def wr_to_unix(pkt_tai, pkt_nsec, tv_sec, ignore_clock_desync=False):
+def quabo_timestamp_good(pcap_sec):
+    return False # PANOSETI board times no good for now
+
+def wr_to_unix(pkt_tai, pkt_nsec, pcap_sec, ignore_clock_desync=False):
     """
     Given a WR packet time (TAI) with only 10 bits of sec,
     and a Unix time that's within a few ms,
@@ -142,21 +145,21 @@ def wr_to_unix(pkt_tai, pkt_nsec, tv_sec, ignore_clock_desync=False):
     """
     # 37 is the TAI-UTC offset. 
     # The packet TAI seconds is only 10 bits (0-1023).
-    d = (tv_sec - pkt_tai + 37) % 1024
+    d = (pcap_sec - pkt_tai + 37) % 1024
     if d == 0:
-        return True, tv_sec, pkt_nsec, tv_sec + pkt_nsec / 1e9
+        return True, pcap_sec, pkt_nsec, pcap_sec + pkt_nsec / 1e9
     elif d == 1:
-        return True, tv_sec - 1, pkt_nsec, tv_sec - 1 + pkt_nsec / 1e9
+        return True, pcap_sec - 1, pkt_nsec, pcap_sec - 1 + pkt_nsec / 1e9
     elif d == 1023:
-        return True, tv_sec + 1, pkt_nsec, tv_sec + 1 + pkt_nsec / 1e9
+        return True, pcap_sec + 1, pkt_nsec, pcap_sec + 1 + pkt_nsec / 1e9
     else:
         # The WR and DAQ clocks differ by > 1s => out of sync
         # Return 0 if ignore_clock_desync is False. Otherwise, return an approximation to the time.
         if ignore_clock_desync:
-            approx_t = tv_sec + pkt_nsec / 1e9
-            return False, tv_sec, pkt_nsec, approx_t
+            approx_t = pcap_sec + pkt_nsec / 1e9
+            return False, pcap_sec, pkt_nsec, approx_t
         else:
-            raise Exception('WR and Unix times differ by > 1 sec: pkt_tai %d tv_sec %d d %d' % (pkt_tai, tv_sec, d))
+            raise Exception('WR and Unix times differ by > 1 sec: pkt_tai %d pcap_sec %d d %d' % (pkt_tai, pcap_sec, d))
 
 class PcapDecoder:
     """
@@ -234,10 +237,10 @@ class PcapDecoder:
             if len(header_data) < 16:
                 break # Truncated
             
-            ts_sec, ts_usec, incl_len, orig_len = struct.unpack(f"{self._endian}IIII", header_data)
+            pcap_sec, pcap_usec, incl_len, orig_len = struct.unpack(f"{self._endian}IIII", header_data)
             packet_data = self._file.read(incl_len)
             
-            packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_captured_packet_index, self.file_science_packet_index)
+            packet = self._parse_packet(packet_data, pcap_sec, pcap_usec*1000, offset, self.file_captured_packet_index, self.file_science_packet_index)
             if packet:
                 yield packet
                 self.file_packet_index += 1
@@ -289,17 +292,17 @@ class PcapDecoder:
                 
                 # Combine timestamps (PCAPNG usually uses microseconds or nanoseconds since epoch)
                 timestamp = (ts_high << 32) | ts_low
-                ts_sec = timestamp // self._ts_resol
-                # Calculate usec based on resolution
-                if self._ts_resol == 1000000:
-                    ts_usec = timestamp % 1000000
-                elif self._ts_resol > 1000000:
-                    ts_usec = (timestamp % self._ts_resol) // (self._ts_resol // 1000000)
-                else:
-                    ts_usec = (timestamp % self._ts_resol) * (1000000 // self._ts_resol)
-                
+                pcap_sec = timestamp // self._ts_resol
+                # Calculate nsec based on resolution
+                if(self._ts_resol == 1000000000): # ns resolution
+                    pcap_nsec = timestamp % self._ts_resol
+                elif self._ts_resol < 1000000000: # us probably
+                    pcap_nsec = (timestamp % self._ts_resol) * (1000000000 // self._ts_resol)
+                else: # better than ns reolution
+                    pcap_nsec = (timestamp % self._ts_resol) // (self._ts_resol // 1000000000)
+
                 packet_data = block_data[20:20+incl_len]
-                packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_captured_packet_index, self.file_science_packet_index)
+                packet = self._parse_packet(packet_data, pcap_sec, pcap_nsec, offset, self.file_captured_packet_index, self.file_science_packet_index)
                 if packet:
                     yield packet
                     self.file_science_packet_index += 1
@@ -307,7 +310,7 @@ class PcapDecoder:
 
             # Skip other block types (SHB, IDB, etc. are already read into block_data)
 
-    def _parse_packet(self, packet_data, ts_sec, ts_usec, file_offset, file_captured_packet_index, file_science_packet_index):
+    def _parse_packet(self, packet_data, pcap_sec, pcap_nsec, file_offset, file_captured_packet_index, file_science_packet_index):
         # Based on Quabo Packet Interface Wiki:
         # Science packets are sent to port 60001.
         # Total payload sizes: 
@@ -397,7 +400,18 @@ class PcapDecoder:
         
         tai = meta[4]
         nanosec = meta[5]
-        event_time_good, event_time_sec, event_time_nsec, event_time = wr_to_unix(tai, nanosec, ts_sec, ignore_clock_desync=True)
+
+        pcap_time = pcap_sec + pcap_nsec / 1e9
+
+        event_time_good = False
+        if quabo_timestamp_good(pcap_sec):
+            event_time_good, event_time_sec, event_time_nsec, event_time = wr_to_unix(tai, nanosec, pcap_sec, ignore_clock_desync=True)
+
+        if not event_time_good:
+            # Fall back to using PCAP time if WR time is not good
+            event_time_sec = pcap_sec
+            event_time_nsec = pcap_nsec
+            event_time = pcap_time
 
         sender_ip = ".".join(str(b) for b in packet_data[26:30])
 
@@ -406,8 +420,9 @@ class PcapDecoder:
             file_offset=file_offset,
             file_captured_packet_index=file_captured_packet_index,
             file_science_packet_index=self.file_science_packet_index,
-            pcap_sec=ts_sec,
-            pcap_usec=ts_usec,
+            pcap_time=pcap_time,
+            pcap_sec=pcap_sec,
+            pcap_nsec=pcap_nsec,
             incl_len=len(packet_data),
             acq_mode=acq_mode,
             packet_ver=meta[1],
