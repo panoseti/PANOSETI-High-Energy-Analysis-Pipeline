@@ -15,7 +15,7 @@ import bisect
 
 # Define the structure for a PANOSETI Science Packet
 # Using namedtuple for a "struct-like" behavior as requested.
-SciencePacket = namedtuple('SciencePacket', [
+_SciencePacketBase = namedtuple('SciencePacket', [
     'filename', 'file_offset', 'file_captured_packet_index', 'file_science_packet_index',
     'pcap_time', 'pcap_sec', 'pcap_nsec', 'incl_len', 'sender_ip',
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
@@ -23,6 +23,18 @@ SciencePacket = namedtuple('SciencePacket', [
     'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
     'flags', 'gti_index', 'gti_event_time', 'pix_data', 
 ])
+
+class SciencePacket(_SciencePacketBase):
+    def __repr__(self):
+        lines = [f"{type(self).__name__}("]
+        for field in self._fields:
+            value = getattr(self, field)
+            if field == 'pix_data':
+                lines.append(f"  {field}: <{len(value)} pixels>,")
+            else:
+                lines.append(f"  {field}: {value!r},")
+        lines.append(")")
+        return "\n".join(lines)
 
 def parse_time(t):
     """
