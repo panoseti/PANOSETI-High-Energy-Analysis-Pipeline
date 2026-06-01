@@ -16,12 +16,12 @@ import bisect
 # Define the structure for a PANOSETI Science Packet
 # Using namedtuple for a "struct-like" behavior as requested.
 SciencePacket = namedtuple('SciencePacket', [
-    'filename', 'file_offset', 'file_packet_index',
+    'filename', 'file_offset', 'file_captured_packet_index', 'file_science_packet_index',
     'pcap_sec', 'pcap_usec', 'incl_len',
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
     'telescope_id', 'quabo_id',
     'tai', 'nanosec', 'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
-    'dummy', 'gti_index', 'gti_event_time', 'pix_data'
+    'flags', 'gti_index', 'gti_event_time', 'pix_data'
 ])
 
 def parse_time(t):
@@ -166,13 +166,15 @@ class PcapDecoder:
     See: Jamie's C++ code
     See: https://github.com/panoseti/panoseti/wiki/Quabo-packet-interface#science-packets
     """
-    def __init__(self, filename):
+    def __init__(self, filename, dest_port=60001):
         self.filename = filename
         self._file = open(filename, 'rb')
         self._is_pcapng = False
         self._endian = '<'
         self._ts_resol = 1000000 # Default to microseconds (10^-6)
-        self.file_packet_index = 0
+        self.dest_port = dest_port
+        self.file_captured_packet_index = 0
+        self.file_science_packet_index = 0
         self._detect_format()
 
     def _detect_format(self):
@@ -235,10 +237,12 @@ class PcapDecoder:
             ts_sec, ts_usec, incl_len, orig_len = struct.unpack(f"{self._endian}IIII", header_data)
             packet_data = self._file.read(incl_len)
             
-            packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
+            packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_captured_packet_index, self.file_science_packet_index)
             if packet:
                 yield packet
                 self.file_packet_index += 1
+
+            self.file_captured_packet_index += 1
 
     def _iter_pcapng(self):
         while True:
@@ -295,13 +299,15 @@ class PcapDecoder:
                     ts_usec = (timestamp % self._ts_resol) * (1000000 // self._ts_resol)
                 
                 packet_data = block_data[20:20+incl_len]
-                packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_packet_index)
+                packet = self._parse_packet(packet_data, ts_sec, ts_usec, offset, self.file_captured_packet_index, self.file_science_packet_index)
                 if packet:
                     yield packet
-                    self.file_packet_index += 1
+                    self.file_science_packet_index += 1
+                self.file_captured_packet_index += 1
+
             # Skip other block types (SHB, IDB, etc. are already read into block_data)
 
-    def _parse_packet(self, packet_data, ts_sec, ts_usec, file_offset, file_packet_index):
+    def _parse_packet(self, packet_data, ts_sec, ts_usec, file_offset, file_captured_packet_index, file_science_packet_index):
         # Based on Quabo Packet Interface Wiki:
         # Science packets are sent to port 60001.
         # Total payload sizes: 
@@ -309,21 +315,49 @@ class PcapDecoder:
         #   - 272 bytes (8-bit modes)
         # 42 bytes of Eth/IP/UDP headers are expected if captured on the wire.
         
-        # We handle cases where we might have just the payload or the full capture.
         if len(packet_data) == 570: # 42 + 528
             payload = packet_data[42:]
-        elif len(packet_data) == 528:
-            payload = packet_data
         elif len(packet_data) == 314: # 42 + 272
             payload = packet_data[42:]
-        elif len(packet_data) == 272:
-            payload = packet_data
         else:
             # Not a recognized science packet size
             return None
         
+        # Ensure it is an IPv4 UDP packet and destination port matches self.dest_port
+        if len(packet_data) < 42:
+            return None
+        
+        # Check EtherType is IPv4 (0x0800)
+        eth_type = struct.unpack(">H", packet_data[12:14])[0]
+        if eth_type != 0x0800:
+            return None
+        
+        # Check IP version is 4, and extract header length
+        ip_header_first_byte = packet_data[14]
+        ip_version = ip_header_first_byte >> 4
+        if ip_version != 4:
+            return None
+        
+        ip_ihl = (ip_header_first_byte & 0x0F) * 4
+        # Ensure protocol is UDP (17)
+        # The protocol field is at offset 9 in IPv4 header (byte 23 of packet_data)
+        ip_proto = packet_data[23]
+        if ip_proto != 17:
+            return None
+        
+        # UDP header starts after the IP header
+        udp_start = 14 + ip_ihl
+        if len(packet_data) < udp_start + 8:
+            return None
+        
+        # Extract UDP destination port (bytes 2-3 of UDP header, big endian)
+        dest_port = struct.unpack(">H", packet_data[udp_start+2 : udp_start+4])[0]
+        
+        if self.dest_port != 0 and dest_port != self.dest_port:
+            return None
+        
         # PANOSETI metadata (16 bytes)
-        # acq_mode(1), packet_ver(1), packet_num(2), board_loc(2), TAI(4), nanosec(4), dummy(2)
+        # acq_mode(1), packet_ver(1), packet_num(2), board_loc(2), TAI(4), nanosec(4), flags(2)
         # All multi-byte fields in Quabo packets are little-endian.
         meta_format = "<BBHHIIH"
         meta_size = struct.calcsize(meta_format)
@@ -368,7 +402,8 @@ class PcapDecoder:
         return SciencePacket(
             filename=self.filename,
             file_offset=file_offset,
-            file_packet_index=file_packet_index,
+            file_captured_packet_index=file_captured_packet_index,
+            file_science_packet_index=self.file_science_packet_index,
             pcap_sec=ts_sec,
             pcap_usec=ts_usec,
             incl_len=len(packet_data),
@@ -384,7 +419,7 @@ class PcapDecoder:
             event_time_nsec=event_time_nsec,
             event_time=event_time,
             event_time_good=event_time_good,
-            dummy=meta[6],
+            flags=meta[6],
             gti_index=0,
             gti_event_time=event_time,
             pix_data=pix_data
@@ -393,7 +428,7 @@ class PcapDecoder:
     def close(self):
         self._file.close()
 
-def get_panoseti_packets(filenames, gtis=None, verbose=False):
+def get_panoseti_packets(filenames, gtis=None, verbose=False, dest_port=60001):
     """
     Convenience function to get packets from one or more PANOSETI PCAP/PCAPNG files.
     'filenames' can be a single filename (string), a glob pattern (string), 
@@ -417,7 +452,7 @@ def get_panoseti_packets(filenames, gtis=None, verbose=False):
     for filename in sorted(files):
         if(verbose):
             print(f"Processing file: {filename} (size: {os.path.getsize(filename)} bytes)")
-        decoder = PcapDecoder(filename)
+        decoder = PcapDecoder(filename, dest_port=dest_port)
         try:
             for packet in decoder:
                 is_good, gti_idx, gti_start_time = gti_filter.get_info(packet.event_time)
