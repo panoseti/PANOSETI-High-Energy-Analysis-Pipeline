@@ -25,8 +25,8 @@ class CameraEvent:
         
         # Timing from the first packet that started this event
         self.pcap_sec = first_packet.pcap_sec
-        self.pcap_usec = first_packet.pcap_usec
-        self.start_pcap_time = self.pcap_sec + self.pcap_usec / 1e6
+        self.pcap_nsec = first_packet.pcap_nsec
+        self.pcap_time = first_packet.pcap_time
         
         # Hybridized event time (seconds since Unix epoch)
         self.event_time = first_packet.event_time
@@ -97,7 +97,7 @@ class CameraEvent:
 
     def __repr__(self):
         quabos = sorted(list(self.packets.keys()))
-        return f"<CameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.start_pcap_time:.6f}>"
+        return f"<CameraEvent tel={self.telescope_id} quabos={quabos} time={self.event_time:.9f} gti={self.gti_index} pcap_time={self.pcap_time:.9f}>"
 
 class CameraImages:
     """
@@ -305,7 +305,7 @@ class CameraEventBuilder:
         """
         Process a single SciencePacket and yield any completed CameraEvents.
         """
-        pcap_time = packet.pcap_sec + packet.pcap_usec / 1e6
+        pcap_time = packet.pcap_time
         event_time = packet.event_time
         telescope_id = packet.telescope_id
         quabo_id = packet.quabo_id
@@ -314,7 +314,7 @@ class CameraEventBuilder:
         for tid in list(self.active_events.keys()):
             for et in list(self.active_events[tid].keys()):
                 event = self.active_events[tid][et]
-                if pcap_time - event.start_pcap_time > self.max_pcap_tdiff:
+                if pcap_time - event.pcap_time > self.max_pcap_tdiff:
                     yield self.active_events[tid].pop(et)
             if not self.active_events[tid]:
                 del self.active_events[tid]
