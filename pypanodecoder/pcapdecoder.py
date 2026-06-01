@@ -21,7 +21,7 @@ SciencePacket = namedtuple('SciencePacket', [
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
     'telescope_id', 'quabo_id',
     'tai', 'nanosec', 'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
-    'flags', 'gti_index', 'gti_event_time', 'pix_data'
+    'flags', 'gti_index', 'gti_event_time', 'pix_data', 'sender_ip'
 ])
 
 def parse_time(t):
@@ -399,6 +399,8 @@ class PcapDecoder:
         nanosec = meta[5]
         event_time_good, event_time_sec, event_time_nsec, event_time = wr_to_unix(tai, nanosec, ts_sec, ignore_clock_desync=True)
 
+        sender_ip = ".".join(str(b) for b in packet_data[26:30])
+
         return SciencePacket(
             filename=self.filename,
             file_offset=file_offset,
@@ -422,7 +424,8 @@ class PcapDecoder:
             flags=meta[6],
             gti_index=0,
             gti_event_time=event_time,
-            pix_data=pix_data
+            pix_data=pix_data,
+            sender_ip=sender_ip
         )
 
     def close(self):
