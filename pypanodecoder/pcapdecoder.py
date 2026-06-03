@@ -416,14 +416,15 @@ class PcapDecoder:
         pcap_time = pcap_sec + pcap_nsec / 1e9
 
         event_time_good = False
-        if quabo_timestamp_good(pcap_sec):
-            event_time_good, event_time_sec, event_time_nsec, event_time = wr_to_unix(tai, nanosec, pcap_sec, ignore_clock_desync=True)
 
-        if not event_time_good:
-            # Fall back to using PCAP time if WR time is not good
-            event_time_sec = pcap_sec
-            event_time_nsec = pcap_nsec
-            event_time = pcap_time
+        # if quabo_timestamp_good(pcap_sec):
+        event_time_good, event_time_sec, event_time_nsec, event_time = wr_to_unix(tai, nanosec, pcap_sec, ignore_clock_desync=True)
+
+        # if not event_time_good:
+        #     # Fall back to using PCAP time if WR time is not good
+        #     event_time_sec = pcap_sec
+        #     event_time_nsec = pcap_nsec
+        #     event_time = pcap_time
 
         sender_ip = ".".join(str(b) for b in packet_data[26:30])
 
