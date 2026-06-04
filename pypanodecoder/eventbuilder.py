@@ -44,7 +44,7 @@ class CameraEvent:
         """Adds a packet to the current camera event."""
         self.packets[packet.quabo_id] = packet
 
-    def get_image(self):
+    def get_image(self, transpose=False):
         """
         Reconstructs the 32x32 camera image as a NumPy array.
         Applies rotations and positions according to the logic in makeevents.h.
@@ -68,30 +68,25 @@ class CameraEvent:
             # 1: Top Left (90 deg CW)
             # 2: Bottom Left (No rotation)
             # 3: Bottom Right (270 deg CW)
-            
-            if quabo_id == 0: # Top Right
-                q_img = np.flip(q_img) # 180 deg
-            elif quabo_id == 1: # Top Left
-                q_img = q_img.T
-                q_img = np.flip(q_img, axis=1) # 90 deg CW
-            elif quabo_id == 2: # Bottom Left
-                pass # No rotation
-            elif quabo_id == 3: # Bottom Right
-                q_img = q_img.T
-                q_img = np.flip(q_img, axis=0) # 270 deg CW
-            
-            # Determine offsets in 32x32 image
-            xoff, yoff = 0, 0
-            if quabo_id == 0: # Top Right
-                xoff, yoff = 16, 16
-            elif quabo_id == 1: # Top Left
-                xoff, yoff = 0, 16
-            elif quabo_id == 2: # Bottom Left
-                xoff, yoff = 0, 0
-            elif quabo_id == 3: # Bottom Right
-                xoff, yoff = 16, 0
-            
-            image[xoff:xoff+16, yoff:yoff+16] = q_img
+        
+            if transpose:                
+                if quabo_id == 0: # Top Right
+                    image[16:32, 16:32] = np.flip(q_img) # 180 deg
+                elif quabo_id == 1: # Top Left
+                    image[0:16, 16:32] = np.flip(q_img.T, axis=1) # 90 deg CW
+                elif quabo_id == 2: # Bottom Left
+                    image[0:16, 0:16] = q_img # No rotation
+                elif quabo_id == 3: # Bottom Right
+                    image[16:32, 0:16] = np.flip(q_img.T, axis=0) # 270 deg CW
+            else:
+                if quabo_id == 0: # Top Right
+                    image[16:32, 16:32] = np.flip(q_img).T # 180 deg + transpose
+                elif quabo_id == 1: # Top Left
+                    image[16:32, 0:16] = np.flip(q_img, axis=0) # 90 deg CW + transpose
+                elif quabo_id == 2: # Bottom Left
+                    image[0:16, 0:16] = q_img.T # Transpose only
+                elif quabo_id == 3: # Bottom Right
+                    image[0:16, 16:32] = np.flip(q_img, axis=1) # 270 deg CW + transpose
             
         return image
 
