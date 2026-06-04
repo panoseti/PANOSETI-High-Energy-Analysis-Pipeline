@@ -8,7 +8,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_image(image, transpose=True, ax=None, fig=None, colorbar_label=None, show_colorbar=True, cmap='viridis', plate_scale=None, **kwargs):
+def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, show_colorbar=True, cmap='viridis', plate_scale=None, **kwargs):
     """
     Plots a PANOSETI module image (pixels, SiPMs, or Quabos).
     
