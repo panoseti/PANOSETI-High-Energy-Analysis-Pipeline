@@ -480,7 +480,7 @@ class PcapDecoder:
             pcap_sec=pcap_sec,
             pcap_nsec=pcap_nsec,
             pcap_len=incl_len,
-            pcap_src_ip=sender_ip
+            pcap_src_ip=sender_ip,
             acq_mode=acq_mode,
             packet_ver=meta[1],
             packet_num=meta[2],
@@ -496,7 +496,7 @@ class PcapDecoder:
             flags=meta[6],
             gti_index=0,
             gti_event_time=event_time,
-            pix_data=pix_data,
+            pix_data=pix_data
         )
 
     def close(self):
