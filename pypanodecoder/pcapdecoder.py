@@ -17,7 +17,7 @@ import bisect
 # Using namedtuple for a "struct-like" behavior as requested.
 _SciencePacketBase = namedtuple('SciencePacket', [
     'filename', 'file_offset', 'file_captured_packet_index', 'file_science_packet_index',
-    'pcap_time', 'pcap_sec', 'pcap_nsec', 'pcap_len', 'sender_ip',
+    'pcap_time', 'pcap_sec', 'pcap_nsec', 'pcap_len', 'pcap_src_ip',
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
     'telescope_id', 'quabo_id', 'tai', 'nanosec', 
     'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
@@ -39,7 +39,7 @@ class SciencePacket(_SciencePacketBase):
 # Define the structure for a PANOSETI House Keeping Packet
 _HKPacketBase = namedtuple('HKPacket', [
     'filename', 'file_offset', 'file_captured_packet_index', 'file_hk_packet_index',
-    'pcap_time', 'pcap_sec', 'pcap_nsec', 'pcap_len', 'sender_ip',
+    'pcap_time', 'pcap_sec', 'pcap_nsec', 'pcap_len', 'pcap_src_ip',
     'board_loc', 'telescope_id', 'quabo_id',
     'gti_index', 'gti_event_time', 'data'
 ])
@@ -419,7 +419,7 @@ class PcapDecoder:
             pcap_sec=pcap_sec,
             pcap_nsec=pcap_nsec,
             pcap_len=incl_len,
-            sender_ip=sender_ip,
+            pcap_src_ip=sender_ip,
             board_loc=board_loc,
             telescope_id=telescope_id,
             quabo_id=quabo_id,
@@ -480,6 +480,7 @@ class PcapDecoder:
             pcap_sec=pcap_sec,
             pcap_nsec=pcap_nsec,
             pcap_len=incl_len,
+            pcap_src_ip=sender_ip
             acq_mode=acq_mode,
             packet_ver=meta[1],
             packet_num=meta[2],
@@ -496,7 +497,6 @@ class PcapDecoder:
             gti_index=0,
             gti_event_time=event_time,
             pix_data=pix_data,
-            sender_ip=sender_ip
         )
 
     def close(self):
