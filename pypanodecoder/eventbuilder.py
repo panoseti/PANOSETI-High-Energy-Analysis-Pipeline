@@ -44,51 +44,77 @@ class CameraEvent:
         """Adds a packet to the current camera event."""
         self.packets[packet.quabo_id] = packet
 
-    def get_image(self, transpose=False):
+    @staticmethod
+    def make_image(quabo0_pix=None, quabo1_pix=None, quabo2_pix=None, quabo3_pix=None,
+                   transpose=False, dtype=None, missing_value=0):
+        """
+        Combines 4 quabo pixel arrays (256 elements each) into a 32x32 camera image.
+        
+        Args:
+            quabo0_pix to quabo3_pix (array-like, optional): 256-pixel arrays.
+            transpose (bool): Whether to transpose the resulting quadrants.
+            dtype (numpy.dtype, optional): Data type of the output image. 
+                                           If None, uses type of the first present quabo.
+            missing_value: Value to use for quabos not present. Default 0.
+            
+        Returns:
+            np.ndarray: A 32x32 array of pixel values.
+        """
+        # Determine dtype if not provided
+        if dtype is None:
+            for pix in [quabo0_pix, quabo1_pix, quabo2_pix, quabo3_pix]:
+                if pix is not None:
+                    dtype = np.asanyarray(pix).dtype
+                    break
+            if dtype is None:
+                dtype = np.float64
+
+        image = np.full((32, 32), missing_value, dtype=dtype)
+        if transpose:
+            if quabo0_pix is not None:
+                pix = np.array(quabo0_pix).reshape((16, 16))
+                image[16:32, 16:32] = np.flip(pix, axis=1)
+            if quabo1_pix is not None:
+                pix = np.array(quabo1_pix).reshape((16, 16))
+                image[0:16, 16:32] = pix.T
+            if quabo2_pix is not None:
+                pix = np.array(quabo2_pix).reshape((16, 16))
+                image[0:16, 0:16] = np.flip(pix, axis=0)
+            if quabo3_pix is not None:
+                pix = np.array(quabo3_pix).reshape((16, 16))
+                image[16:32, 0:16] = np.flip(pix).T
+        else:
+            if quabo0_pix is not None:
+                pix = np.array(quabo0_pix).reshape((16, 16))
+                image[16:32, 16:32] = np.flip(pix, axis=1).T
+            if quabo1_pix is not None:
+                pix = np.array(quabo1_pix).reshape((16, 16))
+                image[16:32, 0:16] = pix
+            if quabo2_pix is not None:
+                pix = np.array(quabo2_pix).reshape((16, 16))
+                image[0:16, 0:16] = np.flip(pix, axis=0).T
+            if quabo3_pix is not None:
+                pix = np.array(quabo3_pix).reshape((16, 16))
+                image[0:16, 16:32] = np.flip(pix)
+
+        return image
+
+    def get_image(self, transpose=False, dtype=None, missing_value=0):
         """
         Reconstructs the 32x32 camera image as a NumPy array.
-        Applies rotations and positions according to the logic in makeevents.h.
         
         Returns:
             np.ndarray: A 32x32 array of pixel values.
         """
-        image = np.zeros((32, 32), dtype=np.int32)
-        
-        for quabo_id, packet in self.packets.items():
-            # Initial quabo image before rotation
-            pix_data = np.array(packet.pix_data).reshape((16, 16))
-            
-            # In makeevents.h:
-            # xbin = 16 - (i // 16), ybin = 1 + (i % 16)
-            # Translating to 0-indexed [x, y] coordinates: x = 15 - row, y = col
-            q_img = np.flip(pix_data, axis=0)
-            
-            # Apply rotations based on quabo index (quadrant)
-            # 0: Top Right (180 deg CW)
-            # 1: Top Left (90 deg CW)
-            # 2: Bottom Left (No rotation)
-            # 3: Bottom Right (270 deg CW)
-        
-            if transpose:                
-                if quabo_id == 0: # Top Right
-                    image[16:32, 16:32] = np.flip(q_img) # 180 deg
-                elif quabo_id == 1: # Top Left
-                    image[0:16, 16:32] = np.flip(q_img.T, axis=1) # 90 deg CW
-                elif quabo_id == 2: # Bottom Left
-                    image[0:16, 0:16] = q_img # No rotation
-                elif quabo_id == 3: # Bottom Right
-                    image[16:32, 0:16] = np.flip(q_img.T, axis=0) # 270 deg CW
-            else:
-                if quabo_id == 0: # Top Right
-                    image[16:32, 16:32] = np.flip(q_img).T # 180 deg + transpose
-                elif quabo_id == 1: # Top Left
-                    image[16:32, 0:16] = np.flip(q_img, axis=0) # 90 deg CW + transpose
-                elif quabo_id == 2: # Bottom Left
-                    image[0:16, 0:16] = q_img.T # Transpose only
-                elif quabo_id == 3: # Bottom Right
-                    image[0:16, 16:32] = np.flip(q_img, axis=1) # 270 deg CW + transpose
-            
-        return image
+        return self.make_image(
+            quabo0_pix=self.packets[0].pix_data if 0 in self.packets else None,
+            quabo1_pix=self.packets[1].pix_data if 1 in self.packets else None,
+            quabo2_pix=self.packets[2].pix_data if 2 in self.packets else None,
+            quabo3_pix=self.packets[3].pix_data if 3 in self.packets else None,
+            transpose=transpose,
+            dtype=dtype,
+            missing_value=missing_value
+        )
 
     def __repr__(self):
         quabos = sorted(list(self.packets.keys()))
