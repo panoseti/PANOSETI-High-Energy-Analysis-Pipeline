@@ -7,6 +7,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 
 def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, show_colorbar=True, cmap='viridis', plate_scale=None, **kwargs):
     """
@@ -134,36 +135,47 @@ def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, s
 
     return fig, ax, pc
 
-def overlay_stars(stars, p1, p2, flip=False, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None):
+def overlay_stars(stars, p1=None, p2=None, flip=False, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, **kwargs):
     """
-    Overlays stars on a field and calculates the pointing solution.
+    Overlays stars on a field and optionally calculates the pointing solution.
     
     Args:
         stars (list): List of star dictionaries from stars.get_bright_stars().
-        p1 (tuple): (index, x, y) for the first reference star.
-        p2 (tuple): (index, x, y) for the second reference star.
+        p1 (tuple, optional): (index, x, y) for the first reference star.
+        p2 (tuple, optional): (index, x, y) for the second reference star.
         flip (bool): Parity flip for the image coordinates.
         ax (matplotlib.axes.Axes, optional): Axes to plot on.
         use_index (bool): If True, label stars with their index in the stars list.
         clip_to_axes (bool): If True, only show stars within the current axes limits.
         color (str): Color for the star markers and labels (default: 'r').
         plate_scale (float, optional): If provided, force this plate scale (deg/pix).
+        ps (PointingSolution, optional): Pre-calculated pointing solution.
+        show_mags (bool): If True, show star magnitudes in parentheses after labels.
+        auto_align (bool): If True, automatically set horizontal alignment based on 
+                           position to avoid clipping at edges.
+        **kwargs: Additional arguments passed to ax.text() for label styling (e.g., fontsize).
         
     Returns:
-        PointingSolution: The calculated pointing solution.
+        PointingSolution: The pointing solution used.
     """
     from .pointing import PointingSolution
     
-    i1, x1, y1 = p1
-    i2, x2, y2 = p2
-    
-    ps = PointingSolution(stars[i1], (x1, y1), stars[i2], (x2, y2), flip=flip, plate_scale=plate_scale)
+    if ps is None:
+        if p1 is None or p2 is None:
+            raise ValueError("Must provide either a PointingSolution (ps) or two reference stars (p1, p2).")
+        i1, x1, y1 = p1
+        i2, x2, y2 = p2
+        ps = PointingSolution.solve(stars[i1], (x1, y1), stars[i2], (x2, y2), flip=flip, plate_scale=plate_scale)
     
     if ax is None:
         ax = plt.gca()
         
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
+    
+    # Default text options
+    text_kwargs = {'fontsize': 8, 'ha': 'left', 'va': 'bottom'}
+    text_kwargs.update(kwargs)
     
     # Plot stars
     for i, star in enumerate(stars):
@@ -184,6 +196,20 @@ def overlay_stars(stars, p1, p2, flip=False, ax=None, use_index=False, clip_to_a
             # Merge multiple whitespaces
             label = " ".join(name.split())
             
-        ax.text(x, y, label, color=color, fontsize=8, ha='left', va='bottom')
+        if show_mags:
+            label = f"{label} ({star['vmag']:.1f})"
+            
+        # Copy kwargs to allow per-star modification
+        current_text_kwargs = text_kwargs.copy()
+        if auto_align:
+            x_min, x_max = min(xlim), max(xlim)
+            if (x - x_min) / (x_max - x_min) > 0.8:
+                current_text_kwargs['ha'] = 'right'
+            else:
+                current_text_kwargs['ha'] = 'left'
+
+        radius = math.sqrt(size) / 2.0
+        dx = radius if current_text_kwargs.get('ha') == 'left' else -radius
+        ax.text(x + dx, y, label, color=color, **current_text_kwargs)
         
     return ps
