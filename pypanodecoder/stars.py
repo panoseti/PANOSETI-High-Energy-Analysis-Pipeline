@@ -10,7 +10,10 @@ import urllib.request
 import gzip
 import io
 
-YBSC5_URL = "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz"
+YBSC5_URLS = [
+    "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz",
+    "https://github.com/sfegan/PANOSETI-High-Energy-Analysis-Pipeline/raw/refs/heads/main/pypanodecoder/resources/ybsc5.gz"
+]
 
 def _rad(x):
     return math.radians(x)
@@ -31,12 +34,22 @@ def _load_ybsc():
     if _ybsc_cache is not None:
         return _ybsc_cache
 
-    req = urllib.request.Request(
-        YBSC5_URL,
-        headers={"User-Agent": "Mozilla/5.0"}
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        raw = r.read()
+    raw = None
+    for url in YBSC5_URLS:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                raw = r.read()
+            break
+        except Exception:
+            continue
+
+    if raw is None:
+        raise RuntimeError(f"Failed to download Yale Bright Star Catalog from all sources: {YBSC5_URLS}")
+
     with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
         text = gz.read().decode("latin-1", errors="ignore")
 
