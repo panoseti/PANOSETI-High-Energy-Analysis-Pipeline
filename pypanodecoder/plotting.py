@@ -208,8 +208,10 @@ def overlay_stars(stars, p1=None, p2=None, flip=False, ax=None, use_index=False,
             else:
                 current_text_kwargs['ha'] = 'left'
 
-        radius = math.sqrt(size) / 2.0
-        dx = radius if current_text_kwargs.get('ha') == 'left' else -radius
-        ax.text(x + dx, y, label, color=color, **current_text_kwargs)
+        radius = math.sqrt(size) / 2.0 * 1.2
+        offset_x = radius if current_text_kwargs.get('ha') == 'left' else -radius
+        ax.annotate(label, xy=(x, y), xytext=(offset_x, 0),
+                    textcoords='offset points', 
+                    color=color, **current_text_kwargs)
         
     return ps
