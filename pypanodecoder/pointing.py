@@ -7,9 +7,28 @@ import math
 class PointingSolution:
     """
     Represents a pointing solution for translating between sky and image coordinates.
-    Calculated using two reference stars.
     """
-    def __init__(self, star1, pos1, star2, pos2, flip=False, plate_scale=None):
+    def __init__(self, ra0, dec0, plate_scale=1.0, theta=0.0, flip=False, pos0=(0, 0)):
+        """
+        Initializes a pointing solution with explicit parameters.
+        
+        Args:
+            ra0 (float): RA of the reference point (degrees).
+            dec0 (float): Dec of the reference point (degrees).
+            plate_scale (float): Plate scale in degrees/pixel (default 1.0).
+            theta (float): Rotation angle in degrees (default 0.0).
+            flip (bool): Parity flip for the image coordinates (default False).
+            pos0 (tuple): Image coordinates (x, y) for the reference point (default (0, 0)).
+        """
+        self.ra0 = ra0
+        self.dec0 = dec0
+        self.plate_scale = plate_scale
+        self.theta = math.radians(theta)
+        self.flip = flip
+        self.x1, self.y1 = pos0
+
+    @classmethod
+    def solve(cls, star1, pos1, star2, pos2, flip=False, plate_scale=None):
         """
         Calculates a pointing solution from two stars.
         
@@ -23,13 +42,12 @@ class PointingSolution:
                                            The distance between pos1 and pos2 will be 
                                            ignored for scale but used for orientation.
         """
-        self.ra0 = star1['ra_deg']
-        self.dec0 = star1['dec_deg']
-        self.x1, self.y1 = pos1
-        self.flip = flip
+        # Create temporary instance to use _sky_to_tangent (which depends on self.ra0/dec0)
+        # We'll use star1 as the reference point
+        ps = cls(star1['ra_deg'], star1['dec_deg'], flip=flip, pos0=pos1)
         
         # Tangent plane coordinates of star2 relative to star1
-        xi2, eta2 = self._sky_to_tangent(star2['ra_deg'], star2['dec_deg'])
+        xi2, eta2 = ps._sky_to_tangent(star2['ra_deg'], star2['dec_deg'])
         d_tp = math.sqrt(xi2**2 + eta2**2)
         
         # Image coordinates of star2 relative to star1
@@ -41,9 +59,9 @@ class PointingSolution:
             raise ValueError("Star positions in image must be distinct.")
             
         if plate_scale is not None:
-            self.plate_scale = plate_scale
+            ps.plate_scale = plate_scale
         else:
-            self.plate_scale = d_tp / d_pix
+            ps.plate_scale = d_tp / d_pix
         
         # Parity factor
         f = -1.0 if flip else 1.0
@@ -51,7 +69,9 @@ class PointingSolution:
         # Calculate rotation angle theta
         phi_img = math.atan2(f * dy, dx)
         phi_tp = math.atan2(eta2, xi2)
-        self.theta = phi_tp - phi_img
+        ps.theta = phi_tp - phi_img
+        
+        return ps
 
     def _sky_to_tangent(self, ra, dec):
         """Convert RA/Dec to tangent plane coordinates (degrees) relative to (ra0, dec0)."""
@@ -134,9 +154,12 @@ class PointingSolution:
                 f"flip={self.flip}>")
 
 OBSERVATION_TARGETS = {
-    "crab":   (83.63308, 22.01450),
-    "mrk421": (166.11379, 38.20883),
-    "mrk501": (253.46758, 39.76017)
+    "crab":            (83.63308, 22.01450),
+    "mrk421":          (166.11379, 38.20883),
+    "mrk501":          (253.46758, 39.76017),
+    "galactic_center": (266.41683, -29.00781),
+    "hessj1837-069":   (279.41500, -6.95000),
+    "mgroj2019+37":    (303.15708, 36.18417),
 }
 
 def get_target_coordinates(name):
