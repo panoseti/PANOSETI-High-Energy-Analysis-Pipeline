@@ -135,7 +135,7 @@ def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, s
 
     return fig, ax, pc
 
-def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, max_magnitude=6.0, ax=None, east_on_left=True, **kwargs):
+def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, max_magnitude=5.0, ax=None, east_on_left=True, **kwargs):
     """
     Plots a star field around a specific source or set of coordinates.
     
@@ -161,8 +161,6 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
         if coords is None:
             raise ValueError(f"Unknown source: {source}")
         ra0, dec0 = coords
-        if label is None:
-            label = source
     elif ra is not None and dec is not None:
         ra0, dec0 = ra, dec
     else:
@@ -176,12 +174,18 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
     ps = pointing.PointingSolution(ra0, dec0, plate_scale=1.0, east_on_left=east_on_left)
 
     # Fetch stars
-    star_list = stars.get_bright_stars(ra0, dec0, radius_deg=radius_deg, max_magnitude=max_magnitude)
+    star_list = stars.get_bright_stars(ra0, dec0, radius_deg=1.5*radius_deg, max_magnitude=max_magnitude)
+
+    ax.set_aspect('equal')
+    # Set limits slightly larger than the visual aids
+    limit = radius_deg if radius_deg > 5.5 else 6.0
+    ax.set_xlim(-limit, limit)
+    ax.set_ylim(-limit, limit)
 
     # Plot center marker and label if requested
     if label is not None:
         ax.plot(0, 0, 'kx')
-        ax.annotate(label, xy=(0, 0), xytext=(5, 5), textcoords='offset points', 
+        ax.annotate(label, xy=(0, 0), xytext=(2.5, 2.5), textcoords='offset points', 
                     ha='left', va='bottom', fontsize=8)
 
     # Default overlay options
@@ -189,8 +193,10 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
         'color': 'b',
         'show_mags': True,
         'clip_to_axes': True,
-        'fontsize': 6,
-        'auto_align': True
+        'fontsize': 4,
+        'auto_align': True,
+        'east_on_left': east_on_left,
+        'clip_to_axes': True
     }
     overlay_kwargs.update(kwargs)
 
@@ -204,16 +210,10 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
     # Square boundary at +/- 5 degrees
     ax.vlines([-5.0, 5.0], -5.0, 5.0, colors='k', linestyles='--', lw=0.75, alpha=0.5)
     ax.hlines([-5.0, 5.0], -5.0, 5.0, colors='k', linestyles='--', lw=0.75, alpha=0.5)
-
-    ax.set_aspect('equal')
-    # Set limits slightly larger than the visual aids
-    limit = radius_deg if radius_deg > 5.5 else 6.0
-    ax.set_xlim(limit, -limit) if east_on_left else ax.set_xlim(-limit, limit)
-    ax.set_ylim(-limit, limit)
     
     ax.grid(True, alpha=0.3)
-    ax.set_xlabel('Delta RA [deg]')
-    ax.set_ylabel('Delta Dec [deg]')
+    ax.set_xlabel('West [deg]' if east_on_left else 'East [deg]')
+    ax.set_ylabel('North [deg]')
     
     return ps
 
