@@ -135,7 +135,89 @@ def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, s
 
     return fig, ax, pc
 
-def overlay_stars(stars, p1=None, p2=None, flip=False, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, **kwargs):
+def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, max_magnitude=6.0, ax=None, east_on_left=True, **kwargs):
+    """
+    Plots a star field around a specific source or set of coordinates.
+    
+    Args:
+        source (str, optional): Name of the source to look up.
+        ra (float, optional): RA of the center (degrees).
+        dec (float, optional): Dec of the center (degrees).
+        label (str, optional): Label for the center source. If None, no cross or label is plotted.
+        radius_deg (float): Radius to fetch stars for (default 8.0).
+        max_magnitude (float): Maximum magnitude of stars to display (default 6.0).
+        ax (matplotlib.axes.Axes, optional): Axes to plot on.
+        east_on_left (bool): If True, East is to the left (standard astronomical view).
+        **kwargs: Additional arguments passed to overlay_stars().
+        
+    Returns:
+        PointingSolution: The pointing solution used for the plot.
+    """
+    from . import pointing
+    from . import stars
+
+    if source is not None:
+        coords = pointing.get_target_coordinates(source)
+        if coords is None:
+            raise ValueError(f"Unknown source: {source}")
+        ra0, dec0 = coords
+        if label is None:
+            label = source
+    elif ra is not None and dec is not None:
+        ra0, dec0 = ra, dec
+    else:
+        raise ValueError("Must provide either 'source' or both 'ra' and 'dec'.")
+
+    if ax is None:
+        ax = plt.gca()
+
+    # Create a pointing solution centered at (ra0, dec0) at image (0,0)
+    # We use a unit plate scale so that image coordinates are degrees from center
+    ps = pointing.PointingSolution(ra0, dec0, plate_scale=1.0, east_on_left=east_on_left)
+
+    # Fetch stars
+    star_list = stars.get_bright_stars(ra0, dec0, radius_deg=radius_deg, max_magnitude=max_magnitude)
+
+    # Plot center marker and label if requested
+    if label is not None:
+        ax.plot(0, 0, 'kx')
+        ax.annotate(label, xy=(0, 0), xytext=(5, 5), textcoords='offset points', 
+                    ha='left', va='bottom', fontsize=8)
+
+    # Default overlay options
+    overlay_kwargs = {
+        'color': 'b',
+        'show_mags': True,
+        'clip_to_axes': True,
+        'fontsize': 6,
+        'auto_align': True
+    }
+    overlay_kwargs.update(kwargs)
+
+    # Plot stars
+    overlay_stars(star_list, ps=ps, ax=ax, **overlay_kwargs)
+
+    # Visual aids: 5-degree circle and square
+    theta = np.linspace(0, 2 * np.pi, 360)
+    ax.plot(5.0 * np.cos(theta), 5.0 * np.sin(theta), 'k--', lw=0.5, alpha=0.5)
+    
+    # Square boundary at +/- 5 degrees
+    ax.vlines([-5.0, 5.0], -5.0, 5.0, colors='k', linestyles='--', lw=0.75, alpha=0.5)
+    ax.hlines([-5.0, 5.0], -5.0, 5.0, colors='k', linestyles='--', lw=0.75, alpha=0.5)
+
+    ax.set_aspect('equal')
+    # Set limits slightly larger than the visual aids
+    limit = radius_deg if radius_deg > 5.5 else 6.0
+    ax.set_xlim(limit, -limit) if east_on_left else ax.set_xlim(-limit, limit)
+    ax.set_ylim(-limit, limit)
+    
+    ax.grid(True, alpha=0.3)
+    ax.set_xlabel('Delta RA [deg]')
+    ax.set_ylabel('Delta Dec [deg]')
+    
+    return ps
+
+def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, **kwargs):
     """
     Overlays stars on a field and optionally calculates the pointing solution.
     
@@ -143,7 +225,7 @@ def overlay_stars(stars, p1=None, p2=None, flip=False, ax=None, use_index=False,
         stars (list): List of star dictionaries from stars.get_bright_stars().
         p1 (tuple, optional): (index, x, y) for the first reference star.
         p2 (tuple, optional): (index, x, y) for the second reference star.
-        flip (bool): Parity flip for the image coordinates.
+        east_on_left (bool): If True, East is to the left (standard astronomical view).
         ax (matplotlib.axes.Axes, optional): Axes to plot on.
         use_index (bool): If True, label stars with their index in the stars list.
         clip_to_axes (bool): If True, only show stars within the current axes limits.
@@ -165,7 +247,7 @@ def overlay_stars(stars, p1=None, p2=None, flip=False, ax=None, use_index=False,
             raise ValueError("Must provide either a PointingSolution (ps) or two reference stars (p1, p2).")
         i1, x1, y1 = p1
         i2, x2, y2 = p2
-        ps = PointingSolution.solve(stars[i1], (x1, y1), stars[i2], (x2, y2), flip=flip, plate_scale=plate_scale)
+        ps = PointingSolution.solve(stars[i1], (x1, y1), stars[i2], (x2, y2), east_on_left=east_on_left, plate_scale=plate_scale)
     
     if ax is None:
         ax = plt.gca()
