@@ -9,6 +9,7 @@ import math
 import urllib.request
 import gzip
 import io
+import os
 
 YBSC5_URLS = [
     "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz",
@@ -35,20 +36,32 @@ def _load_ybsc():
         return _ybsc_cache
 
     raw = None
-    for url in YBSC5_URLS:
+
+    # Try local file first
+    local_path = os.path.join(os.path.dirname(__file__), "resources", "ybsc5.gz")
+    if os.path.exists(local_path):
         try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            with urllib.request.urlopen(req, timeout=10) as r:
-                raw = r.read()
-            break
+            with open(local_path, "rb") as f:
+                raw = f.read()
         except Exception:
-            continue
+            pass
+
+    # Fallback to download if local file not found or failed to read
+    if raw is None:
+        for url in YBSC5_URLS:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    raw = r.read()
+                break
+            except Exception:
+                continue
 
     if raw is None:
-        raise RuntimeError(f"Failed to download Yale Bright Star Catalog from all sources: {YBSC5_URLS}")
+        raise RuntimeError(f"Failed to load Yale Bright Star Catalog from local file or sources: {YBSC5_URLS}")
 
     with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
         text = gz.read().decode("latin-1", errors="ignore")
