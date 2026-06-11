@@ -6,7 +6,6 @@
 # Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytechnique de Paris
 
 import os
-import sys
 import json
 import glob
 import bisect
@@ -15,175 +14,175 @@ import numpy as np
 from .pcapdecoder import parse_time
 from .eventbuilder import CameraImages, CameraEvent
 
-class BaselineDatabase:                                                                                                                                                                                                          
-    """                                                                                                                                                                                                                          
-    A database of Quabo pedestal baseline measurements.                                                                                                                                                                          
-    Loads measurements from quabo_ph_baseline.json files and maps UIDs to                                                                                                                                                        
-    board locations using quabo_uids.json files.                                                                                                                                                                                 
-    """                                                                                                                                                                                                                          
-    def __init__(self, paths=None):                                                                                                                                                                                              
-        """                                                                                                                                                                                                                      
-        Args:                                                                                                                                                                                                                    
-            paths (str, list, optional): Glob pattern(s) or list of files/directories                                                                                                                                            
-                                         to search for baseline files.                                                                                                                                                           
-        """                                                                                                                                                                                                                      
-        # board_loc -> [ (timestamp, baseline_array), ... ] sorted by timestamp                                                                                                                                                  
-        self.baselines = {}                                                                                                                                                                                                      
-        if paths:                                                                                                                                                                                                                
-            self.load(paths)                                                                                                                                                                                                     
-                                                                                                                                                                                                                                 
-    def load(self, paths):                                                                                                                                                                                                       
-        """                                                                                                                                                                                                                      
-        Searches for and loads baseline measurements.                                                                                                                                                                            
-                                                                                                                                                                                                                                 
-        Args:                                                                                                                                                                                                                    
-            paths (str, list): Glob pattern(s) or list of files/directories.                                                                                                                                                     
-        """                                                                                                                                                                                                                      
-        if isinstance(paths, str):                                                                                                                                                                                               
-            if any(c in paths for c in '*?['):                      
-                files = glob.glob(paths, recursive=True) 
-            else:                                                        
-                files = [paths]                                         
-        else:                                                                                                                    
-            files = []                                            
-            for p in paths:                                                                                           
-                if any(c in p for c in '*?['):                                                                      
-                    files.extend(glob.glob(p, recursive=True))             
-                else:                                                                                                                                                                                                            
-                    files.append(p)                                                                                                                                                                                              
-                                                                                                                                                                                                                                 
-        # Collect all quabo_ph_baseline.json files                                                                                                                                                                               
-        baseline_files = []                                                                                                                                                                                                      
-        for f in files:                                                                                                                                                                                                          
-            if os.path.isdir(f):                                                                                                                                                                                                 
-                baseline_files.extend(glob.glob(os.path.join(f, "**/quabo_ph_baseline.json"), recursive=True))                                                                                                                   
-            elif f.endswith("quabo_ph_baseline.json"):                                                                                                                                                                           
-                baseline_files.append(f)                                                                                                                                                                                         
-                                                                                                                                                                                                                                 
-        for bfile in sorted(baseline_files):                                                                                                                                                                                     
-            # Look for quabo_uids.json in the same directory                                                                                                                                                                     
-            bdir = os.path.dirname(bfile)                                                                                                                                                                                            
-            ufile = os.path.join(bdir, "quabo_uids.json")                                                                                                                                                                            
-                                                                                                                                                                                                                                     
-            if not os.path.exists(ufile):                                                                                                                                                                                        
-                # Try parent directory as a fallback                                                                                                                                                                             
-                ufile = os.path.join(os.path.dirname(bdir), "quabo_uids.json")                                                                                                                                                       
-                if not os.path.exists(ufile):                                                                                                                                                                                        
-                    continue                                                                                                                                                                                                         
-                                                                                                                                                                                                                                 
-            uid_map = self._load_uid_map(ufile)                                                                                                                                                                                  
-            self._load_baseline_file(bfile, uid_map)                                                                                                                                                                                 
-                                                                                                                                                                                                                                     
-    def _load_uid_map(self, ufile):                                                                                                                                                                                                  
-        """Loads quabo_uids.json and returns a map of UID -> board_loc."""                                                                                                                                                       
-        with open(ufile, 'r') as f:                                                                                                                                                                                              
-            data = json.load(f)                                                                                                                                                                                                     
-                                                                                                                                                                                                                                     
-        uid_to_loc = {}                                                                                                                              
-        for dome in data.get('domes', []):                                                                                                                                                                                           
-            for module in dome.get('modules', []):                                                                                                                                                                                   
-                ip = module.get('ip_addr', '')                                                                                                                                                                                       
-                try:                                                                                                                                                                                                                
-                    octets = [int(o) for o in ip.split('.')]                                                                                                                                                                        
-                    if len(octets) == 4:                                                                                                                                                                                         
-                        # board_loc logic from pcapdecoder.py                                                                                                                                                                    
-                        board_loc_base = ((octets[2] & 0x03) << 8) | octets[3]                                                                                                                                                   
+class BaselineDatabase:
+    """
+    A database of Quabo pedestal baseline measurements.
+    Loads measurements from quabo_ph_baseline.json files and maps UIDs to
+    board locations using quabo_uids.json files.
+    """
+    def __init__(self, paths=None):
+        """
+        Args:
+            paths (str, list, optional): Glob pattern(s) or list of files/directories
+                                         to search for baseline files.
+        """
+        # board_loc -> [ (timestamp, baseline_array), ... ] sorted by timestamp
+        self.baselines = {}
+        if paths:
+            self.load(paths)
+
+    def load(self, paths):
+        """
+        Searches for and loads baseline measurements.
+
+        Args:
+            paths (str, list): Glob pattern(s) or list of files/directories.
+        """
+        if isinstance(paths, str):
+            if any(c in paths for c in '*?['):
+                files = glob.glob(paths, recursive=True)
+            else:
+                files = [paths]
+        else:
+            files = []
+            for p in paths:
+                if any(c in p for c in '*?['):
+                    files.extend(glob.glob(p, recursive=True))
+                else:
+                    files.append(p)
+
+        # Collect all quabo_ph_baseline.json files
+        baseline_files = []
+        for f in files:
+            if os.path.isdir(f):
+                baseline_files.extend(glob.glob(os.path.join(f, "**/quabo_ph_baseline.json"), recursive=True))
+            elif f.endswith("quabo_ph_baseline.json"):
+                baseline_files.append(f)
+
+        for bfile in sorted(baseline_files):
+            # Look for quabo_uids.json in the same directory
+            bdir = os.path.dirname(bfile)
+            ufile = os.path.join(bdir, "quabo_uids.json")
+
+            if not os.path.exists(ufile):
+                # Try parent directory as a fallback
+                ufile = os.path.join(os.path.dirname(bdir), "quabo_uids.json")
+                if not os.path.exists(ufile):
+                    continue
+
+            uid_map = self._load_uid_map(ufile)
+            self._load_baseline_file(bfile, uid_map)
+
+    def _load_uid_map(self, ufile):
+        """Loads quabo_uids.json and returns a map of UID -> board_loc."""
+        with open(ufile, 'r') as f:
+            data = json.load(f)
+
+        uid_to_loc = {}
+        for dome in data.get('domes', []):
+            for module in dome.get('modules', []):
+                ip = module.get('ip_addr', '')
+                try:
+                    octets = [int(o) for o in ip.split('.')]
+                    if len(octets) == 4:
+                        # board_loc logic from pcapdecoder.py
+                        board_loc_base = ((octets[2] & 0x03) << 8) | octets[3]
                         # Each module has 4 quabos, usually sequentially indexed                                                                                                                                           [352/1091]
-                        for i, q in enumerate(module.get('quabos', [])):                                                                                                                                                         
-                            uid = q.get('uid')                                                                                                                                                                                   
-                            if uid:                                                                                                                                                                                              
-                                uid_to_loc[uid] = board_loc_base + i                                                                                                                                                             
-                except (ValueError, IndexError):                                                                                                                                                                                     
-                    continue                                                                                                                                                                                                         
-        return uid_to_loc                                                                                                                                                                                                            
-                                                                                                                                                                                                                                    
-    def _load_baseline_file(self, bfile, uid_map):                                                                                                                                                                               
-        """Loads a baseline file and adds its data to the database."""                                                                                                                                                           
-        with open(bfile, 'r') as f:                                                                                                                                                                                              
-            data = json.load(f)                                                                                                                                                                                                  
-                                                                                                                                                                                                                                 
-        try:                                                                                                                                                                                                                     
-            ts = parse_time(data.get('date'))                                                                                                                                                                                    
-        except (ValueError, TypeError):                                                                                                                                                                                          
-            # Use file modification time if date is missing or invalid                                                                                                                                                           
-            ts = os.path.getmtime(bfile)                                                                                                                                                                                         
-                                                                                                                                                                                                                                 
-        for q in data.get('quabos', []):                                                                                                                                                                                         
-            uid = q.get('uid')                                                                                                                                                                                                   
-            coefs = q.get('coefs')                                                                                                                                                                                               
-            if uid in uid_map and coefs:                                                                                                                                                                                         
-                loc = uid_map[uid]                                                                                                                                                                                               
-                if loc not in self.baselines:                                                                                                                                                                                    
-                    self.baselines[loc] = []                                                                                                                                                                                     
-                                                                                                                                                                                                                                 
-                # Check if this timestamp already exists for this board                                                                                                                                                          
-                exists = False                                                                                                                                                                                                   
-                for existing_ts, _ in self.baselines[loc]:                                                                                                                                                                       
-                    if abs(existing_ts - ts) < 1e-3:                                                                                                                                                                             
-                        exists = True                                                                                                                                                                                            
-                        break                                                                                                                                                                                                    
-                                                                                                                                                                                                                                 
-                if not exists:                                                                                                                                                                                                   
-                    # Store as numpy array for easier manipulation                                                                                                                                                               
-                    self.baselines[loc].append((ts, np.array(coefs)))                                                                                                                                                            
-                    self.baselines[loc].sort(key=lambda x: x[0])                                                                                                                                                                 
-                                                                                                                                                                                                                                 
+                        for i, q in enumerate(module.get('quabos', [])):
+                            uid = q.get('uid')
+                            if uid:
+                                uid_to_loc[uid] = board_loc_base + i
+                except (ValueError, IndexError):
+                    continue
+        return uid_to_loc
+
+    def _load_baseline_file(self, bfile, uid_map):
+        """Loads a baseline file and adds its data to the database."""
+        with open(bfile, 'r') as f:
+            data = json.load(f)
+
+        try:
+            ts = parse_time(data.get('date'))
+        except (ValueError, TypeError):
+            # Use file modification time if date is missing or invalid
+            ts = os.path.getmtime(bfile)
+
+        for q in data.get('quabos', []):
+            uid = q.get('uid')
+            coefs = q.get('coefs')
+            if uid in uid_map and coefs:
+                loc = uid_map[uid]
+                if loc not in self.baselines:
+                    self.baselines[loc] = []
+
+                # Check if this timestamp already exists for this board
+                exists = False
+                for existing_ts, _ in self.baselines[loc]:
+                    if abs(existing_ts - ts) < 1e-3:
+                        exists = True
+                        break
+
+                if not exists:
+                    # Store as numpy array for easier manipulation
+                    self.baselines[loc].append((ts, np.array(coefs)))
+                    self.baselines[loc].sort(key=lambda x: x[0])
+
     def get_baseline(self, time, board_loc=None, telescope_id=None):
-        """                                              
+        """
         Retrieves the nearest baseline measurement before the given time.
-                                                                        
-        Args:                                                                                                                    
+
+        Args:
             time (float, str): UTC time (timestamp or ISO string).
-            board_loc (int, optional): Specific board location.                                                       
-            telescope_id (int, optional): Retrieve combined baseline image for a telescope.                         
-                                                                           
-        Returns:                                                                                                                                                                                                                 
-            np.ndarray: 256-pixel array (if board_loc given) or                                                                                                                                                                  
-                        32x32 camera image (if telescope_id given).                                                                                                                                                              
-                        Returns None if no baseline found.                                                                                                                                                                       
-        """                                                                                                                                                                                                                      
-        ts_req = parse_time(time)                                                                                                                                                                                                
-                                                                                                                                                                                                                                 
-        if board_loc is not None:                                                                                                                                                                                                
-            return self._get_board_baseline(ts_req, board_loc)                                                                                                                                                                   
-                                                                                                                                                                                                                                 
-        if telescope_id is not None:                                                                                                                                                                                             
-            # Reconstruct 32x32 image from the 4 quabos (0-3) of this telescope                                                                                                                                                  
-            q_baselines = []                                                                                                                                                                                                     
-            for i in range(4):                                                                                                                                                                                                       
-                loc = (telescope_id << 2) | i                                                                                                                                                                                        
-                q_baselines.append(self._get_board_baseline(ts_req, loc))                                                                                                                                                            
-                                                                                                                                                                                                                                 
-            # Check if we have at least one quabo                                                                                                                                                                                
-            if all(b is None for b in q_baselines):                                                                                                                                                                                  
-                return None                                                                                                                                                                                                          
-                                                                                                                                                                                                                                     
-            return CameraEvent.make_image(                                                                                                                                                                                       
-                quabo0_pix=q_baselines[0],                                                                                                                                                                                       
-                quabo1_pix=q_baselines[1],                                                                                                                                                                                           
-                quabo2_pix=q_baselines[2],                                                                                                                                                                                           
-                quabo3_pix=q_baselines[3]                                                                                                                                                                                            
-            )                                                                                                                                                                                                                    
-                                                                                                                                                                                                                                 
-        return None                                                                                                                                                                                                                 
-                                                                                                                                                                                                                                     
-    def _get_board_baseline(self, ts, loc):                                                                                                          
-        if loc not in self.baselines or not self.baselines[loc]:                                                                                                                                                                     
-            return None                                                                                                                                                                                                              
-                                                                                                                                                                                                                                     
-        # Find the index of the first baseline with timestamp > ts                                                                                                                                                                  
-        times = [b[0] for b in self.baselines[loc]]                                                                                                                                                                                 
-        idx = bisect.bisect_right(times, ts)                                                                                                                                                                                     
-                                                                                                                                                                                                                                 
-        # We want the one BEFORE or AT ts, which is idx - 1                                                                                                                                                                      
-        if idx == 0:                                                                                                                                                                                                             
-            # No baseline before this time, return the earliest one anyway?                                                                                                                                                      
-            # User says "return the nearest measured baseline that is before any given time"                                                                                                                                     
-            # If nothing is before, maybe we shouldn't return anything.                                                                                                                                                          
-            return None                                                                                                                                                                                                          
-                                                                                                                                                                                                                                     
-        return self.baselines[loc][idx - 1][1]                                                                                                                                                                                       
-                                                                                                                                                                                                                                     
+            board_loc (int, optional): Specific board location.
+            telescope_id (int, optional): Retrieve combined baseline image for a telescope.
+
+        Returns:
+            np.ndarray: 256-pixel array (if board_loc given) or
+                        32x32 camera image (if telescope_id given).
+                        Returns None if no baseline found.
+        """
+        ts_req = parse_time(time)
+
+        if board_loc is not None:
+            return self._get_board_baseline(ts_req, board_loc)
+
+        if telescope_id is not None:
+            # Reconstruct 32x32 image from the 4 quabos (0-3) of this telescope
+            q_baselines = []
+            for i in range(4):
+                loc = (telescope_id << 2) | i
+                q_baselines.append(self._get_board_baseline(ts_req, loc))
+
+            # Check if we have at least one quabo
+            if all(b is None for b in q_baselines):
+                return None
+
+            return CameraEvent.make_image(
+                quabo0_pix=q_baselines[0],
+                quabo1_pix=q_baselines[1],
+                quabo2_pix=q_baselines[2],
+                quabo3_pix=q_baselines[3]
+            )
+
+        return None
+
+    def _get_board_baseline(self, ts, loc):
+        if loc not in self.baselines or not self.baselines[loc]:
+            return None
+
+        # Find the index of the first baseline with timestamp > ts
+        times = [b[0] for b in self.baselines[loc]]
+        idx = bisect.bisect_right(times, ts)
+
+        # We want the one BEFORE or AT ts, which is idx - 1
+        if idx == 0:
+            # No baseline before this time, return the earliest one anyway?
+            # User says "return the nearest measured baseline that is before any given time"
+            # If nothing is before, maybe we shouldn't return anything.
+            return None
+
+        return self.baselines[loc][idx - 1][1]
+
     def get_adjacent_times(self, time, board_loc=None, telescope_id=None):
         """
         Returns the times of the previous and next measurements.
@@ -235,7 +234,7 @@ class BaselineDatabase:
                 times.update(b[0] for b in bl_list)
 
         return sorted(list(times))
- 
+
 
 class ChargeHistogram:
     """
@@ -250,13 +249,13 @@ class ChargeHistogram:
     def gaussian(cls, sigma, qcenter, mean=None):
         """
         Generates a Gaussian ChargeHistogram.
-        
+
         Args:
             sigma (array-like): Standard deviation(s) of the Gaussian(s).
             qcenter (array-like): Bin centers for the histogram.
-            mean (array-like, optional): Mean(s) of the Gaussian(s). 
+            mean (array-like, optional): Mean(s) of the Gaussian(s).
                                        Defaults to None (all zeros).
-            
+
         Returns:
             ChargeHistogram: A new histogram containing Gaussian densities.
         """
@@ -269,20 +268,20 @@ class ChargeHistogram:
 
         if len(qcenter) < 2:
             raise ValueError("qcenter must have at least two values to determine bin_width")
-        
+
         bin_width = qcenter[1] - qcenter[0]
         edges = np.append(qcenter - 0.5 * bin_width, qcenter[-1] + 0.5 * bin_width)
-        
+
         # Broadcast mean and sigma to (grid..., 1) and edges to (N+1,)
         # scipy.stats.norm.cdf handles the broadcasting
         cdf_edges = norm.cdf(edges, loc=mean[..., np.newaxis], scale=sigma[..., np.newaxis])
-        
+
         # Probabilities in each bin
         probabilities = np.diff(cdf_edges, axis=-1)
-        
+
         # Normalize as density: divide by bin_width
         qhist = probabilities / bin_width
-        
+
         return cls(qcenter, qhist, bin_width)
 
     @property
@@ -293,10 +292,10 @@ class ChargeHistogram:
     def extract(self, *index):
         """
         Extracts a single element (or sub-grid) from the histogram grid.
-        
+
         Args:
             index: The index or slice to extract.
-            
+
         Returns:
             ChargeHistogram: A new histogram containing only the selected elements.
         """
@@ -308,19 +307,19 @@ class ChargeHistogram:
     def downsample(self, factor):
         """
         Downsamples the histogram by combining adjacent bins.
-        
+
         Args:
             factor (int): The number of bins to combine.
-            
+
         Returns:
             ChargeHistogram: A new downsampled histogram.
         """
         if factor <= 1:
             return self
-            
+
         n_bins = self.qhist.shape[-1]
         n_new_bins = n_bins // factor
-        
+
         if n_new_bins == 0:
             # Return a single bin covering everything if factor > n_bins
             new_qcenter = np.array([self.qcenter.mean()])
@@ -328,13 +327,13 @@ class ChargeHistogram:
             return ChargeHistogram(new_qcenter, new_qhist, self.bin_width * n_bins)
 
         truncated_n = n_new_bins * factor
-        
+
         # Reshape and sum the histogram
         new_qhist = self.qhist[..., :truncated_n].reshape(self.shape + (n_new_bins, factor)).sum(axis=-1)
-        
+
         # Reshape and average the bin centers
         new_qcenter = self.qcenter[:truncated_n].reshape(n_new_bins, factor).mean(axis=-1)
-        
+
         return ChargeHistogram(new_qcenter, new_qhist, self.bin_width * factor)
 
     def __add__(self, other):
@@ -344,36 +343,36 @@ class ChargeHistogram:
         """
         if not isinstance(other, ChargeHistogram):
             return NotImplemented
-        
+
         if self.shape != other.shape:
             raise ValueError(f"Incompatible shapes: {self.shape} vs {other.shape}")
-        
+
         if self.bin_width != other.bin_width:
             raise ValueError(f"Incompatible bin widths: {self.bin_width} vs {other.bin_width}")
 
         if not np.array_equal(self.qcenter, other.qcenter):
-            # Fallback to check if they are "close enough" if needed, 
+            # Fallback to check if they are "close enough" if needed,
             # but usually they should be identical.
             raise ValueError("Bin centers do not match")
-            
+
         return ChargeHistogram(self.qcenter, self.qhist + other.qhist, self.bin_width)
 
     def __mul__(self, other):
         """
         Performs a numerical convolution of two ChargeHistograms across the grid.
         This is mapped to the multiplication operator (*).
-        
-        The result represents the distribution of the sum of two independent 
+
+        The result represents the distribution of the sum of two independent
         random variables, each distributed according to one of the histograms.
-        
-        Note: This assumes the binning is uniform and identical. 
+
+        Note: This assumes the binning is uniform and identical.
         The resulting histogram will be centered around the sum of the means,
-        but since we force it back into the same qcenter range, 
+        but since we force it back into the same qcenter range,
         values falling outside the range will be lost (truncated).
         """
         if not isinstance(other, ChargeHistogram):
             return NotImplemented
-        
+
         if self.shape != other.shape:
             raise ValueError(f"Incompatible shapes: {self.shape} vs {other.shape}")
 
@@ -385,38 +384,38 @@ class ChargeHistogram:
 
         # Numerical convolution along the last axis (the histogram bins)
         from scipy.signal import fftconvolve
-        
+
         # qhist is (grid..., bins)
         new_qhist = fftconvolve(self.qhist, other.qhist, mode='full', axes=-1)
-        
+
         # Clip small negative values from FFT floating-point artifacts
         new_qhist = np.maximum(new_qhist, 0)
-        
+
         n_bins = len(self.qcenter)
         q0 = self.qcenter[0]
-        
+
         # Alignment logic:
         # The first bin of 'full' convolution corresponds to value 2*q0.
         # We want to extract bins starting at value q0.
         # The index of value q0 in the 'full' array is (q0 - 2*q0) / bin_width = -q0 / bin_width.
         # This ensures that a delta function at value 0 (if present) acts as the identity.
         offset = int(round(-q0 / self.bin_width))
-        
+
         if offset < 0:
             crop_start = 0
             fill_start = -offset
         else:
             crop_start = offset
             fill_start = 0
-            
+
         final_qhist = np.zeros_like(self.qhist, dtype=float)
-        
+
         crop_end = min(crop_start + n_bins - fill_start, new_qhist.shape[-1])
         fill_end = fill_start + (crop_end - crop_start)
-        
+
         if fill_start < n_bins:
             final_qhist[..., fill_start:fill_end] = new_qhist[..., crop_start:crop_end]
-            
+
         # Normalization to keep the y-scale (counts) roughly consistent.
         # Dividing by the sum of 'other' ensures that if 'other' is a delta-like
         # kernel, the total counts of 'self' are preserved.
@@ -429,12 +428,12 @@ class ChargeHistogram:
     def normalize(self, density=True):
         """
         Normalizes the histogram.
-        
+
         Args:
-            density (bool): If True, the integral of the histogram will be 1 
+            density (bool): If True, the integral of the histogram will be 1
                             (divided by sum and bin width).
                             If False, the sum of the bins will be 1.
-                            
+
         Returns:
             ChargeHistogram: A new normalized histogram.
         """
@@ -448,12 +447,12 @@ class ChargeHistogram:
     def to_log10(self, bins_per_decade=10, density=False):
         """
         Transforms the histogram into log10 space.
-        
+
         Args:
             bins_per_decade (int): Number of bins per decade in log10 space.
             density (bool): If True, the resulting histogram will be a density
                             (divided by the log bin width).
-                            
+
         Returns:
             ChargeHistogram: A new histogram with log10(q) as bin centers.
         """
@@ -461,61 +460,61 @@ class ChargeHistogram:
         mask = self.qcenter > 0
         if not np.any(mask):
             # Return an empty histogram if no positive values
-            return ChargeHistogram(np.array([0.0]), 
-                                   np.zeros(self.shape + (1,)), 
+            return ChargeHistogram(np.array([0.0]),
+                                   np.zeros(self.shape + (1,)),
                                    1.0 / bins_per_decade)
 
         q_pos = self.qcenter[mask]
         log_q = np.log10(q_pos)
-        
+
         log_bin_width = 1.0 / bins_per_decade
-        
+
         # Define log10 edges covering the range of positive qcenters
         min_log = np.floor(np.min(log_q) * bins_per_decade) / bins_per_decade
         max_log = np.ceil(np.max(log_q) * bins_per_decade) / bins_per_decade
         log_edges = np.arange(min_log, max_log + 0.5 * log_bin_width, log_bin_width)
-        
+
         if len(log_edges) < 2:
              log_edges = np.array([min_log, min_log + log_bin_width])
 
         new_qcenter = 0.5 * (log_edges[:-1] + log_edges[1:])
-        
+
         # Original edges and CDF
         edges_orig, cdf_orig = self.cdf()
-        
+
         # Interpolate CDF at target edges (in linear space)
         target_edges = 10**log_edges
-        
+
         grid_shape = self.shape
         num_elements = int(np.prod(grid_shape)) if grid_shape else 1
-        
+
         # Flatten for interpolation
         flat_cdf = cdf_orig.reshape(num_elements, -1)
         new_flat_cdf = np.zeros((num_elements, len(log_edges)))
-        
+
         for i in range(num_elements):
             new_flat_cdf[i] = np.interp(target_edges, edges_orig, flat_cdf[i])
-            
+
         # Probability in each log bin
         new_qhist_flat = np.diff(new_flat_cdf, axis=-1)
-        
+
         # Multiply by original total sum to preserve scale (e.g. counts)
         total_sum = np.sum(self.qhist, axis=-1).reshape(num_elements, 1)
         new_qhist_flat *= total_sum
-        
+
         if density:
             new_qhist_flat /= log_bin_width
-            
+
         new_qhist = new_qhist_flat.reshape(grid_shape + (len(new_qcenter),))
-        
+
         return ChargeHistogram(new_qcenter, new_qhist, log_bin_width)
 
     def cdf(self, reverse=False):
         """
         Returns the normalized cumulative distribution function (CDF) for all elements.
-        
+
         Args:
-            reverse (bool): If True, returns the reversed CDF (1 to 0), 
+            reverse (bool): If True, returns the reversed CDF (1 to 0),
                             representing the probability P(X >= x).
 
         Returns:
@@ -526,13 +525,13 @@ class ChargeHistogram:
         # If qcenter are centers, left edges are qcenter - 0.5 * bin_width
         left_edges = self.qcenter - 0.5 * self.bin_width
         edges = np.append(left_edges, left_edges[-1] + self.bin_width)
-        
+
         total_counts = np.sum(self.qhist, axis=-1)
-        
+
         # Result CDF array
         cdf_shape = self.qhist.shape[:-1] + (self.qhist.shape[-1] + 1,)
         cdf = np.zeros(cdf_shape)
-        
+
         good_mask = total_counts > 0
         if not good_mask.any():
             return edges, cdf
@@ -549,14 +548,14 @@ class ChargeHistogram:
             cumsum = np.cumsum(self.qhist, axis=-1)
             cdf[good_mask, 1:] = cumsum[good_mask] / total_counts[good_mask, np.newaxis]
             # cdf[..., 0] is already 0
-            
+
         return edges, cdf
 
     def sf(self):
         """
         Returns the survival function (SF) for all elements in the histogram grid.
         SF is defined as 1 - CDF, representing P(X >= x).
-        
+
         Returns:
             tuple: (edges, sf)
                 edges: np.ndarray of bin edges (length N+1)
@@ -567,39 +566,39 @@ class ChargeHistogram:
     def quantiles(self, q):
         """
         Computes the quantiles for all elements in the histogram grid.
-        
+
         Args:
             q (float or iterable): The quantile(s) to compute (e.g., 0.5 for median).
-            
+
         Returns:
             list of np.ndarray: A list containing an array of quantile values for each q.
         """
         # Ensure q is an array
         q_vals = np.atleast_1d(q)
-        
+
         edges, cdf = self.cdf()
-        
+
         # Flatten for interpolation
         flat_cdf = cdf.reshape(-1, cdf.shape[-1])
         grid_shape = self.shape
         num_elements = flat_cdf.shape[0]
-        
+
         # Mask for histograms with data
         # Last element of CDF is 1.0 for those with data
         good_mask = flat_cdf[:, -1] > 0
-        
+
         results = []
         for qv in q_vals:
             # Output array for this quantile
             res = np.full(num_elements, np.nan)
-            
+
             # For each histogram, interpolate qv
             for i in range(num_elements):
                 if good_mask[i]:
                     res[i] = np.interp(qv, flat_cdf[i], edges)
-            
+
             results.append(res.reshape(grid_shape))
-            
+
         return results[0] if np.isscalar(q) else results
 
     def mean(self):
@@ -631,56 +630,56 @@ class ChargeHistogram:
     def winsorized_mean(self, limits=(0.05, 0.05)):
         """
         Computes the Winsorized mean for all elements in the histogram grid.
-        
+
         Args:
             limits (tuple): The fraction to cut from the (low, high) ends.
         """
         v_low, v_high = self.quantiles([limits[0], 1.0 - limits[1]])
         total = np.sum(self.qhist, axis=-1)
-        
+
         # Clip bin centers to the Winsorized limits for each grid point
         centers_clipped = np.clip(self.qcenter, v_low[..., np.newaxis], v_high[..., np.newaxis])
-        
+
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.sum(self.qhist * centers_clipped, axis=-1) / total
 
     def winsorized_var(self, limits=(0.05, 0.05)):
         """
         Computes the Winsorized variance for all elements in the histogram grid.
-        
+
         Args:
             limits (tuple): The fraction to cut from the (low, high) ends.
         """
         v_low, v_high = self.quantiles([limits[0], 1.0 - limits[1]])
         total = np.sum(self.qhist, axis=-1)
-        
+
         wm = self.winsorized_mean(limits=limits)
         centers_clipped = np.clip(self.qcenter, v_low[..., np.newaxis], v_high[..., np.newaxis])
-        
+
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.sum(self.qhist * (centers_clipped - wm[..., np.newaxis])**2, axis=-1) / total
 
     def huber_location(self, loss='huber', scale=None):
         """
         Estimates the location (center) of the distribution using a robust loss function.
-        
+
         Args:
             loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'arctan').
                         Defaults to 'huber'.
             scale (array-like, optional): The scale parameter for the loss function.
                                           Defaults to the square root of the Winsorized variance.
-                                          
+
         Returns:
             np.ndarray: The estimated location for each point in the grid.
         """
         from scipy.optimize import minimize_scalar
-        
+
         grid_shape = self.shape
         num_elements = int(np.prod(grid_shape)) if grid_shape else 1
-        
+
         # Flatten for iteration
         flat_qhist = self.qhist.reshape(num_elements, -1)
-        
+
         # Get initial guesses and scales
         x0_all = np.atleast_1d(self.median()).flatten()
         if scale is None:
@@ -688,7 +687,7 @@ class ChargeHistogram:
             # IQR / 1.349 is a robust estimate of sigma for Gaussian
             iqr_all = np.atleast_1d(self.iqr()).flatten() / 1.349
             wvar_all = np.sqrt(np.atleast_1d(self.winsorized_var())).flatten()
-            
+
             # Take the smaller of the two, but ensure it's not zero
             scale_all = np.where((iqr_all > 0) & (iqr_all < wvar_all), iqr_all, wvar_all)
         else:
@@ -709,56 +708,56 @@ class ChargeHistogram:
             rho = lambda z: 0.5 * z**2
 
         results = np.full(num_elements, np.nan)
-        
+
         for i in range(num_elements):
             s_val = scale_all[i]
             if np.isnan(s_val) or s_val <= 0:
                 s_val = self.bin_width
-                
+
             x0 = x0_all[i]
             if np.isnan(x0):
                 continue
-            
+
             mask = flat_qhist[i] > 0
             if not np.any(mask):
                 continue
-                
+
             w = flat_qhist[i, mask]
             c = self.qcenter[mask]
-            
+
             def objective(mu):
                 return np.sum(w * rho((c - mu) / s_val))
-            
+
             try:
                 # Bracket around the median
                 res = minimize_scalar(objective, bracket=(x0 - 5*s_val, x0, x0 + 5*s_val))
                 results[i] = res.x
             except Exception:
                 results[i] = x0
-            
+
         return results.reshape(grid_shape) if grid_shape else results[0]
 
     def huber_scale(self, loss='huber', location=None):
         """
         Estimates the scale (standard deviation) of the distribution using a robust loss function.
-        
+
         Args:
             loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'arctan').
                         Defaults to 'huber'.
             location (array-like, optional): The location (center) parameter for the loss function.
                                              Defaults to the median.
-                                             
+
         Returns:
             np.ndarray: The estimated scale for each point in the grid.
         """
         from scipy.optimize import minimize_scalar
-        
+
         grid_shape = self.shape
         num_elements = int(np.prod(grid_shape)) if grid_shape else 1
-        
+
         # Flatten for iteration
         flat_qhist = self.qhist.reshape(num_elements, -1)
-        
+
         # Get initial locations and guesses for scale
         if location is None:
             mu_all = np.atleast_1d(self.median()).flatten()
@@ -785,37 +784,37 @@ class ChargeHistogram:
             rho = lambda z: 0.5 * z**2
 
         results = np.full(num_elements, np.nan)
-        
+
         for i in range(num_elements):
             s0 = s0_all[i]
             if np.isnan(s0) or s0 <= 0:
                 s0 = self.bin_width
-                
+
             mu = mu_all[i]
             if np.isnan(mu):
                 continue
-            
+
             mask = flat_qhist[i] > 0
             if not np.any(mask):
                 continue
-                
+
             w = flat_qhist[i, mask]
             c = self.qcenter[mask]
             w_sum = np.sum(w)
-            
+
             # The objective function minimizes J(s) = sum(w * rho((c - mu) / s)) + sum(w) * log(s)
             def objective(s):
                 if s <= 0:
                     return np.inf
                 return np.sum(w * rho((c - mu) / s)) + w_sum * np.log(s)
-            
+
             try:
                 # Bounded optimization is more reliable for scale
                 res = minimize_scalar(objective, bounds=(1e-6 * s0, 100 * s0), method='bounded')
                 results[i] = res.x
             except Exception:
                 results[i] = s0
-            
+
         return results.reshape(grid_shape) if grid_shape else results[0]
 
 class ChargeSpectra:
@@ -839,7 +838,7 @@ class ChargeSpectra:
     def normalize(self, density=True):
         """
         Normalizes all histograms in the container.
-        
+
         Args:
             density (bool): If True, normalizes to a density (integral is 1).
                             If False, normalizes so the sum is 1.
@@ -855,11 +854,11 @@ class ChargeSpectra:
     def to_log10(self, bins_per_decade=10, density=False):
         """
         Transforms all histograms in the container into log10 space.
-        
+
         Args:
             bins_per_decade (int): Number of bins per decade in log10 space.
             density (bool): If True, the resulting histograms will be densities.
-                            
+
         Returns:
             ChargeSpectra: A new container with log-transformed histograms.
         """
@@ -874,10 +873,10 @@ class ChargeSpectra:
     def downsample(self, factor):
         """
         Downsamples all histograms in the container.
-        
+
         Args:
             factor (int): The number of bins to combine.
-                            
+
         Returns:
             ChargeSpectra: A new container with downsampled histograms.
         """
@@ -891,7 +890,7 @@ class ChargeSpectra:
 
 def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
     """Internal helper to build spectra from a 3D numpy array of images (32, 32, N)."""
-    
+
     # Bin widths
     w_pix = 1
     w_sipm = 8 if downsample else 1
@@ -903,7 +902,7 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
     qcenter_pix = np.arange(qmin_pix, qmax_pix, w_pix)
     qhist_pix = np.zeros((32, 32, len(qcenter_pix)), dtype=int)
 
-    # Histograms for (summed) charge in each SiPM 
+    # Histograms for (summed) charge in each SiPM
     qcenter_sipm = np.arange(qmin_pix*64, qmax_pix*64, w_sipm)
     qhist_sipm = np.zeros((4, 4, len(qcenter_sipm)), dtype=int)
 
@@ -954,12 +953,12 @@ def _build_spectra(images, qmin_pix=-512, qmax_pix=4096, downsample=False):
         camera=ChargeHistogram(qcenter_camera, qhist_camera, w_camera)
     )
 
-def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True, 
+def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True,
                              qmin_pix=-512, qmax_pix=4096, downsample=False,
                              density=False):
     """
     Calculate the charge spectrum for each pixel from a CameraImages object.
-    
+
     Args:
         camera_images (CameraImages): The loaded camera images and metadata.
         gti_indexes (list, optional): List of GTI indexes to include. If None, all are included.
@@ -979,7 +978,7 @@ def calculate_charge_spectra(camera_images, gti_indexes=None, combine_gtis=True,
         mask = np.isin(camera_images.gti_indexes, gti_indexes)
 
     if combine_gtis:
-        res = _build_spectra(camera_images.images[:, :, mask], 
+        res = _build_spectra(camera_images.images[:, :, mask],
                              qmin_pix=qmin_pix, qmax_pix=qmax_pix, downsample=downsample)
         if density:
             res = res.normalize(density=True)
@@ -1001,12 +1000,12 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
     Fits a polynomial pedestal model to each pixel and subtracts it.
     The fit is performed independently for each GTI.
     Events outside the specified quantiles are excluded from the fit for robustness.
-    
+
     Args:
         camera_images (CameraImages): The image container.
         norder (int): The order of the polynomial to fit (0=constant, 1=linear, etc.).
         quantiles (tuple): The (low, high) quantile limits for including data in the fit.
-        
+
     Returns:
         CameraImages: A new container with pedestal-subtracted images.
     """
@@ -1014,43 +1013,43 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
         # Calculate bounds for fitting (robust estimation of the quiet pedestal)
         charge_spectra = calculate_charge_spectra(gti_images, combine_gtis=True)
         q_low, q_high = charge_spectra.pix.quantiles(quantiles)
-        
+
         t = gti_images.gti_event_times
         pcorr = np.zeros((32, 32, norder + 1))
-        
+
         for i in range(32):
             for j in range(32):
                 y = gti_images.images[i, j, :]
                 mask = (y >= q_low[i, j]) & (y <= q_high[i, j])
-                
+
                 if np.sum(mask) > norder:
                     pcorr[i, j, :] = np.polyfit(t[mask], y[mask], norder)
                 else:
                     # Fallback to simple mean if not enough data for polynomial fit
                     pcorr[i, j, -1] = np.mean(y)
-                    
+
         # Use the class method to apply the subtraction
         return gti_images.apply_pedestal_corrections(pcorr)
-        
+
     return camera_images.map_gtis(_correct_gti_images)
 
 def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwargs):
     """
     Calculates a constant pedestal correction value for each pixel and subtracts it.
     The calculation is performed independently for each GTI.
-    
+
     Args:
         images (CameraImages): The image container.
-        pedestal_calculator (str or callable, optional): 
+        pedestal_calculator (str or callable, optional):
             If a string, one of:
                 - "quantile": Uses the specified quantile (default 0.5/median).
-                - "huber", "cauchy", "soft_l1", "arctan": Uses the corresponding 
+                - "huber", "cauchy", "soft_l1", "arctan": Uses the corresponding
                   robust location estimator from ChargeHistogram.
             If None, defaults to "quantile".
-            If a callable, it should take a CameraImages object and **kwargs 
+            If a callable, it should take a CameraImages object and **kwargs
             and return a (32, 32) array of pedestal values.
         **kwargs: Arguments passed to the calculator (e.g., quantile=0.5 or scale=1.0).
-                  
+
     Returns:
         CameraImages: A new container with pedestal-subtracted images.
     """
@@ -1070,5 +1069,5 @@ def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwarg
         pedestal_val = pedestal_calculator(gti_images, **kwargs)
         pcorr = pedestal_val[:, :, np.newaxis]
         return gti_images.apply_pedestal_corrections(pcorr)
-        
+
     return images.map_gtis(_correct_gti_images)

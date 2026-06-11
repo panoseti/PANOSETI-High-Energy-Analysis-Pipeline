@@ -12,13 +12,13 @@ import math
 def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, show_colorbar=True, cmap='viridis', plate_scale=None, **kwargs):
     """
     Plots a PANOSETI module image (pixels, SiPMs, or Quabos).
-    
+
     The function supports three standard input shapes:
     - 32x32 array: Plots 1024 individual pixel values, delineating the 4x4 SiPMs
       (each 8x8 pixels) with white lines.
     - 4x4 array: Plots 16 SiPM values, delineating the 2x2 Quabos with white lines.
     - 2x2 array: Plots 4 Quabo values.
-    
+
     Args:
         image (array_like): 2D array of values to plot. Must be of shape (32, 32), (4, 4), or (2, 2).
         transpose (bool): If True (default), transposes the image array before plotting.
@@ -32,24 +32,24 @@ def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, s
                                        centered pixel indices, while 0.31 could give
                                        degrees on the sky.
         **kwargs: Additional keyword arguments passed to ax.imshow().
-        
+
     Returns:
         tuple: (matplotlib.figure.Figure, matplotlib.axes.Axes, matplotlib.image.AxesImage)
     """
     image = np.asarray(image)
     if image.ndim != 2:
         raise ValueError("Input image must be a 2-dimensional array.")
-        
+
     shape = image.shape
     if shape not in [(32, 32), (4, 4), (2, 2)]:
         raise ValueError(
             f"Unsupported image shape {shape}. "
             f"Supported shapes are (32, 32) [pixels], (4, 4) [SiPMs], and (2, 2) [Quabos]."
         )
-        
+
     if transpose:
         image = image.T
-        
+
     if ax is None:
         if fig is None:
             fig = plt.figure()
@@ -84,11 +84,11 @@ def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, s
         half_height = 0.5 * ny * eff_scale
         extent = [-half_width, half_width, -half_height, half_height]
         kwargs['extent'] = extent
-        
+
         # Line positions in scaled coordinates
         x_min, x_max = -half_width, half_width
         y_min, y_max = -half_height, half_height
-        
+
         # Step size for lines in scaled units
         if shape == (32, 32):
             # Lines every 8 pixels (SiPM boundaries)
@@ -138,7 +138,7 @@ def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, s
 def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, max_magnitude=5.0, ax=None, east_on_left=True, **kwargs):
     """
     Plots a star field around a specific source or set of coordinates.
-    
+
     Args:
         source (str, optional): Name of the source to look up.
         ra (float, optional): RA of the center (degrees).
@@ -149,7 +149,7 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
         ax (matplotlib.axes.Axes, optional): Axes to plot on.
         east_on_left (bool): If True, East is to the left (standard astronomical view).
         **kwargs: Additional arguments passed to overlay_stars().
-        
+
     Returns:
         PointingSolution: The pointing solution used for the plot.
     """
@@ -185,7 +185,7 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
     # Plot center marker and label if requested
     if label is not None:
         ax.plot(0, 0, 'kx')
-        ax.annotate(label, xy=(0, 0), xytext=(2.5, 2.5), textcoords='offset points', 
+        ax.annotate(label, xy=(0, 0), xytext=(2.5, 2.5), textcoords='offset points',
                     ha='left', va='bottom', fontsize=8)
 
     # Default overlay options
@@ -206,21 +206,21 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
     # Visual aids: 5-degree circle and square
     theta = np.linspace(0, 2 * np.pi, 360)
     ax.plot(5.0 * np.cos(theta), 5.0 * np.sin(theta), 'k--', lw=0.5, alpha=0.5)
-    
+
     # Square boundary at +/- 5 degrees
     ax.vlines([-5.0, 5.0], -5.0, 5.0, colors='k', linestyles='--', lw=0.75, alpha=0.5)
     ax.hlines([-5.0, 5.0], -5.0, 5.0, colors='k', linestyles='--', lw=0.75, alpha=0.5)
-    
+
     ax.grid(True, alpha=0.3)
     ax.set_xlabel('West [deg]' if east_on_left else 'East [deg]')
     ax.set_ylabel('North [deg]')
-    
+
     return ps
 
 def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, **kwargs):
     """
     Overlays stars on a field and optionally calculates the pointing solution.
-    
+
     Args:
         stars (list): List of star dictionaries from stars.get_bright_stars().
         p1 (tuple, optional): (index, x, y) for the first reference star.
@@ -233,36 +233,36 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         plate_scale (float, optional): If provided, force this plate scale (deg/pix).
         ps (PointingSolution, optional): Pre-calculated pointing solution.
         show_mags (bool): If True, show star magnitudes in parentheses after labels.
-        auto_align (bool): If True, automatically set horizontal alignment based on 
+        auto_align (bool): If True, automatically set horizontal alignment based on
                            position to avoid clipping at edges.
         **kwargs: Additional arguments passed to ax.text() for label styling (e.g., fontsize).
-        
+
     Returns:
         PointingSolution: The pointing solution used.
     """
     from .pointing import PointingSolution
-    
+
     if ps is None:
         if p1 is None or p2 is None:
             raise ValueError("Must provide either a PointingSolution (ps) or two reference stars (p1, p2).")
         i1, x1, y1 = p1
         i2, x2, y2 = p2
         ps = PointingSolution.solve(stars[i1], (x1, y1), stars[i2], (x2, y2), east_on_left=east_on_left, plate_scale=plate_scale)
-    
+
     if ax is None:
         ax = plt.gca()
-        
+
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
-    
+
     # Default text options
     text_kwargs = {'fontsize': 8, 'ha': 'left', 'va': 'bottom'}
     text_kwargs.update(kwargs)
-    
+
     # Plot stars
     for i, star in enumerate(stars):
         x, y = ps.sky_to_image(star['ra_deg'], star['dec_deg'])
-        
+
         if clip_to_axes:
             if not (min(xlim) <= x <= max(xlim) and min(ylim) <= y <= max(ylim)):
                 continue
@@ -270,17 +270,17 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         # Use vmag for size
         size = max(5, (10 - star['vmag'])**2)
         ax.scatter(x, y, s=size, edgecolors=color, facecolors='none', alpha=0.7)
-        
+
         if use_index:
             label = str(i)
         else:
             name = star['name'] if star['name'] else f"HR{star['hr']}"
             # Merge multiple whitespaces
             label = " ".join(name.split())
-            
+
         if show_mags:
             label = f"{label} ({star['vmag']:.1f})"
-            
+
         # Copy kwargs to allow per-star modification
         current_text_kwargs = text_kwargs.copy()
         if auto_align:
@@ -293,7 +293,7 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         radius = math.sqrt(size) / 2.0 * 1.2
         offset_x = radius if current_text_kwargs.get('ha') == 'left' else -radius
         ax.annotate(label, xy=(x, y), xytext=(offset_x, 0),
-                    textcoords='offset points', 
+                    textcoords='offset points',
                     color=color, **current_text_kwargs)
-        
+
     return ps

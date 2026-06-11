@@ -19,9 +19,9 @@ _SciencePacketBase = namedtuple('SciencePacket', [
     'filename', 'file_offset', 'file_captured_packet_index', 'file_science_packet_index',
     'pcap_time', 'pcap_sec', 'pcap_nsec', 'pcap_len', 'pcap_src_ip',
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
-    'telescope_id', 'quabo_id', 'tai', 'nanosec', 
+    'telescope_id', 'quabo_id', 'tai', 'nanosec',
     'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
-    'flags', 'gti_index', 'gti_event_time', 'pix_data', 
+    'flags', 'gti_index', 'gti_event_time', 'pix_data',
 ])
 
 class SciencePacket(_SciencePacketBase):
@@ -66,7 +66,7 @@ def parse_time(t):
         return float(t)
     if isinstance(t, str):
         # Try a few common formats
-        for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f", 
+        for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f",
                     "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
                     "%Y-%m-%d"]:
             try:
@@ -107,7 +107,7 @@ class GTIFilter:
 
         if isinstance(gti, dict):
             gti = [gti]
-        
+
         # 1. Normalize and collect start/stop pairs
         raw_intervals = []
         for d in gti:
@@ -116,10 +116,10 @@ class GTIFilter:
             stop = parse_time(d.get('stop') or d.get('end', float('inf')))
             if start < stop:
                 raw_intervals.append((start, stop))
-        
+
         # 2. Sort by start time
         raw_intervals.sort()
-        
+
         # 3. Merge overlapping intervals
         merged = []
         if raw_intervals:
@@ -131,7 +131,7 @@ class GTIFilter:
                     merged.append((curr_start, curr_stop))
                     curr_start, curr_stop = next_start, next_stop
             merged.append((curr_start, curr_stop))
-        
+
         # 4. Build a continuous set of intervals from -inf to inf
         self.intervals = []
         last_t = -float('inf')
@@ -144,10 +144,10 @@ class GTIFilter:
             last_t = stop
         if last_t < float('inf'):
             self.intervals.append((last_t, float('inf'), False, -1))
-        
+
         if not merged:
             self.intervals = [(-float('inf'), float('inf'), True, 0)]
-            
+
         self._starts = [i[0] for i in self.intervals]
         self._current_idx = 0
 
@@ -157,7 +157,7 @@ class GTIFilter:
         start, stop, good, idx = self.intervals[self._current_idx]
         if start <= t < stop:
             return good, idx, start
-        
+
         # Find correct interval using binary search
         idx_bin = bisect.bisect_right(self._starts, t) - 1
         self._current_idx = idx_bin
@@ -175,7 +175,7 @@ def wr_to_unix(pkt_tai, pkt_nsec, pcap_sec, ignore_clock_desync=False):
 
     See: https://github.com/panoseti/panoseti/blob/master/control/utils/pff.py#L238
     """
-    # 37 is the TAI-UTC offset. 
+    # 37 is the TAI-UTC offset.
     # The packet TAI seconds is only 10 bits (0-1023).
     d = (pcap_sec - pkt_tai + 37) % 1024
     if d == 0:
@@ -219,7 +219,7 @@ class PcapDecoder:
         magic = self._file.read(4)
         if len(magic) < 4:
             raise EOFError("File too small to be a PCAP/PCAPNG file")
-        
+
         # Standard PCAP
         if magic == b'\xa1\xb2\xc3\xd4':
             self._endian = '>'
@@ -264,17 +264,17 @@ class PcapDecoder:
         while True:
             # Capture the start offset of the packet header
             offset = self._file.tell()
-            
+
             # Read 16-byte packet header
             header_data = self._file.read(16)
             if not header_data:
                 break
             if len(header_data) < 16:
                 break # Truncated
-            
+
             pcap_sec, pcap_usec, incl_len, orig_len = struct.unpack(f"{self._endian}IIII", header_data)
             packet_data = self._file.read(incl_len)
-            
+
             packet = self._parse_packet(packet_data, pcap_sec, pcap_usec*1000, offset, self.file_captured_packet_index, self.file_science_packet_index, self.file_hk_packet_index)
             if packet:
                 yield packet
@@ -289,16 +289,16 @@ class PcapDecoder:
         while True:
             # Capture the start offset of the block
             offset = self._file.tell()
-            
+
             block_header = self._file.read(8)
             if not block_header:
                 break
             if len(block_header) < 8:
                 break
-            
+
             block_type, block_total_length = struct.unpack(f"{self._endian}II", block_header)
             block_data = self._file.read(block_total_length - 8)
-            
+
             # Interface Description Block (IDB) is 0x00000001
             if block_type == 0x00000001:
                 # Parse IDB for timestamp resolution (option 9)
@@ -324,10 +324,10 @@ class PcapDecoder:
                 # Packet Data (...)
                 # Padding (to 4-byte boundary)
                 # Block Total Length (4) - already read as part of block_data
-                
+
                 epb_header = struct.unpack(f"{self._endian}IIIII", block_data[:20])
                 if_id, ts_high, ts_low, incl_len, orig_len = epb_header
-                
+
                 # Combine timestamps (PCAPNG usually uses microseconds or nanoseconds since epoch)
                 timestamp = (ts_high << 32) | ts_low
                 pcap_sec = timestamp // self._ts_resol
@@ -355,35 +355,35 @@ class PcapDecoder:
         # Based on Quabo Packet Interface Wiki:
         # Science packets are sent to port 60001 (by default).
         # House Keeping packets are sent to port 60000 (by default).
-        
+
         if len(packet_data) < 42:
             return None
-        
+
         # Check EtherType is IPv4 (0x0800)
         eth_type = struct.unpack(">H", packet_data[12:14])[0]
         if eth_type != 0x0800:
             return None
-        
+
         # Check IP version is 4, and extract header length
         ip_header_first_byte = packet_data[14]
         ip_version = ip_header_first_byte >> 4
         if ip_version != 4:
             return None
-        
+
         ip_ihl = (ip_header_first_byte & 0x0F) * 4
         # Ensure protocol is UDP (17)
         ip_proto = packet_data[23]
         if ip_proto != 17:
             return None
-        
+
         # UDP header starts after the IP header
         udp_start = 14 + ip_ihl
         if len(packet_data) < udp_start + 8:
             return None
-        
+
         # Extract UDP destination port (bytes 2-3 of UDP header, big endian)
         dest_port = struct.unpack(">H", packet_data[udp_start+2 : udp_start+4])[0]
-        
+
         sender_ip_bytes = packet_data[26:30]
         sender_ip = ".".join(str(b) for b in sender_ip_bytes)
         payload = packet_data[udp_start+8:]
@@ -429,20 +429,20 @@ class PcapDecoder:
         )
 
     def _decode_science_packet(self, payload, pcap_sec, pcap_nsec, sender_ip, file_offset, file_captured_packet_index, file_science_packet_index, incl_len):
-        # Science packets Total payload sizes: 
+        # Science packets Total payload sizes:
         #   - 528 bytes (16-bit modes)
         #   - 272 bytes (8-bit modes)
-        
+
         if len(payload) != 528 and len(payload) != 272:
             return None
-        
+
         # PANOSETI metadata (16 bytes)
         meta_format = "<BBHHIIH"
         meta_size = struct.calcsize(meta_format)
         meta = struct.unpack(meta_format, payload[:meta_size])
-        
+
         acq_mode = meta[0]
-        
+
         if acq_mode == 0x01:
             pix_format = "<256h" # 16-bit signed
             pix_bytes = 512
@@ -455,16 +455,16 @@ class PcapDecoder:
         else:
             pix_format = "<256H" if len(payload) >= 528 else "<256B"
             pix_bytes = 512 if len(payload) >= 528 else 256
-        
+
         if len(payload) < meta_size + pix_bytes:
             return None
 
         pix_data = struct.unpack(pix_format, payload[meta_size:meta_size+pix_bytes])
-        
+
         board_loc = meta[3]
         telescope_id = board_loc >> 2
         quabo_id = board_loc & 0x3
-        
+
         tai = meta[4]
         nanosec = meta[5]
 
@@ -505,7 +505,7 @@ class PcapDecoder:
 def get_panoseti_packets(filenames, gtis=None, verbose=False, science_port=60001, decode_hk=False):
     """
     Convenience function to get packets from one or more PANOSETI PCAP/PCAPNG files.
-    'filenames' can be a single filename (string), a glob pattern (string), 
+    'filenames' can be a single filename (string), a glob pattern (string),
     or a list/iterable of filenames.
     'gtis' can be a GTIFilter object, a dict with start/stop keys, or a list of such dicts.
     """
