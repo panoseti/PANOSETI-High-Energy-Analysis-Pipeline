@@ -512,14 +512,14 @@ def get_panoseti_packets(filenames, gtis=None, verbose=False, science_port=60001
     gti_filter = gtis if isinstance(gtis, GTIFilter) else GTIFilter(gtis)
     if isinstance(filenames, str):
         if any(char in filenames for char in '*?['):
-            files = sorted(glob.glob(filenames))
+            files = sorted(glob.glob(filenames, recursive=True))
         else:
             files = [filenames]
     else:
         files = []
         for item in filenames:
             if isinstance(item, str) and any(char in item for char in '*?['):
-                files.extend(sorted(glob.glob(item)))
+                files.extend(sorted(glob.glob(item, recursive=True)))
             else:
                 files.append(item)
 
