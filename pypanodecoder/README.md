@@ -23,7 +23,7 @@ Tools for reconstructing full camera events from individual Quabo packets.
 - **Image Reconstruction**: Provides a `get_image()` method that rotates and mosaics Quabo data into a 32x32 camera image.
 - **`CameraImages`**: A container for holding stacks of camera images and associated metadata in memory, supporting GTI filtering and pedestal correction.
 - **`get_camera_events`**: A generator function to stream merged camera events from multiple files, with GTI filtering.
-- **`load_camera_images`**: High-level utility to load data directly into a 3D NumPy array (32x32xN).
+- **`load_pcap_camera_images`**: High-level utility to load data directly into a 3D NumPy array (32x32xN).
 
 ### `pedestals.py`
 Utilities for charge spectra analysis and pedestal management.
@@ -66,7 +66,7 @@ Each call to `get_camera_events` yields a `CameraEvent` containing the merged da
 ## Example: load camera images and plot DQM metrics
 
 ```python
-from pypanodecoder.eventbuilder import load_camera_images
+from pypanodecoder.eventbuilder import load_pcap_camera_images
 from pypanodecoder.dqm import plot_event_rate, plot_delta_t
 import matplotlib.pyplot as plt
 
@@ -77,7 +77,7 @@ GTIs = [
 ]
 
 # Load images from multiple PCAP files with GTI filtering
-data = load_camera_images("data/202601*/onsky_*.pcapng", gtis=GTIs)
+data = load_pcap_camera_images("data/202601*/onsky_*.pcapng", gtis=GTIs)
 
 # Plot the event rate
 fig_rate, _ = plot_event_rate(data, subplots=True, uttime=True)
@@ -88,7 +88,7 @@ fig_dt, _ = plot_delta_t(data, fit=True)
 plt.show()
 ```
 
-Here we show how to load the camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `CameraImages` object containing the image data and metadata. Once the data is loaded, it can easily be accessed to retrieve the event data or process it.
+Here we show how to load the camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_pcap_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `CameraImages` object containing the image data and metadata. Once the data is loaded, it can easily be accessed to retrieve the event data or process it.
 
 In this example we use the DQM plotting functions to plot the event rate histogram and inter-event (Delta-T) time distribution. The `plot_event_rate` is configured to create subplots for each GTI and display time in absolute UT time. The `plot_delta_t` function fits an exponential model to the inter-event time distribution to estimate the random trigger rate.
 

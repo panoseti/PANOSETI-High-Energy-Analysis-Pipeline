@@ -19,7 +19,9 @@ from .eventbuilder import (
     CameraImages,
     CameraEventBuilder,
     get_camera_events,
-    load_camera_images
+    load_camera_images,
+    load_pcap_camera_images,
+    load_pff_camera_images
 )
 
 from .pedestals import (
@@ -50,6 +52,8 @@ __all__ = [
     'CameraEventBuilder',
     'get_camera_events',
     'load_camera_images',
+    'load_pcap_camera_images',
+    'load_pff_camera_images',
     'ChargeHistogram',
     'ChargeSpectra',
     'calculate_charge_spectra',

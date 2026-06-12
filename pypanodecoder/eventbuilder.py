@@ -8,6 +8,8 @@
 import struct
 import os
 import sys
+import json
+import glob
 import numpy as np
 
 from .pcapdecoder import get_panoseti_packets, SciencePacket, GTIFilter
@@ -126,7 +128,8 @@ class CameraImages:
     Allows access via attributes (e.g., .images) or keys (e.g., ['images']).
     """
     def __init__(self, images, event_times, gti_indexes, 
-                 gti_event_times, quabo_masks, gtis=None, events=None, dtype=None, filter=None):
+                 gti_event_times, quabo_masks, gtis=None, events=None, 
+                 dtype=None, filter=None, source=None):
         self.images = np.array(images, dtype=dtype) if dtype else images
         self.event_times = event_times
         self.gti_indexes = gti_indexes
@@ -135,6 +138,11 @@ class CameraImages:
         self.gtis = gtis if gtis is not None else {}
         self.events = events if events is not None else []
         self.filter = dict(filter) if filter is not None else {}
+        # source can be a string (applied to all GTIs) or a dict {gti_index: source_name}
+        if isinstance(source, str):
+            self.source = {idx: source for idx in self.unique_gti_indexes}
+        else:
+            self.source = dict(source) if source is not None else {}
 
     @classmethod
     def concatenate(cls, objects):
@@ -143,8 +151,10 @@ class CameraImages:
             raise ValueError("concatenate() requires a non-empty list of CameraImages objects")
         
         merged_gtis = {}
+        merged_source = {}
         for o in objects:
             merged_gtis.update(o.gtis)
+            merged_source.update(o.source)
             
         merged_filter = {}
         for o in objects:
@@ -164,13 +174,25 @@ class CameraImages:
             quabo_masks=np.concatenate([o.quabo_masks for o in objects]),
             gtis=merged_gtis,
             events=[ev for o in objects for ev in o.events],
-            filter=merged_filter
+            filter=merged_filter,
+            source=merged_source
         )
 
     @property
     def unique_gti_indexes(self):
         """Returns the sorted unique GTI indexes present in this object."""
         return np.unique(self.gti_indexes)
+
+    @property
+    def data_source(self):
+        """Returns 'PCAP', 'PFF', or 'MIXED' based on the sources of all GTIs."""
+        sources = set(self.source.values())
+        if len(sources) > 1:
+            return 'MIXED'
+        elif len(sources) == 1:
+            return list(sources)[0]
+        else:
+            return None
 
     def filter_gtis(self, gti_index):
         """Returns a new CameraImages object filtered for a specific GTI index."""
@@ -188,7 +210,8 @@ class CameraImages:
             quabo_masks=self.quabo_masks[mask],
             gtis={gti_index: self.gtis[gti_index]} if gti_index in self.gtis else {},
             events=filtered_events,
-            filter=dict(self.filter)
+            filter=dict(self.filter),
+            source={gti_index: self.source.get(gti_index)}
         )
 
     def filter_events(self, min_quabos=None, min_delta_t=None):
@@ -231,6 +254,10 @@ class CameraImages:
             existing_mdt = new_filter_dict.get('min_delta_t')
             new_filter_dict['min_delta_t'] = max(existing_mdt, min_delta_t) if existing_mdt is not None else min_delta_t
 
+        # We keep only sources for GTIs that still have events
+        new_gti_indexes = np.unique(self.gti_indexes[keep])
+        new_source = {idx: self.source[idx] for idx in new_gti_indexes if idx in self.source}
+
         return CameraImages(
             images=self.images[:, :, keep],
             event_times=self.event_times[keep],
@@ -239,7 +266,8 @@ class CameraImages:
             quabo_masks=self.quabo_masks[keep],
             gtis=self.gtis,
             events=filtered_events,
-            filter=new_filter_dict
+            filter=new_filter_dict,
+            source=new_source
         )
 
     def apply_pedestal_corrections(self, pcorr):
@@ -270,7 +298,8 @@ class CameraImages:
             quabo_masks=self.quabo_masks,
             gtis=self.gtis,
             events=self.events,
-            filter=dict(self.filter)
+            filter=dict(self.filter),
+            source=dict(self.source)
         )
 
     def map_gtis(self, functor, *args, **kwargs):
@@ -396,7 +425,7 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=
     for event in builder.flush():
         yield event
 
-def load_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, **kwargs):
+def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, **kwargs):
     """
     Load all camera images from one or more PANOSETI pcap files.
     
@@ -470,5 +499,195 @@ def load_camera_images(filenames, gtis=None, min_quabos=None, store_camera_event
         quabo_masks=quabo_masks,
         gtis=gtis_dict,
         events=events_list,
-        filter=filter_dict
+        filter=filter_dict,
+        source='PCAP'
     )
+
+def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, verbose=False):
+    """
+    Load all camera images from one or more PANOSETI PFF files.
+    
+    Args:
+        filenames (str or list): One or more paths to .pff files, or a glob pattern.
+        gtis (GTIFilter, dict or list, optional): Good Time Intervals.
+        min_quabos (int, optional): Minimum number of quabo packets required to form an image.
+        store_camera_events (bool): If True, store the CameraEvent instances (mocked).
+        verbose (bool): If True, print progress.
+
+    Returns:
+        CameraImages: Object containing the 32x32xNevent images and metadata.
+    """
+    if isinstance(filenames, str):
+        if any(char in filenames for char in '*?['):
+            files = sorted(glob.glob(filenames, recursive=True))
+        else:
+            files = [filenames]
+    else:
+        files = []
+        for item in filenames:
+            if isinstance(item, str) and any(char in item for char in '*?['):
+                files.extend(sorted(glob.glob(item, recursive=True)))
+            else:
+                files.append(item)
+    files = sorted(files)
+
+    images = []
+    event_times = []
+    gti_indexes = []
+    gti_event_times = []
+    quabo_masks = []
+    events_list = []
+
+    gti_filter = gtis if isinstance(gtis, GTIFilter) else GTIFilter(gtis)
+    gtis_dict = {}
+    for start, stop, good, idx in gti_filter.intervals:
+        if good:
+            gtis_dict[idx] = {'start': start, 'stop': stop}
+
+    RECORD_SIZE = 2540
+    JSON_LEN = 491
+
+    for filename in files:
+        if verbose:
+            print(f"Reading {filename}...")
+        with open(filename, 'rb') as f:
+            while True:
+                data = f.read(RECORD_SIZE)
+                if len(data) < RECORD_SIZE:
+                    break
+                
+                header_data = data[:JSON_LEN].decode('utf-8').strip()
+                try:
+                    header = json.loads(header_data)
+                except json.JSONDecodeError:
+                    continue
+                
+                present_quabos = []
+                quabo_mask = 0
+                event_time = 0
+                for i in range(4):
+                    q_key = f"quabo_{i}"
+                    q_info = header.get(q_key, {})
+                    if q_info.get('tv_sec', 0) != 0:
+                        present_quabos.append(i)
+                        quabo_mask |= (1 << i)
+                        event_time = q_info['tv_sec'] + q_info['tv_usec'] / 1e6
+                
+                if not present_quabos:
+                    continue
+                
+                if min_quabos is not None and len(present_quabos) < min_quabos:
+                    continue
+                
+                is_good, gti_idx, gti_start = gti_filter.get_info(event_time)
+                if not is_good:
+                    continue
+                
+                # Image data starts after JSON header and '*'
+                image_raw = np.frombuffer(data[JSON_LEN+1:], dtype='<i2')
+                image = image_raw.reshape((32, 32)).copy()
+                
+                # Rotate 180 degrees to match CameraImages standard
+                image = np.flip(image)
+                
+                images.append(image)
+                event_times.append(event_time)
+                gti_indexes.append(gti_idx)
+                gti_event_times.append(event_time - gti_start if gti_start != -float('inf') else event_time)
+                quabo_masks.append(quabo_mask)
+
+    if images:
+        sort_idx = np.argsort(event_times)
+        images = np.stack(images, axis=2)[:, :, sort_idx]
+        event_times = np.array(event_times)[sort_idx]
+        gti_indexes = np.array(gti_indexes)[sort_idx]
+        gti_event_times = np.array(gti_event_times)[sort_idx]
+        quabo_masks = np.array(quabo_masks)[sort_idx]
+    else:
+        images = np.zeros((32, 32, 0))
+        event_times = np.array([])
+        gti_indexes = np.array([])
+        gti_event_times = np.array([])
+        quabo_masks = np.array([])
+
+    filter_dict = {}
+    if min_quabos is not None:
+        filter_dict['min_quabos'] = min_quabos
+
+    return CameraImages(
+        images=images,
+        event_times=event_times,
+        gti_indexes=gti_indexes,
+        gti_event_times=gti_event_times,
+        quabo_masks=quabo_masks,
+        gtis=gtis_dict,
+        events=None,
+        filter=filter_dict,
+        source='PFF'
+    )
+
+def load_camera_images(filenames, gtis=None, priority="PCAP", **kwargs):
+    """
+    Unified loader for PANOSETI data (PCAP or PFF).
+    Globs filenames, separates them by format, loads them, and merges them.
+    If a GTI is present in both formats, 'priority' determines which is kept.
+
+    Args:
+        filenames (str or list): Glob pattern(s) or list of files.
+        gtis (GTIFilter, dict or list, optional): Good Time Intervals.
+        priority (str): "PCAP" or "PFF". Which format to prefer if GTIs overlap.
+        **kwargs: Arguments passed to load_pcap_camera_images or load_pff_camera_images.
+
+    Returns:
+        CameraImages: The merged camera images.
+    """
+    if isinstance(filenames, str):
+        if any(char in filenames for char in '*?['):
+            all_files = sorted(glob.glob(filenames, recursive=True))
+        else:
+            all_files = [filenames]
+    else:
+        all_files = []
+        for item in filenames:
+            if isinstance(item, str) and any(char in item for char in '*?['):
+                all_files.extend(sorted(glob.glob(item, recursive=True)))
+            else:
+                all_files.append(item)
+    
+    pcap_files = [f for f in all_files if f.lower().endswith(('.pcap', '.pcapng'))]
+    pff_files = [f for f in all_files if f.lower().endswith('.pff')]
+
+    images_pcap = None
+    if pcap_files:
+        images_pcap = load_pcap_camera_images(pcap_files, gtis=gtis, **kwargs)
+
+    images_pff = None
+    if pff_files:
+        # load_pff_camera_images uses 'verbose' instead of '**kwargs' currently, 
+        # but let's pass kwargs that it can handle (min_quabos, store_camera_events, verbose)
+        pff_kwargs = {k: v for k, v in kwargs.items() if k in ['min_quabos', 'store_camera_events', 'verbose']}
+        images_pff = load_pff_camera_images(pff_files, gtis=gtis, **pff_kwargs)
+
+    if images_pcap and images_pff:
+        # Check for overlapping GTIs
+        pcap_gtis = set(images_pcap.unique_gti_indexes)
+        pff_gtis = set(images_pff.unique_gti_indexes)
+        overlap = pcap_gtis.intersection(pff_gtis)
+
+        to_merge = []
+        if priority.upper() == "PCAP":
+            to_merge.append(images_pcap)
+            for gidx in pff_gtis:
+                if gidx not in overlap:
+                    to_merge.append(images_pff.filter_gtis(gidx))
+        else: # Priority PFF
+            to_merge.append(images_pff)
+            for gidx in pcap_gtis:
+                if gidx not in overlap:
+                    to_merge.append(images_pcap.filter_gtis(gidx))
+        
+        return CameraImages.concatenate(to_merge)
+    
+    return images_pcap or images_pff or CameraImages(np.zeros((32, 32, 0)), np.array([]), np.array([]), np.array([]), np.array([]), source='NONE')
+
+
