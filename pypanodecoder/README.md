@@ -33,6 +33,22 @@ Utilities for charge spectra analysis and pedestal management.
 - **`ChargeSpectra`**: Generates histograms at the pixel, SiPM (8x8), Quabo (16x16), and full camera (32x32) levels.
 - **Pedestal Correction**: Implements time-dependent polynomial pedestal fitting and subtraction to handle drift in detector baselines.
 
+### `plotting.py`
+Standard plotting functions for PANOSETI data.
+- **`plot_image`**: Core function for plotting 32x32 (pixel), 4x4 (SiPM), or 2x2 (Quabo) images with automatic component delineation.
+- **`plot_star_field`**: Plots a star field around a target or specific coordinates.
+- **`overlay_stars`**: Overlays star markers and labels on an image axes using a pointing solution.
+
+### `pointing.py`
+Calculate pointing solutions from reference stars and manage target coordinates.
+- **`PointingSolution`**: Translates between sky (RA/Dec) and image (x, y) coordinates. Can be solved from two reference stars.
+- **`get_target_coordinates`**: Utility to retrieve coordinates for common astronomical targets (e.g., Crab, Mrk 421).
+
+### `stars.py`
+Utilities to query and filter the Yale Bright Star Catalog (YBSC5).
+- **`get_bright_stars`**: Fetches stars near a given RA/Dec within a specified radius and magnitude limit.
+- **Automatic Catalog Fetching**: Automatically downloads and caches the YBSC5 catalog if not found locally.
+
 ### `dqm/`
 Data Quality Monitoring (DQM) subpackage and visualization tools.
 - **`plot_event_rate`**: Plots the event rate (Hz) over time, with support for multiple GTIs, subplots, and absolute UT time.
