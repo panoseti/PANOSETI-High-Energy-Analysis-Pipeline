@@ -24,6 +24,11 @@ from .eventbuilder import (
     load_pff_camera_images
 )
 
+from .data_writer import (
+    PcapWriter,
+    PffWriter
+)
+
 from .pedestals import (
     ChargeHistogram,
     ChargeSpectra,
@@ -54,6 +59,8 @@ __all__ = [
     'load_camera_images',
     'load_pcap_camera_images',
     'load_pff_camera_images',
+    'PcapWriter',
+    'PffWriter',
     'ChargeHistogram',
     'ChargeSpectra',
     'calculate_charge_spectra',
