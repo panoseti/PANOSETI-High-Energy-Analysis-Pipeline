@@ -143,21 +143,21 @@ def get_bright_stars(ra_deg, dec_deg, radius_deg=8.0, max_magnitude=8.0):
     results.sort(key=lambda x: x["vmag"])
     return results
 
-def print_stars(stars):
+def star_table(stars):
     """
-    Prints a formatted table of stars.
+    Returns a formatted table of stars as a string.
 
     Args:
         stars (list): List of star dictionaries from get_bright_stars().
     """
     if not stars:
-        print("No stars found.")
-        return
+        return "No stars found."
 
+    lines = []
     # Table header
-    header = f"{'Idx':>3} {'HR':>4} {'Name':<12} {'RA [deg]':>10} {'Dec [deg]':>10} {'Vmag':>6} {'B-V':>6} {'Sep [deg]':>10}"
-    print(header)
-    print("-" * len(header))
+    header = f"{'Idx':<3} {'HR':>4} {'Name':<12} {'RA [deg]':>10} {'Dec [deg]':>10} {'Vmag':>6} {'B-V':>6} {'Sep [deg]':>10}"
+    lines.append(header)
+    lines.append("-" * len(header))
 
     for i, star in enumerate(stars):
         hr = star.get('hr', '')
@@ -170,4 +170,14 @@ def print_stars(stars):
         bv_str = f"{bv:6.2f}" if bv is not None else f"{'':>6}"
         sep = star.get('separation_deg', 0.0)
 
-        print(f"{i:3d} {hr:>4} {name:<12} {ra:10.4f} {dec:10.4f} {vmag:6.2f} {bv_str} {sep:10.4f}")
+        lines.append(f"{i:<3d} {hr:>4} {name:<12} {ra:10.4f} {dec:10.4f} {vmag:6.2f} {bv_str} {sep:10.4f}")
+    return "\n".join(lines)
+
+def print_stars(stars):
+    """
+    Prints a formatted table of stars.
+
+    Args:
+        stars (list): List of star dictionaries from get_bright_stars().
+    """
+    print(star_table(stars))

@@ -8,7 +8,7 @@ class PointingSolution:
     """
     Represents a pointing solution for translating between sky and image coordinates.
     """
-    def __init__(self, ra0, dec0, plate_scale=1.0, theta=0.0, east_on_left=True, pos0=(0, 0)):
+    def __init__(self, ra0, dec0, plate_scale=1.0, theta=0.0, east_on_left=True, pos0=(0, 0), xy_units=None):
         """
         Initializes a pointing solution with explicit parameters.
 
@@ -26,6 +26,7 @@ class PointingSolution:
         self.theta = math.radians(theta)
         self.east_on_left = east_on_left
         self.x1, self.y1 = pos0
+        self.xy_units = xy_units if xy_units is not None else ( 'deg' if plate_scale==1.0 else 'pix' )
 
     @classmethod
     def solve(cls, star1, pos1, star2, pos2, east_on_left=True, plate_scale=None):
@@ -147,6 +148,33 @@ class PointingSolution:
         eta = self.plate_scale * (f * dx * sin_th + dy * cos_th)
 
         return self._tangent_to_sky(xi, eta)
+
+    def print_stars(self, stars):
+        """
+        Prints a formatted table of stars including their image coordinates.
+
+        Args:
+            stars (list): List of star dictionaries from get_bright_stars().
+        """
+        from .stars import star_table
+        table = star_table(stars)
+        if not stars:
+            print(table)
+            return
+
+        lines = table.splitlines()
+
+        # Extend header
+        lines[0] += f" {'X [' + self.xy_units + ']' if self.xy_units != '' and len(self.xy_units)<6 else 'X':>10}"
+        lines[0] += f" {'Y [' + self.xy_units + ']' if self.xy_units != '' and len(self.xy_units)<6 else 'Y':>10}"
+        lines[1] += "-" * 22
+
+        # Extend data rows
+        for i, star in enumerate(stars):
+            x, y = self.sky_to_image(star['ra_deg'], star['dec_deg'])
+            lines[i+2] += f" {x:10.2f} {y:10.2f}"
+
+        print("\n".join(lines))
 
     def __repr__(self):
         return (f"<PointingSolution RA0={self.ra0:.4f} Dec0={self.dec0:.4f} "
