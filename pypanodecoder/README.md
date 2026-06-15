@@ -21,11 +21,18 @@ The core decoder for PANOSETI Science packets from PCAP/PCAPNG files.
 Tools for reconstructing full camera events from individual Quabo packets.
 - **`CameraEvent`**: Groups packets from the four Quabos (quadrants) of a telescope that share the same hardware timestamp.
 - **Image Reconstruction**: Provides a `get_image()` method that rotates and mosaics Quabo data into a 32x32 camera image.
-- **`CameraImages`**: A container for holding stacks of camera images and associated metadata in memory, supporting GTI filtering and pedestal correction. Now supports tracking the data source (PCAP or PFF) for each GTI individually.
+- **`CameraImages`**: A container for holding stacks of camera images and associated metadata in memory. Now supports tracking the data source (PCAP or PFF), module ID, and event-wide arrival times (`pcap_times`).
+- **`CameraEventBuilder`**: Robustly groups packets into events using timestamps or packet numbers, ensuring predictable yield order.
 - **`get_camera_events`**: A generator function to stream merged camera events from multiple files, with GTI filtering.
 - **`load_camera_images`**: Unified high-level utility that handles both PCAP and PFF files, supporting priority-based merging of overlapping GTIs.
 - **`load_pcap_camera_images`**: Specific utility to load data directly from PCAP/PCAPNG files.
-- **`load_pff_camera_images`**: Specific utility to load data directly from PFF files, including automatic image alignment.
+- **`load_pff_camera_images`**: Specific utility to load data directly from PFF files, including automatic image alignment and record indexing.
+
+### `data_writer.py`
+Utilities for saving PANOSETI data in PCAPNG and PFF formats.
+- **`PcapWriter`**: Generates valid PCAPNG files with reconstructed quabo packets. Supports configurable application names, hardware/OS metadata, and provenance comments.
+- **`PffWriter`**: Writes camera events into the fixed-size PFF record format.
+- **`templated_filename`**: Flexible utility for generating filenames based on site information (from a synchronized `SITES` configuration), date, and time.
 
 ### `pedestals.py`
 Utilities for charge spectra analysis and pedestal management.
@@ -53,6 +60,20 @@ Utilities to query and filter the Yale Bright Star Catalog (YBSC5).
 Data Quality Monitoring (DQM) subpackage and visualization tools.
 - **`plot_event_rate`**: Plots the event rate (Hz) over time, with support for multiple GTIs, subplots, and absolute UT time.
 - **`plot_delta_t`**: Analyzes the distribution of time intervals between consecutive events. Includes exponential fitting to measure random trigger rates.
+
+## Scripts
+
+The `scripts/` directory contains command-line utilities for data management and format conversion.
+
+### `pff_to_pcap.py`
+Converts PANOSETI PFF files to PCAPNG format.
+- **Usage**: `./scripts/pff_to_pcap.py data/*.pff`
+- **Features**: Automatic module ID detection, metadata preservation, and provenance tracking (stored in PCAPNG comments).
+
+### `pcap_to_pff.py`
+Converts PCAP/PCAPNG files to PFF format.
+- **Usage**: `./scripts/pcap_to_pff.py data/*.pcapng --module-id 252`
+- **Features**: Reconstructs camera events from packets and applies correct image orientation for PFF.
 
 ## Example: decode Quabo packets from one file
 
