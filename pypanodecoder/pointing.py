@@ -2,6 +2,7 @@
 
 # pointing.py: Calculate pointing solutions from reference stars.
 
+import numpy as np
 import math
 
 class PointingSolution:
@@ -26,7 +27,14 @@ class PointingSolution:
         self.theta = math.radians(theta)
         self.east_on_left = east_on_left
         self.x1, self.y1 = pos0
-        self.xy_units = xy_units if xy_units is not None else ( 'deg' if plate_scale==1.0 else 'pix' )
+        if xy_units is None:
+            units = { 1.0: 'deg', 
+                      1.0/60.0: 'arcmin',
+                      1.0/3600.0: 'arcsec',
+                      180.0/np.pi: 'rad',
+                      180.0/(1000.0*np.pi): 'mrad' }
+            xy_units = units.get(plate_scale, 'pix')
+        self.xy_units = xy_units
 
     @classmethod
     def solve(cls, star1, pos1, star2, pos2, east_on_left=True, plate_scale=None):
@@ -165,8 +173,8 @@ class PointingSolution:
         lines = table.splitlines()
 
         # Extend header
-        lines[0] += f" {'X [' + self.xy_units + ']' if self.xy_units != '' and len(self.xy_units)<6 else 'X':>10}"
-        lines[0] += f" {'Y [' + self.xy_units + ']' if self.xy_units != '' and len(self.xy_units)<6 else 'Y':>10}"
+        lines[0] += f" {'X [' + self.xy_units[:6] + ']' if self.xy_units != ''else 'X':>10}"
+        lines[0] += f" {'Y [' + self.xy_units[:6] + ']' if self.xy_units != '' else 'Y':>10}"
         lines[1] += "-" * 22
 
         # Extend data rows
