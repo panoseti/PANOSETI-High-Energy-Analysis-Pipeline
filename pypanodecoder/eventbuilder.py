@@ -12,7 +12,7 @@ import json
 import glob
 import numpy as np
 
-from .pcapdecoder import get_panoseti_packets, SciencePacket, GTIFilter
+from .pcapdecoder import get_panoseti_packets, SciencePacket, GTIFilter, wr_to_unix
 
 class CameraEvent:
     """
@@ -165,9 +165,11 @@ class CameraImages:
                  gti_event_times, quabo_masks, gtis=None, events=None, 
                  dtype=None, filter=None, source=None,
                  quabo_pcap_sec=None, quabo_pcap_nsec=None,
-                 quabo_pkt_sec=None, quabo_pkt_nsec=None):
+                 quabo_pkt_sec=None, quabo_pkt_nsec=None,
+                 pcap_times=None):
         self.images = np.array(images, dtype=dtype) if dtype else images
         self.event_times = event_times
+        self.pcap_times = pcap_times
         self.gti_indexes = gti_indexes
         self.gti_event_times = gti_event_times
         self.quabo_masks = quabo_masks
@@ -215,6 +217,7 @@ class CameraImages:
         return cls(
             images=np.concatenate([o.images for o in objects], axis=2),
             event_times=np.concatenate([o.event_times for o in objects]),
+            pcap_times=_concat_timing('pcap_times'),
             gti_indexes=np.concatenate([o.gti_indexes for o in objects]),
             gti_event_times=np.concatenate([o.gti_event_times for o in objects]),
             quabo_masks=np.concatenate([o.quabo_masks for o in objects]),
@@ -255,6 +258,7 @@ class CameraImages:
         return CameraImages(
             images=self.images[:, :, mask],
             event_times=self.event_times[mask],
+            pcap_times=self.pcap_times[mask] if self.pcap_times is not None else None,
             gti_indexes=self.gti_indexes[mask],
             gti_event_times=self.gti_event_times[mask],
             quabo_masks=self.quabo_masks[mask],
@@ -315,6 +319,7 @@ class CameraImages:
         return CameraImages(
             images=self.images[:, :, keep],
             event_times=self.event_times[keep],
+            pcap_times=self.pcap_times[keep] if self.pcap_times is not None else None,
             gti_indexes=self.gti_indexes[keep],
             gti_event_times=self.gti_event_times[keep],
             quabo_masks=self.quabo_masks[keep],
@@ -351,6 +356,7 @@ class CameraImages:
         return CameraImages(
             images=self.images - res,
             event_times=self.event_times,
+            pcap_times=self.pcap_times,
             gti_indexes=self.gti_indexes,
             gti_event_times=self.gti_event_times,
             quabo_masks=self.quabo_masks,
@@ -398,7 +404,7 @@ class CameraEventBuilder:
     Builds camera events from a stream of PANOSETI Science packets.
     Uses hybridized event_time for grouping and PCAP arrival time for flushing.
     """
-    def __init__(self, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, module_id=None):
+    def __init__(self, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, module_id=None, use_packet_num=False):
         """
         Args:
             max_pcap_tdiff (float): Maximum PCAP arrival time difference (seconds) 
@@ -408,11 +414,14 @@ class CameraEventBuilder:
                                     to consider quabos as part of the same event.
                                     Default is 1e-6s (1us).
             module_id (int, optional): Module ID to assign to camera events.
+            use_packet_num (bool): If True, merge quabos into events based on packet_num.
         """
         self.max_pcap_tdiff = max_pcap_tdiff
         self.max_event_tdiff = max_event_tdiff
         self.module_id = module_id
-        # active_events maps telescope_id -> { event_time -> CameraEvent }
+        self.use_packet_num = use_packet_num
+        # active_events maps telescope_id -> { key -> CameraEvent }
+        # key is packet_num (if use_packet_num) or event_time
         self.active_events = {}
 
     def process_packet(self, packet):
@@ -423,53 +432,62 @@ class CameraEventBuilder:
         event_time = packet.event_time
         telescope_id = packet.telescope_id
         quabo_id = packet.quabo_id
+        packet_num = packet.packet_num
         
         # 1. Flush any events that have timed out (based on PCAP arrival time)
-        for tid in list(self.active_events.keys()):
-            for et in list(self.active_events[tid].keys()):
-                event = self.active_events[tid][et]
+        if telescope_id in self.active_events:
+            for key in list(self.active_events[telescope_id].keys()):
+                event = self.active_events[telescope_id][key]
                 if pcap_time - event.pcap_time > self.max_pcap_tdiff:
-                    yield self.active_events[tid].pop(et)
-            if not self.active_events[tid]:
-                del self.active_events[tid]
+                    yield self.active_events[telescope_id].pop(key)
         
         # 2. Match the current packet to an active event
         if telescope_id not in self.active_events:
             self.active_events[telescope_id] = {}
             
-        # Search for an event with "close" event_time
-        matched_event_et = None
-        for et in self.active_events[telescope_id]:
-            if abs(event_time - et) <= self.max_event_tdiff:
-                # Found a match. Check if we already have this quabo.
-                if quabo_id not in self.active_events[telescope_id][et].packets:
-                    matched_event_et = et
-                    break
+        # Search for an event with matching criteria
+        matched_key = None
+        if self.use_packet_num:
+            if packet_num in self.active_events[telescope_id]:
+                event = self.active_events[telescope_id][packet_num]
+                if quabo_id not in event.packets:
+                    matched_key = packet_num
                 else:
-                    # Duplicate quabo for this hybridized time. 
-                    # This implies the previous event is finished or this is a separate trigger.
-                    # We flush the old one.
-                    yield self.active_events[telescope_id].pop(et)
-                    break
+                    # Duplicate quabo for this packet_num. Flush the old one.
+                    yield self.active_events[telescope_id].pop(packet_num)
+        else:
+            # Search for an event with "close" event_time
+            for et in self.active_events[telescope_id]:
+                if abs(event_time - et) <= self.max_event_tdiff:
+                    event = self.active_events[telescope_id][et]
+                    if quabo_id not in event.packets:
+                        matched_key = et
+                        break
+                    else:
+                        # Duplicate quabo for this hybridized time. Flush the old one.
+                        yield self.active_events[telescope_id].pop(et)
+                        break
 
-        if matched_event_et is not None:
-            self.active_events[telescope_id][matched_event_et].add_packet(packet)
-            if len(self.active_events[telescope_id][matched_event_et].packets) == 4:
-                yield self.active_events[telescope_id].pop(matched_event_et)
+        if matched_key is not None:
+            self.active_events[telescope_id][matched_key].add_packet(packet)
+            if len(self.active_events[telescope_id][matched_key].packets) == 4:
+                yield self.active_events[telescope_id].pop(matched_key)
         else:
             # No matching event, start a new one
-            self.active_events[telescope_id][event_time] = CameraEvent(telescope_id, packet, module_id=self.module_id)
+            key = packet_num if self.use_packet_num else event_time
+            self.active_events[telescope_id][key] = CameraEvent(telescope_id, packet, module_id=self.module_id)
 
     def flush(self):
         """
         Yield all remaining active events. Should be called at the end of the packet stream.
         """
         for tid in list(self.active_events.keys()):
-            for et in list(self.active_events[tid].keys()):
-                yield self.active_events[tid].pop(et)
+            # Dict keys iteration is insertion order in Python 3.7+
+            for key in list(self.active_events[tid].keys()):
+                yield self.active_events[tid].pop(key)
         self.active_events.clear()
 
-def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=None, verbose=False, module_id=None):
+def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=None, verbose=False, module_id=None, use_packet_num=False):
     """
     Convenience generator to get full camera events from one or more PANOSETI pcap files.
     
@@ -479,18 +497,19 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=
         max_event_tdiff (float): Maximum hybridized event time difference (s).
         gtis (GTIFilter, dict or list): Good Time Intervals for filtering events.
         module_id (int, optional): Module ID to assign to camera events.
+        use_packet_num (bool): If True, merge quabos into events based on packet_num.
         
     Yields:
         CameraEvent: Reconstructed camera events.
     """
-    builder = CameraEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff, module_id=module_id)
+    builder = CameraEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff, module_id=module_id, use_packet_num=use_packet_num)
     for packet in get_panoseti_packets(filenames, gtis=gtis, verbose=verbose):
         for event in builder.process_packet(packet):
             yield event
     for event in builder.flush():
         yield event
 
-def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, module_id=None, **kwargs):
+def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, module_id=None, use_packet_num=False, no_sort=False, **kwargs):
     """
     Load all camera images from one or more PANOSETI pcap files.
     
@@ -500,12 +519,15 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
         min_quabos (int, optional): Minimum number of quabo packets required to form an image.
         store_camera_events (bool): If True, store the CameraEvent instances.
         module_id (int, optional): Module ID to assign to camera events.
+        use_packet_num (bool): If True, merge quabos into events based on packet_num.
+        no_sort (bool): If True, do not sort images by event_time.
 
     Returns:
         CameraImages: Object containing the 32x32xNevent images and metadata.
     """
     images = []
     event_times = []
+    pcap_times = []
     gti_indexes = []
     gti_event_times = []
     quabo_masks = []
@@ -522,10 +544,11 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
         if good:
             gtis_dict[idx] = {'start': start, 'stop': stop}
 
-    for event in get_camera_events(filenames, gtis=gti_filter, module_id=module_id, **kwargs):
+    for event in get_camera_events(filenames, gtis=gti_filter, module_id=module_id, use_packet_num=use_packet_num, **kwargs):
         if min_quabos is None or len(event.packets) >= min_quabos:
             images.append(event.get_image())
             event_times.append(event.event_time)
+            pcap_times.append(event.pcap_time)
             gti_indexes.append(event.gti_index)
             gti_event_times.append(event.gti_event_time)
             
@@ -545,9 +568,14 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
                 events_list.append(event)
 
     if images:
-        sort_idx = np.argsort(event_times)
+        if no_sort:
+            sort_idx = np.arange(len(event_times))
+        else:
+            sort_idx = np.argsort(event_times)
+            
         images = np.stack(images, axis=2)[:, :, sort_idx]
         event_times = np.array(event_times)[sort_idx]
+        pcap_times = np.array(pcap_times)[sort_idx]
         gti_indexes = np.array(gti_indexes)[sort_idx]
         gti_event_times = np.array(gti_event_times)[sort_idx]
         quabo_masks = np.array(quabo_masks)[sort_idx]
@@ -562,6 +590,7 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
     else:
         images = np.zeros((32, 32, 0))
         event_times = np.array([])
+        pcap_times = np.array([])
         gti_indexes = np.array([])
         gti_event_times = np.array([])
         quabo_masks = np.array([])
@@ -578,6 +607,7 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
     return CameraImages(
         images=images,
         event_times=event_times,
+        pcap_times=pcap_times,
         gti_indexes=gti_indexes,
         gti_event_times=gti_event_times,
         quabo_masks=quabo_masks,
@@ -591,7 +621,7 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
         quabo_pkt_nsec=q_pkt_nsec
     )
 
-def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, verbose=False, module_id=None):
+def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, verbose=False, module_id=None, no_sort=False):
     """
     Load all camera images from one or more PANOSETI PFF files.
     
@@ -602,6 +632,7 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
         store_camera_events (bool): If True, store the CameraEvent instances (mocked).
         verbose (bool): If True, print progress.
         module_id (int, optional): Module ID to assign to camera events.
+        no_sort (bool): If True, do not sort images by event_time.
 
     Returns:
         CameraImages: Object containing the 32x32xNevent images and metadata.
@@ -622,6 +653,7 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
 
     images = []
     event_times = []
+    pcap_times = []
     gti_indexes = []
     gti_event_times = []
     quabo_masks = []
@@ -644,6 +676,7 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
         if verbose:
             print(f"Reading {filename}...")
         with open(filename, 'rb') as f:
+            record_idx = 0
             while True:
                 data = f.read(RECORD_SIZE)
                 if len(data) < RECORD_SIZE:
@@ -653,10 +686,12 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
                 try:
                     header = json.loads(header_data)
                 except json.JSONDecodeError:
+                    record_idx += 1
                     continue
                 
                 present_quabos = []
                 quabo_mask = 0
+                pcap_time = 0
                 event_time = 0
                 # Initialize timing for this event (4 quabos)
                 evt_pcap_sec = np.full(4, np.nan)
@@ -670,21 +705,40 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
                     if q_info.get('tv_sec', 0) != 0:
                         present_quabos.append(i)
                         quabo_mask |= (1 << i)
-                        event_time = q_info['tv_sec'] + q_info['tv_usec'] / 1e6
+                        
+                        # capture time
+                        this_q_pcap_sec = q_info['tv_sec']
+                        this_q_pcap_usec = q_info['tv_usec']
+                        this_q_pcap_time = this_q_pcap_sec + this_q_pcap_usec / 1e6
+                        
+                        # hardware time
+                        this_q_pkt_tai = q_info.get('pkt_tai', 0)
+                        this_q_pkt_nsec = q_info.get('pkt_nsec', 0)
+                        
+                        # Determine event time using wr_to_unix
+                        _, _, _, this_q_event_time = wr_to_unix(this_q_pkt_tai, this_q_pkt_nsec, this_q_pcap_sec, ignore_clock_desync=True)
+                        
+                        # Use the first available quabo to set event-wide times
+                        if pcap_time == 0:
+                            pcap_time = this_q_pcap_time
+                            event_time = this_q_event_time
 
-                        evt_pcap_sec[i] = q_info['tv_sec']
-                        evt_pcap_nsec[i] = q_info['tv_usec'] * 1000
-                        evt_pkt_sec[i] = q_info.get('pkt_tai', np.nan)
-                        evt_pkt_nsec[i] = q_info.get('pkt_nsec', np.nan)
+                        evt_pcap_sec[i] = this_q_pcap_sec
+                        evt_pcap_nsec[i] = this_q_pcap_usec * 1000
+                        evt_pkt_sec[i] = this_q_pkt_tai
+                        evt_pkt_nsec[i] = this_q_pkt_nsec
                 
                 if not present_quabos:
+                    record_idx += 1
                     continue
                 
                 if min_quabos is not None and len(present_quabos) < min_quabos:
+                    record_idx += 1
                     continue
                 
                 is_good, gti_idx, gti_start = gti_filter.get_info(event_time)
                 if not is_good:
+                    record_idx += 1
                     continue
                 
                 # Image data starts after JSON header and '*'
@@ -696,16 +750,16 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
                 
                 if store_camera_events:
                     class MockPacket:
-                        def __init__(self, qid, q_info, module_id, gti_idx, gti_start, event_time, pix_data):
+                        def __init__(self, qid, q_info, module_id, gti_idx, gti_start, event_time, pcap_time, pix_data, packet_num):
                             self.quabo_id = qid
                             self.pcap_sec = q_info['tv_sec']
                             self.pcap_nsec = q_info['tv_usec'] * 1000
                             self.pcap_time = self.pcap_sec + self.pcap_nsec / 1e9
-                            self.event_time = self.pcap_time
+                            self.event_time = event_time
                             self.acq_mode = 0x01
                             self.tai = q_info.get('pkt_tai', 0)
                             self.nanosec = q_info.get('pkt_nsec', 0)
-                            self.packet_num = 0
+                            self.packet_num = packet_num
                             self.board_loc = ((module_id or 0) << 2) | qid
                             self.gti_index = gti_idx
                             self.gti_event_time = event_time - gti_start if gti_start != -float('inf') else event_time
@@ -715,15 +769,20 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
                     for i in present_quabos:
                         q_info = header.get(f"quabo_{i}")
                         pix_data = CameraEvent.extract_quabo_pixels(image, i)
-                        p = MockPacket(i, q_info, module_id, gti_idx, gti_start, event_time, pix_data)
+                        p = MockPacket(i, q_info, module_id, gti_idx, gti_start, event_time, pcap_time, pix_data, record_idx)
                         if event is None:
                             event = CameraEvent(module_id if module_id is not None else 0, p, module_id=module_id)
                         else:
                             event.add_packet(p)
+                    # Force the event-wide pcap_time
+                    event.pcap_time = pcap_time
+                    event.pcap_sec = int(pcap_time)
+                    event.pcap_nsec = int((pcap_time - int(pcap_time)) * 1e9)
                     events_list.append(event)
 
                 images.append(image)
                 event_times.append(event_time)
+                pcap_times.append(pcap_time)
                 gti_indexes.append(gti_idx)
                 gti_event_times.append(event_time - gti_start if gti_start != -float('inf') else event_time)
                 quabo_masks.append(quabo_mask)
@@ -731,11 +790,17 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
                 q_pcap_nsec.append(evt_pcap_nsec)
                 q_pkt_sec.append(evt_pkt_sec)
                 q_pkt_nsec.append(evt_pkt_nsec)
+                record_idx += 1
 
     if images:
-        sort_idx = np.argsort(event_times)
+        if no_sort:
+            sort_idx = np.arange(len(event_times))
+        else:
+            sort_idx = np.argsort(event_times)
+            
         images = np.stack(images, axis=2)[:, :, sort_idx]
         event_times = np.array(event_times)[sort_idx]
+        pcap_times = np.array(pcap_times)[sort_idx]
         gti_indexes = np.array(gti_indexes)[sort_idx]
         gti_event_times = np.array(gti_event_times)[sort_idx]
         quabo_masks = np.array(quabo_masks)[sort_idx]
@@ -750,6 +815,7 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
     else:
         images = np.zeros((32, 32, 0))
         event_times = np.array([])
+        pcap_times = np.array([])
         gti_indexes = np.array([])
         gti_event_times = np.array([])
         quabo_masks = np.array([])
@@ -766,6 +832,7 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
     return CameraImages(
         images=images,
         event_times=event_times,
+        pcap_times=pcap_times,
         gti_indexes=gti_indexes,
         gti_event_times=gti_event_times,
         quabo_masks=quabo_masks,
@@ -817,8 +884,8 @@ def load_camera_images(filenames, gtis=None, priority="PCAP", **kwargs):
     images_pff = None
     if pff_files:
         # load_pff_camera_images uses 'verbose' instead of '**kwargs' currently, 
-        # but let's pass kwargs that it can handle (min_quabos, store_camera_events, verbose, module_id)
-        pff_kwargs = {k: v for k, v in kwargs.items() if k in ['min_quabos', 'store_camera_events', 'verbose', 'module_id']}
+        # but let's pass kwargs that it can handle (min_quabos, store_camera_events, verbose, module_id, no_sort)
+        pff_kwargs = {k: v for k, v in kwargs.items() if k in ['min_quabos', 'store_camera_events', 'verbose', 'module_id', 'no_sort']}
         images_pff = load_pff_camera_images(pff_files, gtis=gtis, **pff_kwargs)
 
     if images_pcap and images_pff:
@@ -841,6 +908,6 @@ def load_camera_images(filenames, gtis=None, priority="PCAP", **kwargs):
         
         return CameraImages.concatenate(to_merge)
     
-    return images_pcap or images_pff or CameraImages(np.zeros((32, 32, 0)), np.array([]), np.array([]), np.array([]), np.array([]), source='NONE')
+    return images_pcap or images_pff or CameraImages(np.zeros((32, 32, 0)), np.array([]), np.array([]), np.array([]), np.array([]), source='NONE', pcap_times=np.array([]))
 
 

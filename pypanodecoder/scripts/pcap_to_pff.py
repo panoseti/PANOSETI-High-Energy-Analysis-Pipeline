@@ -28,6 +28,8 @@ def main():
     parser.add_argument('--template', help="Filename template for output.")
     parser.add_argument('--scope', help="Override scope name for template (e.g. Fern).")
     parser.add_argument('--min-quabos', type=int, default=1, help="Minimum quabos required to write an event (default 1).")
+    parser.add_argument('--use-packet-num', action='store_true', help="Merge packets into events based on packet_num.")
+    parser.add_argument('--no-sort', action='store_true', help="Do not sort events chronologically; preserve file order.")
     parser.add_argument('--verbose', '-v', action='store_true', help="Verbose output.")
 
     args = parser.parse_args()
@@ -65,6 +67,8 @@ def main():
             store_camera_events=True, 
             min_quabos=args.min_quabos,
             module_id=args.module_id,
+            use_packet_num=args.use_packet_num,
+            no_sort=args.no_sort,
             verbose=args.verbose
         )
 

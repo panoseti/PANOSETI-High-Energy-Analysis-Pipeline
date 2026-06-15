@@ -35,6 +35,7 @@ def main():
     parser.add_argument('--output', '-o', help="Output filename. If not provided, generated from template.")
     parser.add_argument('--template', help="Filename template for output.")
     parser.add_argument('--scope', help="Override scope name for template (e.g. Fern).")
+    parser.add_argument('--no-sort', action='store_true', help="Do not sort events chronologically; preserve file order.")
     parser.add_argument('--verbose', '-v', action='store_true', help="Verbose output.")
 
     args = parser.parse_args()
@@ -83,7 +84,7 @@ def main():
                 file_module_id = extract_module_id(filename)
             
             # Load images with events stored
-            images = load_pff_camera_images(filename, store_camera_events=True, module_id=file_module_id)
+            images = load_pff_camera_images(filename, store_camera_events=True, module_id=file_module_id, no_sort=args.no_sort)
             
             if images.events:
                 if args.verbose:
