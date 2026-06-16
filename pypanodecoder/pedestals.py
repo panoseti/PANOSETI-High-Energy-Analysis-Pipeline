@@ -1014,7 +1014,8 @@ def apply_polynomial_pedestal_correction(camera_images, norder=0, quantiles=(0.1
         charge_spectra = calculate_charge_spectra(gti_images, combine_gtis=True)
         q_low, q_high = charge_spectra.pix.quantiles(quantiles)
 
-        t = gti_images.gti_event_times
+        # Convert gti_pcap_times from ns to seconds for numerical stability in polyfit
+        t = gti_images.gti_pcap_times / 1e9
         pcorr = np.zeros((32, 32, norder + 1))
 
         for i in range(32):

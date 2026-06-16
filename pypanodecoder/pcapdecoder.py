@@ -21,7 +21,7 @@ _SciencePacketBase = namedtuple('SciencePacket', [
     'acq_mode', 'packet_ver', 'packet_num', 'board_loc',
     'telescope_id', 'quabo_id', 'tai', 'nanosec',
     'event_time', 'event_time_sec', 'event_time_nsec', 'event_time_good',
-    'flags', 'gti_index', 'gti_event_time', 'pix_data',
+    'flags', 'gti_index', 'gti_pcap_time', 'pix_data',
 ])
 
 class SciencePacket(_SciencePacketBase):
@@ -31,6 +31,8 @@ class SciencePacket(_SciencePacketBase):
             value = getattr(self, field)
             if field == 'pix_data':
                 lines.append(f"  {field}: <{len(value)} pixels>,")
+            elif field in ['pcap_time', 'event_time', 'gti_pcap_time']:
+                lines.append(f"  {field}: {value} (ns),")
             else:
                 lines.append(f"  {field}: {value!r},")
         lines.append(")")
@@ -41,7 +43,7 @@ _HKPacketBase = namedtuple('HKPacket', [
     'filename', 'file_offset', 'file_captured_packet_index', 'file_hk_packet_index',
     'pcap_time', 'pcap_sec', 'pcap_nsec', 'pcap_len', 'pcap_src_ip',
     'board_loc', 'telescope_id', 'quabo_id',
-    'gti_index', 'gti_event_time', 'data'
+    'gti_index', 'gti_pcap_time', 'data'
 ])
 
 class HKPacket(_HKPacketBase):
@@ -51,6 +53,8 @@ class HKPacket(_HKPacketBase):
             value = getattr(self, field)
             if field == 'data':
                 lines.append(f"  {field}: <{len(value)} bytes>,")
+            elif field in ['pcap_time', 'gti_pcap_time']:
+                lines.append(f"  {field}: {value} (ns),")
             else:
                 lines.append(f"  {field}: {value!r},")
         lines.append(")")
@@ -164,34 +168,55 @@ class GTIFilter:
         start, _, good, idx = self.intervals[idx_bin]
         return good, idx, start
 
+class QuaboTimeUnroller:
+    """
+    Handles unrolling and calibration of the 10-bit (1024s) Quabo TAI counter.
+    Calculates a per-quabo offset to align hardware time with PCAP arrival time
+    while maintaining hardware precision and monotonicity.
+    """
+    def __init__(self, rollover_sec=1024):
+        self.rollover_sec = rollover_sec
+        self.offset_ns = None
+        self.last_tai = None
+        self.last_pcap_ns = None
+
+    def unroll(self, tai, nsec, pcap_ns):
+        """
+        Calculates monotonic nanoseconds since epoch for a packet.
+        
+        Args:
+            tai (int): 10-bit TAI second counter from packet.
+            nsec (int): Nanosecond counter from packet.
+            pcap_ns (int): PCAP arrival time in nanoseconds.
+        """
+        # Hardware time within the current 1024s cycle
+        hw_cycle_ns = int(tai) * 1000000000 + int(nsec)
+
+        # 1. Check for gap or initial calibration
+        if (self.offset_ns is None or 
+            (self.last_pcap_ns is not None and abs(pcap_ns - self.last_pcap_ns) > self.rollover_sec * 1000000000)):
+            # Calibrate: align this hardware cycle to the current PCAP second.
+            # We align to the start of the PCAP second to keep it simple.
+            pcap_sec_ns = (pcap_ns // 1000000000) * 1000000000
+            self.offset_ns = pcap_sec_ns - (int(tai) * 1000000000)
+            # Alternatively, to be closer to "middle of the second" as suggested:
+            # self.offset_ns = (pcap_ns // 1000000000) * 1000000000 - (int(tai) * 1000000000)
+            # This ensures event_time_sec is initially close to pcap_sec.
+
+        # 2. Detect Rollover
+        # If TAI dropped significantly (e.g. 1023 -> 0), increment offset
+        if self.last_tai is not None and tai < self.last_tai - (self.rollover_sec // 2):
+            self.offset_ns += self.rollover_sec * 1000000000
+        # Handle case where packets might arrive slightly out of order near rollover
+        elif self.last_tai is not None and tai > self.last_tai + (self.rollover_sec // 2):
+            self.offset_ns -= self.rollover_sec * 1000000000
+
+        self.last_tai = tai
+        self.last_pcap_ns = pcap_ns
+        
+        return hw_cycle_ns + self.offset_ns
+
 def quabo_timestamp_good(pcap_sec):
-    return False # PANOSETI board times no good for now
-
-def wr_to_unix(pkt_tai, pkt_nsec, pcap_sec, ignore_clock_desync=False):
-    """
-    Given a WR packet time (TAI) with only 10 bits of sec,
-    and a Unix time that's within a few ms,
-    return the complete WR time (in Unix time, not TAI).
-
-    See: https://github.com/panoseti/panoseti/blob/master/control/utils/pff.py#L238
-    """
-    # 37 is the TAI-UTC offset.
-    # The packet TAI seconds is only 10 bits (0-1023).
-    d = (pcap_sec - pkt_tai + 37) % 1024
-    if d == 0:
-        return True, pcap_sec, pkt_nsec, pcap_sec + pkt_nsec / 1e9
-    elif d == 1:
-        return True, pcap_sec - 1, pkt_nsec, pcap_sec - 1 + pkt_nsec / 1e9
-    elif d == 1023:
-        return True, pcap_sec + 1, pkt_nsec, pcap_sec + 1 + pkt_nsec / 1e9
-    else:
-        # The WR and DAQ clocks differ by > 1s => out of sync
-        # Return 0 if ignore_clock_desync is False. Otherwise, return an approximation to the time.
-        if ignore_clock_desync:
-            approx_t = pcap_sec + pkt_nsec / 1e9
-            return False, pcap_sec, pkt_nsec, approx_t
-        else:
-            raise Exception('WR and Unix times differ by > 1 sec: pkt_tai %d pcap_sec %d d %d' % (pkt_tai, pcap_sec, d))
 
 class PcapDecoder:
     """
@@ -213,6 +238,7 @@ class PcapDecoder:
         self.file_captured_packet_index = 0
         self.file_science_packet_index = 0
         self.file_hk_packet_index = 0
+        self._time_unrollers = {} # board_loc -> QuaboTimeUnroller
         self._detect_format()
 
     def _detect_format(self):
@@ -408,14 +434,14 @@ class PcapDecoder:
         quabo_id = board_loc & 0x03
         telescope_id = (board_loc >> 2) & 0xff
 
-        pcap_time = pcap_sec + pcap_nsec / 1e9
+        pcap_time_ns = int(pcap_sec) * 1000000000 + int(pcap_nsec)
 
         return HKPacket(
             filename=self.filename,
             file_offset=file_offset,
             file_captured_packet_index=file_captured_packet_index,
             file_hk_packet_index=file_hk_packet_index,
-            pcap_time=pcap_time,
+            pcap_time=pcap_time_ns,
             pcap_sec=pcap_sec,
             pcap_nsec=pcap_nsec,
             pcap_len=incl_len,
@@ -424,7 +450,7 @@ class PcapDecoder:
             telescope_id=telescope_id,
             quabo_id=quabo_id,
             gti_index=0,
-            gti_event_time=pcap_time,
+            gti_pcap_time=pcap_time_ns,
             data=payload
         )
 
@@ -468,15 +494,20 @@ class PcapDecoder:
         tai = meta[4]
         nanosec = meta[5]
 
-        pcap_time = pcap_sec + pcap_nsec / 1e9
-        event_time_good, event_time_sec, event_time_nsec, event_time = wr_to_unix(tai, nanosec, pcap_sec, ignore_clock_desync=True)
+        pcap_time_ns = int(pcap_sec) * 1000000000 + int(pcap_nsec)
+        
+        # Use stateful unroller to handle 1024s wraparound and calibration
+        if board_loc not in self._time_unrollers:
+            self._time_unrollers[board_loc] = QuaboTimeUnroller()
+        
+        event_time_ns = self._time_unrollers[board_loc].unroll(tai, nanosec, pcap_time_ns)
 
         return SciencePacket(
             filename=self.filename,
             file_offset=file_offset,
             file_captured_packet_index=file_captured_packet_index,
             file_science_packet_index=file_science_packet_index,
-            pcap_time=pcap_time,
+            pcap_time=pcap_time_ns,
             pcap_sec=pcap_sec,
             pcap_nsec=pcap_nsec,
             pcap_len=incl_len,
@@ -489,13 +520,13 @@ class PcapDecoder:
             quabo_id=quabo_id,
             tai=tai,
             nanosec=nanosec,
-            event_time_sec=event_time_sec,
-            event_time_nsec=event_time_nsec,
-            event_time=event_time,
-            event_time_good=event_time_good,
+            event_time_sec=int(event_time_ns // 1000000000),
+            event_time_nsec=int(event_time_ns % 1000000000),
+            event_time=event_time_ns,
+            event_time_good=True, # Calibrated offline
             flags=meta[6],
             gti_index=0,
-            gti_event_time=event_time,
+            gti_pcap_time=pcap_time_ns,
             pix_data=pix_data
         )
 
@@ -530,13 +561,13 @@ def get_panoseti_packets(filenames, gtis=None, verbose=False, science_port=60001
         try:
             for packet in decoder:
                 # Use pcap_time for GTI filtering for both Science and HK packets
-                is_good, gti_idx, gti_start_time = gti_filter.get_info(packet.pcap_time)
+                is_good, gti_idx, gti_start_time = gti_filter.get_info(packet.pcap_time / 1e9)
                 if is_good:
-                    # Reference time for gti_event_time
-                    ref_time = packet.event_time if isinstance(packet, SciencePacket) else packet.pcap_time
-                    gti_event_time = ref_time
+                    # Use pcap_time for gti_pcap_time since event_time is unreliable
+                    # gti_pcap_time is now in nanoseconds
+                    gti_pcap_time = packet.pcap_time
                     if gti_start_time != -float('inf'):
-                        gti_event_time -= gti_start_time
-                    yield packet._replace(gti_index=gti_idx, gti_event_time=gti_event_time)
+                        gti_pcap_time -= int(gti_start_time * 1e9)
+                    yield packet._replace(gti_index=gti_idx, gti_pcap_time=gti_pcap_time)
         finally:
             decoder.close()

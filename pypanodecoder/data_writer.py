@@ -176,6 +176,7 @@ class PcapWriter:
         Writes a single Science packet to the PCAPNG file.
         """
         if self.file_handle is None:
+            # pcap_sec is in seconds (int or float)
             self._open_file(pcap_sec)
             
         # 1. Ethernet Header (14 bytes)
@@ -324,7 +325,9 @@ class PffWriter:
         Writes a CameraEvent to the PFF file.
         """
         if self.file_handle is None:
-            self._open_file(event.event_time)
+            # event.pcap_time is in nanoseconds, convert to float seconds for filename
+            # PCAP time is used as event time is not reliable at the moment.
+            self._open_file(event.pcap_time / 1e9)
             
         # PFF record size: 491 (JSON) + 1 (*) + 2048 (Image) = 2540
         header = {}

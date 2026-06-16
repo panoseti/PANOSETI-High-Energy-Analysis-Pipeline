@@ -66,9 +66,12 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
         mask = (camera_images.gti_indexes == gti_idx)
 
         if uttime:
-            times = camera_images.event_times[mask] % 86400
+            # Use pcap_times for plotting since event_time is unreliable.
+            # Convert nanoseconds to seconds.
+            times = (camera_images.pcap_times[mask] / 1e9) % 86400
         else:
-            times = camera_images.gti_event_times[mask]
+            # gti_pcap_times is now in nanoseconds, convert to seconds for plotting
+            times = camera_images.gti_pcap_times[mask] / 1e9
 
         if len(times) == 0:
             gti_data_list.append(None)
@@ -196,7 +199,7 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
 
     return fig, axes
 
-def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), **kwargs):
+def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), time_type='pcap', **kwargs):
     """
     Plots the distribution of times between consecutive events (delta_t).
 
@@ -214,6 +217,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True,
         fit (bool): If True, fit an exponential model to each distribution.
         num_bins (int): Number of bins for the histogram.
         figsize (tuple): Size of the figure (width, height).
+        time_type (str): Type of time to use for intervals: 'pcap' (default) or 'event'.
         **kwargs: Additional keyword arguments passed to axes.stairs.
 
     Returns:
@@ -226,10 +230,19 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True,
 
     for gti_idx in unique_gtis:
         mask = (camera_images.gti_indexes == gti_idx)
-        times = np.sort(camera_images.event_times[mask])
-        if len(times) < 2:
+        
+        if time_type.lower() == 'event':
+            # Maintain int64 precision through sort and diff
+            times_ns = np.sort(camera_images.event_times[mask])
+        else:
+            # Maintain int64 precision through sort and diff
+            times_ns = np.sort(camera_images.pcap_times[mask])
+
+        if len(times_ns) < 2:
             continue
-        dt = np.diff(times)
+        
+        # Calculate diff in nanoseconds first, then convert to float seconds
+        dt = np.diff(times_ns) / 1e9
         dt = dt[dt > 0] # Ensure positive intervals
         if len(dt) > 0:
             gti_dts[gti_idx] = dt
@@ -357,7 +370,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True,
         y_max = np.max(all_y_values) * 2.0
         ax.set_ylim(min_normalized_y, y_max)
 
-    ax.set_xlabel(r'$\Delta t$ (s)')
+    ax.set_xlabel(rf'$\Delta t_{{{time_type.lower()}}}$ (s)')
     ax.set_ylabel(ylabel)
 
     if semilog:
