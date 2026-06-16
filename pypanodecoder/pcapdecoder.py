@@ -227,7 +227,7 @@ class PcapDecoder:
     See: Jamie's C++ code
     See: https://github.com/panoseti/panoseti/wiki/Quabo-packet-interface#science-packets
     """
-    def __init__(self, filename, science_port=60001, hk_port=60000, decode_hk=False):
+    def __init__(self, filename, science_port=60001, hk_port=60000, decode_hk=False, acq_mode=0x01):
         self.filename = filename
         self._file = open(filename, 'rb')
         self._is_pcapng = False
@@ -236,6 +236,15 @@ class PcapDecoder:
         self.science_port = science_port
         self.hk_port = hk_port
         self.decode_hk = decode_hk
+        if acq_mode is None:
+            self._acq_mode_filter = None
+        elif isinstance(acq_mode, int):
+            self._acq_mode_filter = {acq_mode}
+        else:
+            try:
+                self._acq_mode_filter = set(acq_mode)
+            except TypeError:
+                self._acq_mode_filter = {acq_mode}
         self.file_captured_packet_index = 0
         self.file_science_packet_index = 0
         self.file_hk_packet_index = 0
@@ -470,6 +479,9 @@ class PcapDecoder:
 
         acq_mode = meta[0]
 
+        if self._acq_mode_filter is not None and acq_mode not in self._acq_mode_filter:
+            return None
+
         if acq_mode == 0x01:
             pix_format = "<256h" # 16-bit signed
             pix_bytes = 512
@@ -534,7 +546,7 @@ class PcapDecoder:
     def close(self):
         self._file.close()
 
-def get_panoseti_packets(filenames, gtis=None, verbose=False, science_port=60001, decode_hk=False):
+def get_panoseti_packets(filenames, gtis=None, verbose=False, science_port=60001, decode_hk=False, acq_mode=0x01):
     """
     Convenience function to get packets from one or more PANOSETI PCAP/PCAPNG files.
     'filenames' can be a single filename (string), a glob pattern (string),
@@ -558,7 +570,7 @@ def get_panoseti_packets(filenames, gtis=None, verbose=False, science_port=60001
     for filename in sorted(files):
         if(verbose):
             print(f"Processing file: {filename} (size: {os.path.getsize(filename)} bytes)")
-        decoder = PcapDecoder(filename, science_port=science_port, decode_hk=decode_hk)
+        decoder = PcapDecoder(filename, science_port=science_port, decode_hk=decode_hk, acq_mode=acq_mode)
         try:
             for packet in decoder:
                 # Use pcap_time for GTI filtering for both Science and HK packets

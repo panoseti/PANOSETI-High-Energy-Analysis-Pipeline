@@ -475,7 +475,7 @@ class CameraEventBuilder:
                 yield self.active_events[tid].pop(key)
         self.active_events.clear()
 
-def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=None, verbose=False, module_id=None, use_packet_num=False):
+def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=None, verbose=False, module_id=None, use_packet_num=False, acq_mode=0x01):
     """
     Convenience generator to get full camera events from one or more PANOSETI pcap files.
     
@@ -484,20 +484,22 @@ def get_camera_events(filenames, max_pcap_tdiff=1.0, max_event_tdiff=1e-6, gtis=
         max_pcap_tdiff (float): Maximum PCAP arrival time difference.
         max_event_tdiff (float): Maximum hybridized event time difference (s).
         gtis (GTIFilter, dict or list): Good Time Intervals for filtering events.
+        verbose (bool): Verbose output.
         module_id (int, optional): Module ID to assign to camera events.
         use_packet_num (bool): If True, merge quabos into events based on packet_num.
+        acq_mode (int, None, or iterable): Filter on acquisition mode byte.
         
     Yields:
         CameraEvent: Reconstructed camera events.
     """
     builder = CameraEventBuilder(max_pcap_tdiff=max_pcap_tdiff, max_event_tdiff=max_event_tdiff, module_id=module_id, use_packet_num=use_packet_num)
-    for packet in get_panoseti_packets(filenames, gtis=gtis, verbose=verbose):
+    for packet in get_panoseti_packets(filenames, gtis=gtis, verbose=verbose, acq_mode=acq_mode):
         for event in builder.process_packet(packet):
             yield event
     for event in builder.flush():
         yield event
 
-def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, module_id=None, use_packet_num=False, no_sort=False, **kwargs):
+def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_events=False, module_id=None, use_packet_num=False, no_sort=False, acq_mode=0x01, **kwargs):
     """
     Load all camera images from one or more PANOSETI pcap files.
     
@@ -509,6 +511,7 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
         module_id (int, optional): Module ID to assign to camera events.
         use_packet_num (bool): If True, merge quabos into events based on packet_num.
         no_sort (bool): If True, do not sort images by event_time.
+        acq_mode (int, None, or iterable): Filter on acquisition mode byte.
 
     Returns:
         CameraImages: Object containing the 32x32xNevent images and metadata.
@@ -530,7 +533,7 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
         if good:
             gtis_dict[idx] = {'start': start, 'stop': stop}
 
-    for event in get_camera_events(filenames, gtis=gti_filter, module_id=module_id, use_packet_num=use_packet_num, **kwargs):
+    for event in get_camera_events(filenames, gtis=gti_filter, module_id=module_id, use_packet_num=use_packet_num, acq_mode=acq_mode, **kwargs):
         if min_quabos is None or len(event.packets) >= min_quabos:
             images.append(event.get_image())
             event_times.append(event.event_time)
@@ -818,7 +821,7 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
         quabo_event_time=q_event_time
     )
 
-def load_camera_images(filenames, gtis=None, priority="PCAP", **kwargs):
+def load_camera_images(filenames, gtis=None, priority="PCAP", acq_mode=0x01, **kwargs):
     """
     Unified loader for PANOSETI data (PCAP or PFF).
     Globs filenames, separates them by format, loads them, and merges them.
@@ -828,6 +831,7 @@ def load_camera_images(filenames, gtis=None, priority="PCAP", **kwargs):
         filenames (str or list): Glob pattern(s) or list of files.
         gtis (GTIFilter, dict or list, optional): Good Time Intervals.
         priority (str): "PCAP" or "PFF". Which format to prefer if GTIs overlap.
+        acq_mode (int, None, or iterable): Filter on acquisition mode byte.
         **kwargs: Arguments passed to load_pcap_camera_images or load_pff_camera_images.
 
     Returns:
@@ -851,7 +855,7 @@ def load_camera_images(filenames, gtis=None, priority="PCAP", **kwargs):
 
     images_pcap = None
     if pcap_files:
-        images_pcap = load_pcap_camera_images(pcap_files, gtis=gtis, **kwargs)
+        images_pcap = load_pcap_camera_images(pcap_files, gtis=gtis, acq_mode=acq_mode, **kwargs)
 
     images_pff = None
     if pff_files:
