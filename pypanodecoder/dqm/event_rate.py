@@ -199,7 +199,7 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
 
     return fig, axes
 
-def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), time_type='pcap', **kwargs):
+def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), time_type='event', **kwargs):
     """
     Plots the distribution of times between consecutive events (delta_t).
 
