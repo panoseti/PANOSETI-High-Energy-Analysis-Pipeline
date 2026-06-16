@@ -184,6 +184,70 @@ class PointingSolution:
 
         print("\n".join(lines))
 
+    def shift_origin(self, dx, dy):
+        """
+        Returns a new PointingSolution shifted by (dx, dy).
+        
+        Args:
+            dx (float): Shift in X image coordinates.
+            dy (float): Shift in Y image coordinates.
+        """
+        return PointingSolution(
+            self.ra0, self.dec0, self.plate_scale, math.degrees(self.theta),
+            self.east_on_left, (self.x1 + dx, self.y1 + dy), self.xy_units
+        )
+
+    def rotate(self, angle_deg, origin=(0, 0)):
+        """
+        Returns a new PointingSolution rotated by angle_deg around origin.
+        
+        Args:
+            angle_deg (float): Rotation angle in degrees (counter-clockwise).
+            origin (tuple): Image coordinates (x, y) around which to rotate (default (0, 0)).
+        """
+        angle_rad = math.radians(angle_deg)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        
+        # Rotate the reference point (x1, y1) around the origin
+        ox, oy = origin
+        dx = self.x1 - ox
+        dy = self.y1 - oy
+        
+        new_x1 = ox + dx * cos_a - dy * sin_a
+        new_y1 = oy + dx * sin_a + dy * cos_a
+        
+        # New rotation angle
+        new_theta_deg = math.degrees(self.theta) + angle_deg
+        
+        return PointingSolution(
+            self.ra0, self.dec0, self.plate_scale, new_theta_deg,
+            self.east_on_left, (new_x1, new_y1), self.xy_units
+        )
+
+    def zoom(self, factor, origin=(0, 0)):
+        """
+        Returns a new PointingSolution zoomed by factor around origin.
+        
+        Args:
+            factor (float): Zoom factor (> 1 is zoom in, < 1 is zoom out).
+                            Image coordinates are multiplied by this factor.
+            origin (tuple): Image coordinates (x, y) around which to zoom (default (0, 0)).
+        """
+        # New plate scale (deg/pix). 
+        # Zooming in (factor > 1) means fewer degrees per pixel.
+        new_scale = self.plate_scale / factor
+        
+        # Scale the reference point (x1, y1) relative to origin
+        ox, oy = origin
+        new_x1 = ox + (self.x1 - ox) * factor
+        new_y1 = oy + (self.y1 - oy) * factor
+        
+        return PointingSolution(
+            self.ra0, self.dec0, new_scale, math.degrees(self.theta),
+            self.east_on_left, (new_x1, new_y1), self.xy_units
+        )
+
     def __repr__(self):
         return (f"<PointingSolution RA0={self.ra0:.4f} Dec0={self.dec0:.4f} "
                 f"scale={self.plate_scale:.6f} deg/pix theta={math.degrees(self.theta):.2f}deg "
