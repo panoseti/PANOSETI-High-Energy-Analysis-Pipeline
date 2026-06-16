@@ -135,7 +135,7 @@ def plot_image(image, transpose=False, ax=None, fig=None, colorbar_label=None, s
 
     return fig, ax, pc
 
-def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, max_magnitude=5.0, ax=None, east_on_left=True, **kwargs):
+def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, max_magnitude=5.0, ax=None, east_on_left=True, theta=0.0, **kwargs):
     """
     Plots a star field around a specific source or set of coordinates.
 
@@ -148,6 +148,7 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
         max_magnitude (float): Maximum magnitude of stars to display (default 6.0).
         ax (matplotlib.axes.Axes, optional): Axes to plot on.
         east_on_left (bool): If True, East is to the left (standard astronomical view).
+        theta (float): Rotation angle in degrees (default 0.0).
         **kwargs: Additional arguments passed to overlay_stars().
 
     Returns:
@@ -171,7 +172,7 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
 
     # Create a pointing solution centered at (ra0, dec0) at image (0,0)
     # We use a unit plate scale so that image coordinates are degrees from center
-    ps = pointing.PointingSolution(ra0, dec0, plate_scale=1.0, east_on_left=east_on_left)
+    ps = pointing.PointingSolution(ra0, dec0, plate_scale=1.0, theta=theta, east_on_left=east_on_left)
 
     # Fetch stars
     star_list = stars.get_bright_stars(ra0, dec0, radius_deg=1.5*radius_deg, max_magnitude=max_magnitude)
@@ -217,7 +218,7 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
 
     return ps
 
-def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, **kwargs):
+def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, loc=0, **kwargs):
     """
     Overlays stars on a field and optionally calculates the pointing solution.
 
@@ -235,6 +236,8 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         show_mags (bool): If True, show star magnitudes in parentheses after labels.
         auto_align (bool): If True, automatically set horizontal alignment based on
                            position to avoid clipping at edges.
+        loc (int): Corner to display North-West guide (L): 0 to disable (default),
+                   1 for top right, 2 for top left, 3 for bottom left, 4 for bottom right.
         **kwargs: Additional arguments passed to ax.text() for label styling (e.g., fontsize).
 
     Returns:
@@ -295,5 +298,68 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         ax.annotate(label, xy=(x, y), xytext=(offset_x, 0),
                     textcoords='offset points',
                     color=color, **current_text_kwargs)
+
+    # Draw North/West L-guide in specified corner
+    if loc in [1, 2, 3, 4]:
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        x_min, x_max = min(xlim), max(xlim)
+        y_min, y_max = min(ylim), max(ylim)
+
+        # Handle potentially inverted axes for placement
+        x_left, x_right = (xlim[1], xlim[0]) if ax.xaxis_inverted() else (xlim[0], xlim[1])
+        y_bottom, y_top = (ylim[1], ylim[0]) if ax.yaxis_inverted() else (ylim[0], ylim[1])
+
+        dx_span = x_right - x_left
+        dy_span = y_top - y_bottom
+        scale_ref = min(dx_span, dy_span)
+
+        arm_len = 0.08 * scale_ref
+        margin_x = 0.10 * dx_span
+        margin_y = 0.10 * dy_span
+
+        # Center of the imaginary square of the L
+        if loc == 1:    # top right
+            xc = x_right - margin_x
+            yc = y_top - margin_y
+        elif loc == 2:  # top left
+            xc = x_left + margin_x
+            yc = y_top - margin_y
+        elif loc == 3:  # bottom left
+            xc = x_left + margin_x
+            yc = y_bottom + margin_y
+        elif loc == 4:  # bottom right
+            xc = x_right - margin_x
+            yc = y_bottom + margin_y
+
+        theta_rad = ps.theta
+        cos_th = math.cos(theta_rad)
+        sin_th = math.sin(theta_rad)
+        f = -1.0 if ps.east_on_left else 1.0
+
+        u_N = (f * sin_th, cos_th)
+        u_W = (-f * cos_th, sin_th)
+
+        # L origin (intersection point of the two arms)
+        x0 = xc - 0.5 * arm_len * (u_N[0] + u_W[0])
+        y0 = yc - 0.5 * arm_len * (u_N[1] + u_W[1])
+
+        # Draw L guide lines
+        ax.plot([x0, x0 + arm_len * u_N[0]], [y0, y0 + arm_len * u_N[1]], color=color, lw=1.5)
+        ax.plot([x0, x0 + arm_len * u_W[0]], [y0, y0 + arm_len * u_W[1]], color=color, lw=1.5)
+
+        # Draw N and W labels
+        theta_deg = math.degrees(theta_rad)
+        arm_rotation_deg = -f * theta_deg
+        text_rot = (arm_rotation_deg + 45) % 90 - 45
+
+        label_offset = 0.25 * arm_len
+        x_N = x0 + (arm_len + label_offset) * u_N[0]
+        y_N = y0 + (arm_len + label_offset) * u_N[1]
+        x_W = x0 + (arm_len + label_offset) * u_W[0]
+        y_W = y0 + (arm_len + label_offset) * u_W[1]
+
+        ax.text(x_N, y_N, 'N', color=color, ha='center', va='center', rotation=text_rot, fontsize=text_kwargs.get('fontsize', 8))
+        ax.text(x_W, y_W, 'W', color=color, ha='center', va='center', rotation=text_rot, fontsize=text_kwargs.get('fontsize', 8))
 
     return ps
