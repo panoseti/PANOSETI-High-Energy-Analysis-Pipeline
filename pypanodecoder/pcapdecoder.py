@@ -217,6 +217,7 @@ class QuaboTimeUnroller:
         return hw_cycle_ns + self.offset_ns
 
 def quabo_timestamp_good(pcap_sec):
+    return False # PANOSETI board times no good for now
 
 class PcapDecoder:
     """

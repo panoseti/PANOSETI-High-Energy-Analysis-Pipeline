@@ -12,7 +12,7 @@ import json
 import glob
 import numpy as np
 
-from .pcapdecoder import get_panoseti_packets, SciencePacket, GTIFilter, wr_to_unix
+from .pcapdecoder import get_panoseti_packets, SciencePacket, GTIFilter, QuaboTimeUnroller
 
 class CameraEvent:
     """
