@@ -139,7 +139,7 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
                             dt = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
                         except ValueError:
                             pass
-                    elif isinstance(start, (int, float)):
+                    elif isinstance(start, (int, float)) and math.isfinite(start):
                         dt = datetime.datetime.fromtimestamp(start, tz=datetime.timezone.utc)
 
                     if dt:
@@ -321,7 +321,7 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True,
                         try:
                             dt_start = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
                         except ValueError: pass
-                    elif isinstance(start, (int, float)):
+                    elif isinstance(start, (int, float)) and math.isfinite(start):
                         dt_start = datetime.datetime.fromtimestamp(start, tz=datetime.timezone.utc)
 
                     if dt_start:

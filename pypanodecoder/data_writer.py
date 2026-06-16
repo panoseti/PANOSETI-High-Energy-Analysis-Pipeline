@@ -256,7 +256,7 @@ class PcapWriter:
             module_id = event.telescope_id
             
         for qid in range(4):
-            if not np.isnan(event.quabo_pcap_sec[qid]):
+            if event.quabo_pcap_time[qid] != 0:
                 board_loc = (module_id << 2) | qid
                 
                 # Try to get pixel data for this quabo
@@ -270,14 +270,17 @@ class PcapWriter:
                     from .eventbuilder import CameraEvent
                     pix_data = CameraEvent.extract_quabo_pixels(image, qid)
                 
+                pcap_ns = event.quabo_pcap_time[qid]
+                event_ns = event.quabo_event_time[qid]
+
                 self.write_science_packet(
-                    pcap_sec=event.quabo_pcap_sec[qid],
-                    pcap_nsec=event.quabo_pcap_nsec[qid],
+                    pcap_sec=int(pcap_ns // 1000000000),
+                    pcap_nsec=int(pcap_ns % 1000000000),
                     board_loc=board_loc,
                     acq_mode=event.acq_mode,
                     pkt_num=event.packet_num,
-                    tai=event.quabo_pkt_sec[qid],
-                    nanosec=event.quabo_pkt_nsec[qid],
+                    tai=int((event_ns // 1000000000) % 1024),
+                    nanosec=int(event_ns % 1000000000),
                     pix_data=pix_data,
                     flags=1 # Reconstructed events are usually "good"
                 )
@@ -332,12 +335,14 @@ class PffWriter:
         # PFF record size: 491 (JSON) + 1 (*) + 2048 (Image) = 2540
         header = {}
         for i in range(4):
-            if not np.isnan(event.quabo_pcap_sec[i]):
+            if event.quabo_pcap_time[i] != 0:
+                pcap_ns = int(event.quabo_pcap_time[i])
+                event_ns = int(event.quabo_event_time[i])
                 header[f"quabo_{i}"] = {
-                    'tv_sec': int(event.quabo_pcap_sec[i]),
-                    'tv_usec': int(event.quabo_pcap_nsec[i] / 1000),
-                    'pkt_tai': int(event.quabo_pkt_sec[i]),
-                    'pkt_nsec': int(event.quabo_pkt_nsec[i])
+                    'tv_sec': pcap_ns // 1000000000,
+                    'tv_usec': (pcap_ns % 1000000000) // 1000,
+                    'pkt_tai': (event_ns // 1000000000) % 1024,
+                    'pkt_nsec': event_ns % 1000000000
                 }
         
         header_json = json.dumps(header)
