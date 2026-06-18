@@ -381,11 +381,76 @@ class CameraImages:
             results.append(res)
         return CameraImages.concatenate(results)
 
+    def __len__(self):
+        """Returns the number of events in this container."""
+        return len(self.event_times)
+
+    def __bool__(self):
+        """Returns True if the container is not empty."""
+        return len(self) > 0
+
+    def __add__(self, other):
+        """Concatenates two CameraImages objects using the + operator."""
+        if not isinstance(other, CameraImages):
+            return NotImplemented
+        return CameraImages.concatenate([self, other])
+
     def __getitem__(self, key):
-        return getattr(self, key)
+        """
+        Allows both attribute access (if key is a string) and 
+        event-wise slicing/indexing.
+        
+        If key is an integer and self.events is available, returns a CameraEvent.
+        Otherwise, returns a new CameraImages object containing the sliced events.
+        """
+        if isinstance(key, str):
+            return getattr(self, key)
+
+        # Handle indexing/slicing using numpy-style indexing
+        indices = np.arange(len(self))[key]
+        
+        # If it's a single index, and we have the event list, return the CameraEvent
+        if np.isscalar(indices):
+            if self.events and len(self.events) == len(self):
+                return self.events[indices]
+            # If no events list, return a CameraImages with a single event by wrapping in a list
+            indices = [indices]
+
+        # Construct new object with sliced arrays
+        def _slice(arr):
+            if arr is None: return None
+            # images is (32, 32, N), others are (N,) or (N, 4)
+            return arr[:, :, indices] if arr.ndim == 3 else arr[indices]
+
+        new_gti_indexes = self.gti_indexes[indices]
+        unique_new_gtis = np.unique(new_gti_indexes)
+        
+        return CameraImages(
+            images=_slice(self.images),
+            event_times=_slice(self.event_times),
+            pcap_times=_slice(self.pcap_times),
+            gti_indexes=new_gti_indexes,
+            gti_pcap_times=_slice(self.gti_pcap_times),
+            quabo_masks=_slice(self.quabo_masks),
+            gtis={idx: self.gtis[idx] for idx in unique_new_gtis if idx in self.gtis},
+            events=[self.events[i] for i in indices] if self.events and len(self.events) == len(self) else None,
+            filter=dict(self.filter),
+            source={idx: self.source[idx] for idx in unique_new_gtis if idx in self.source},
+            quabo_pcap_time=_slice(self.quabo_pcap_time),
+            quabo_event_time=_slice(self.quabo_event_time)
+        )
+
+    def __iter__(self):
+        """Iterates over the events in this container."""
+        for i in range(len(self)):
+            yield self[i]
+
+    def __reversed__(self):
+        """Returns a reversed copy of the container."""
+        return self[::-1]
 
     def __repr__(self):
-        return f"<CameraImages events={len(self.event_times)} gtis={list(self.gtis.keys())}>"
+        return f"<CameraImages events={len(self)} gtis={list(self.gtis.keys())}>"
 
 class CameraEventBuilder:
     """
