@@ -38,7 +38,10 @@ from .pedestals import (
 )
 
 from .plotting import (
-    plot_image
+    plot_image,
+    plot_star_field,
+    overlay_stars,
+    plot_north_west_guide
 )
 
 from .stars import (
@@ -67,6 +70,9 @@ __all__ = [
     'apply_polynomial_pedestal_correction',
     'apply_constant_pedestal_correction',
     'plot_image',
+    'plot_star_field',
+    'overlay_stars',
+    'plot_north_west_guide',
     'get_bright_stars',
     'dqm'
 ]
