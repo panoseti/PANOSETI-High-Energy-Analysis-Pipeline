@@ -218,6 +218,86 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
 
     return ps
 
+def plot_north_west_guide(ps, ax=None, loc=1, color='r', **kwargs):
+    """
+    Draws a North/West L-guide in a specified corner of the plot.
+
+    Args:
+        ps (PointingSolution): The pointing solution for the field.
+        ax (matplotlib.axes.Axes, optional): Axes to plot on.
+        loc (int): Corner to display guide: 1 (top right), 2 (top left),
+                   3 (bottom left), 4 (bottom right).
+        color (str): Color for the guide lines and labels (default: 'r').
+        **kwargs: Additional arguments passed to ax.text() for label styling (e.g., fontsize).
+    """
+    if loc not in [1, 2, 3, 4]:
+        return
+
+    if ax is None:
+        ax = plt.gca()
+
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+
+    # Handle potentially inverted axes for placement
+    x_left, x_right = (xlim[1], xlim[0]) if ax.xaxis_inverted() else (xlim[0], xlim[1])
+    y_bottom, y_top = (ylim[1], ylim[0]) if ax.yaxis_inverted() else (ylim[0], ylim[1])
+
+    dx_span = x_right - x_left
+    dy_span = y_top - y_bottom
+    scale_ref = min(dx_span, dy_span)
+
+    arm_len = 0.08 * scale_ref
+    margin_x = 0.10 * dx_span
+    margin_y = 0.10 * dy_span
+
+    # Center of the imaginary square of the L
+    if loc == 1:    # top right
+        xc = x_right - margin_x
+        yc = y_top - margin_y
+    elif loc == 2:  # top left
+        xc = x_left + margin_x
+        yc = y_top - margin_y
+    elif loc == 3:  # bottom left
+        xc = x_left + margin_x
+        yc = y_bottom + margin_y
+    elif loc == 4:  # bottom right
+        xc = x_right - margin_x
+        yc = y_bottom + margin_y
+
+    theta_rad = ps.theta
+    cos_th = math.cos(theta_rad)
+    sin_th = math.sin(theta_rad)
+    f = -1.0 if ps.east_on_left else 1.0
+
+    u_N = (f * sin_th, cos_th)
+    u_W = (-f * cos_th, sin_th)
+
+    # L origin (intersection point of the two arms)
+    x0 = xc - 0.5 * arm_len * (u_N[0] + u_W[0])
+    y0 = yc - 0.5 * arm_len * (u_N[1] + u_W[1])
+
+    # Draw L guide lines
+    ax.plot([x0, x0 + arm_len * u_N[0]], [y0, y0 + arm_len * u_N[1]], color=color, lw=1.5)
+    ax.plot([x0, x0 + arm_len * u_W[0]], [y0, y0 + arm_len * u_W[1]], color=color, lw=1.5)
+
+    # Draw N and W labels
+    theta_deg = math.degrees(theta_rad)
+    arm_rotation_deg = -f * theta_deg
+    text_rot = (arm_rotation_deg + 45) % 90 - 45
+
+    label_offset = 0.25 * arm_len
+    x_N = x0 + (arm_len + label_offset) * u_N[0]
+    y_N = y0 + (arm_len + label_offset) * u_N[1]
+    x_W = x0 + (arm_len + label_offset) * u_W[0]
+    y_W = y0 + (arm_len + label_offset) * u_W[1]
+
+    text_kwargs = {'ha': 'center', 'va': 'center', 'fontsize': 8}
+    text_kwargs.update(kwargs)
+
+    ax.text(x_N, y_N, 'N', color=color, rotation=text_rot, **text_kwargs)
+    ax.text(x_W, y_W, 'W', color=color, rotation=text_rot, **text_kwargs)
+
 def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, loc=0, **kwargs):
     """
     Overlays stars on a field and optionally calculates the pointing solution.
@@ -301,65 +381,10 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
 
     # Draw North/West L-guide in specified corner
     if loc in [1, 2, 3, 4]:
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        x_min, x_max = min(xlim), max(xlim)
-        y_min, y_max = min(ylim), max(ylim)
-
-        # Handle potentially inverted axes for placement
-        x_left, x_right = (xlim[1], xlim[0]) if ax.xaxis_inverted() else (xlim[0], xlim[1])
-        y_bottom, y_top = (ylim[1], ylim[0]) if ax.yaxis_inverted() else (ylim[0], ylim[1])
-
-        dx_span = x_right - x_left
-        dy_span = y_top - y_bottom
-        scale_ref = min(dx_span, dy_span)
-
-        arm_len = 0.08 * scale_ref
-        margin_x = 0.10 * dx_span
-        margin_y = 0.10 * dy_span
-
-        # Center of the imaginary square of the L
-        if loc == 1:    # top right
-            xc = x_right - margin_x
-            yc = y_top - margin_y
-        elif loc == 2:  # top left
-            xc = x_left + margin_x
-            yc = y_top - margin_y
-        elif loc == 3:  # bottom left
-            xc = x_left + margin_x
-            yc = y_bottom + margin_y
-        elif loc == 4:  # bottom right
-            xc = x_right - margin_x
-            yc = y_bottom + margin_y
-
-        theta_rad = ps.theta
-        cos_th = math.cos(theta_rad)
-        sin_th = math.sin(theta_rad)
-        f = -1.0 if ps.east_on_left else 1.0
-
-        u_N = (f * sin_th, cos_th)
-        u_W = (-f * cos_th, sin_th)
-
-        # L origin (intersection point of the two arms)
-        x0 = xc - 0.5 * arm_len * (u_N[0] + u_W[0])
-        y0 = yc - 0.5 * arm_len * (u_N[1] + u_W[1])
-
-        # Draw L guide lines
-        ax.plot([x0, x0 + arm_len * u_N[0]], [y0, y0 + arm_len * u_N[1]], color=color, lw=1.5)
-        ax.plot([x0, x0 + arm_len * u_W[0]], [y0, y0 + arm_len * u_W[1]], color=color, lw=1.5)
-
-        # Draw N and W labels
-        theta_deg = math.degrees(theta_rad)
-        arm_rotation_deg = -f * theta_deg
-        text_rot = (arm_rotation_deg + 45) % 90 - 45
-
-        label_offset = 0.25 * arm_len
-        x_N = x0 + (arm_len + label_offset) * u_N[0]
-        y_N = y0 + (arm_len + label_offset) * u_N[1]
-        x_W = x0 + (arm_len + label_offset) * u_W[0]
-        y_W = y0 + (arm_len + label_offset) * u_W[1]
-
-        ax.text(x_N, y_N, 'N', color=color, ha='center', va='center', rotation=text_rot, fontsize=text_kwargs.get('fontsize', 8))
-        ax.text(x_W, y_W, 'W', color=color, ha='center', va='center', rotation=text_rot, fontsize=text_kwargs.get('fontsize', 8))
+        # Overwrite horizontal and vertical alignment for the guide
+        guide_kwargs = text_kwargs.copy()
+        guide_kwargs['ha'] = 'center'
+        guide_kwargs['va'] = 'center'
+        plot_north_west_guide(ps, ax=ax, loc=loc, color=color, **guide_kwargs)
 
     return ps
