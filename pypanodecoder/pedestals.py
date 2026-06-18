@@ -696,16 +696,21 @@ class ChargeHistogram:
                 scale_all = np.full(num_elements, scale_all[0])
 
         # Loss functions rho(z) where z = (x - mu) / scale
-        if loss == 'huber':
-            rho = lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5)
-        elif loss == 'soft_l1':
-            rho = lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1)
-        elif loss == 'cauchy':
-            rho = lambda z: np.log(1 + 0.5 * z**2)
-        elif loss == 'arctan':
-            rho = lambda z: np.arctan(0.5 * z**2)
-        else: # linear / squared
-            rho = lambda z: 0.5 * z**2
+        loss_functions = {
+            'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
+            'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
+            'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
+            'arctan':  lambda z: np.arctan(0.5 * z**2),
+            'linear':  lambda z: 0.5 * z**2
+        }
+
+        if not loss:
+            loss = 'linear'
+
+        if loss not in loss_functions:
+            raise ValueError(f"Unknown loss function: {loss}. Supported: {list(loss_functions.keys())}")
+
+        rho = loss_functions[loss]
 
         results = np.full(num_elements, np.nan)
 
@@ -740,9 +745,10 @@ class ChargeHistogram:
     def huber_scale(self, loss='huber', location=None):
         """
         Estimates the scale (standard deviation) of the distribution using a robust loss function.
+        The result is calibrated to be consistent with the standard deviation for a Gaussian.
 
         Args:
-            loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'arctan').
+            loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy').
                         Defaults to 'huber'.
             location (array-like, optional): The location (center) parameter for the loss function.
                                              Defaults to the median.
@@ -772,16 +778,31 @@ class ChargeHistogram:
         s0_all = np.where((iqr_all > 0) & (iqr_all < wvar_all), iqr_all, wvar_all)
 
         # Loss functions rho(z) where z = (x - mu) / scale
-        if loss == 'huber':
-            rho = lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5)
-        elif loss == 'soft_l1':
-            rho = lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1)
-        elif loss == 'cauchy':
-            rho = lambda z: np.log(1 + 0.5 * z**2)
-        elif loss == 'arctan':
-            rho = lambda z: np.arctan(0.5 * z**2)
-        else: # linear / squared
-            rho = lambda z: 0.5 * z**2
+        loss_functions = {
+            'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
+            'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
+            'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
+            'linear':  lambda z: 0.5 * z**2
+        }
+
+        # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1)
+        # These constants ensure the estimator is consistent with Gaussian sigma.
+        beta_map = {
+            'huber':   0.6826894921370859, # norm.cdf(1) - norm.cdf(-1)
+            'soft_l1': 0.6808803445892556,
+            'cauchy':  0.4842562477382487,
+            'linear':  1.0
+        }
+
+        if not loss:
+            loss = 'linear'
+
+        if loss not in loss_functions:
+            raise ValueError(f"Unknown loss function for scale estimation: {loss}. "
+                             f"Supported: {list(loss_functions.keys())}")
+
+        rho = loss_functions[loss]
+        beta = beta_map[loss]
 
         results = np.full(num_elements, np.nan)
 
@@ -802,11 +823,11 @@ class ChargeHistogram:
             c = self.qcenter[mask]
             w_sum = np.sum(w)
 
-            # The objective function minimizes J(s) = sum(w * rho((c - mu) / s)) + sum(w) * log(s)
+            # The objective function minimizes J(s) = sum(w * rho((c - mu) / s)) + beta * sum(w) * log(s)
             def objective(s):
                 if s <= 0:
                     return np.inf
-                return np.sum(w * rho((c - mu) / s)) + w_sum * np.log(s)
+                return np.sum(w * rho((c - mu) / s)) + beta * w_sum * np.log(s)
 
             try:
                 # Bounded optimization is more reliable for scale
