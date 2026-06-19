@@ -838,6 +838,103 @@ class ChargeHistogram:
 
         return results.reshape(grid_shape) if grid_shape else results[0]
 
+    def huber_location_and_scale(self, loss='huber'):
+        """
+        Estimates the location (center) and scale (standard deviation) of the distribution
+        simultaneously using a robust loss function.
+        The scale result is calibrated to be consistent with the standard deviation for a Gaussian.
+
+        Args:
+            loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy').
+                        Defaults to 'huber'.
+
+        Returns:
+            tuple: (locations, scales)
+                locations (np.ndarray): The estimated location for each point in the grid.
+                scales (np.ndarray): The estimated scale for each point in the grid.
+        """
+        from scipy.optimize import minimize
+
+        grid_shape = self.shape
+        num_elements = int(np.prod(grid_shape)) if grid_shape else 1
+
+        # Flatten for iteration
+        flat_qhist = self.qhist.reshape(num_elements, -1)
+
+        # Get initial locations and guesses for scale
+        mu0_all = np.atleast_1d(self.median()).flatten()
+
+        # Robust initial scale guess
+        iqr_all = np.atleast_1d(self.iqr()).flatten() / 1.349
+        wvar_all = np.sqrt(np.atleast_1d(self.winsorized_var())).flatten()
+        s0_all = np.where((iqr_all > 0) & (iqr_all < wvar_all), iqr_all, wvar_all)
+
+        # Loss functions rho(z) where z = (x - mu) / scale
+        loss_functions = {
+            'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
+            'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
+            'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
+            'linear':  lambda z: 0.5 * z**2
+        }
+
+        # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1)
+        # These constants ensure the estimator is consistent with Gaussian sigma.
+        beta_map = {
+            'huber':   0.6826894921370859, # norm.cdf(1) - norm.cdf(-1)
+            'soft_l1': 0.6808803445892556,
+            'cauchy':  0.4842562477382487,
+            'linear':  1.0
+        }
+
+        if not loss:
+            loss = 'linear'
+
+        if loss not in loss_functions:
+            raise ValueError(f"Unknown loss function for joint estimation: {loss}. "
+                             f"Supported: {list(loss_functions.keys())}")
+
+        rho = loss_functions[loss]
+        beta = beta_map[loss]
+
+        results_mu = np.full(num_elements, np.nan)
+        results_s = np.full(num_elements, np.nan)
+
+        for i in range(num_elements):
+            s0 = s0_all[i]
+            if np.isnan(s0) or s0 <= 0:
+                s0 = self.bin_width
+            
+            mu0 = mu0_all[i]
+            if np.isnan(mu0):
+                continue
+
+            mask = flat_qhist[i] > 0
+            if not np.any(mask):
+                continue
+
+            w = flat_qhist[i, mask]
+            c = self.qcenter[mask]
+            w_sum = np.sum(w)
+
+            # The objective function minimizes J(mu, s) = sum(w * rho((c - mu) / s)) + beta * sum(w) * log(s)
+            def objective(params):
+                mu, s = params
+                if s <= 0:
+                    return np.inf
+                return np.sum(w * rho((c - mu) / s)) + beta * w_sum * np.log(s)
+
+            try:
+                res = minimize(objective, x0=[mu0, s0], bounds=[(None, None), (1e-6 * s0, 100 * s0)])
+                results_mu[i] = res.x[0]
+                results_s[i] = res.x[1]
+            except Exception:
+                results_mu[i] = mu0
+                results_s[i] = s0
+
+        res_mu = results_mu.reshape(grid_shape) if grid_shape else results_mu[0]
+        res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
+        return res_mu, res_s
+
 class ChargeSpectra:
     """
     Container for PANOSETI charge spectra (pedestal histograms).
