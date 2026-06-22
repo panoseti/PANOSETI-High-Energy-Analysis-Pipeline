@@ -1,13 +1,13 @@
 # pypanodecoder
 
-A collection of Python tools for decoding and analyzing PANOSETI data stored in PCAP/PCAPNG formats.
+A collection of Python tools for decoding and analyzing PANOSETI data stored in PCAP/PCAPNG and PFF formats.
 
 Author: Stephen Fegan <sfegan@llr.in2p3.fr>
 Laboratoire Leprince-Ringuet, CNRS/IN2P3, Ecole Polytechnique, Institut Polytechnique de Paris
 
 ## Overview
 
-This directory contains the pure Python tools for loading and analyzing PANOSETI data. At the low level a raw packet decoding and event merging tool is provided. At a higher level there are utilities for pedestal calculation and data quality monitoring. The tools aspire to be simple and extensible, so that they can be used to build more complex analysis tasks or as part of a larger pipelines. They are largely free from non-standard dependencies (except NumPy, SciPy, and Matplotlib).
+This directory contains the pure Python tools for loading and analyzing PANOSETI data. At the low level a raw packet decoding and event merging tool is provided. At a higher level there are utilities for pedestal calculation and data quality monitoring. The tools support both raw PCAP/PCAPNG network captures and the PANOSETI File Format (PFF). The tools aspire to be simple and extensible, so that they can be used to build more complex analysis tasks or as part of a larger pipelines. They are largely free from non-standard dependencies (except NumPy, SciPy, and Matplotlib).
 
 ## Modules
 
@@ -21,9 +21,18 @@ The core decoder for PANOSETI Science packets from PCAP/PCAPNG files.
 Tools for reconstructing full camera events from individual Quabo packets.
 - **`CameraEvent`**: Groups packets from the four Quabos (quadrants) of a telescope that share the same hardware timestamp.
 - **Image Reconstruction**: Provides a `get_image()` method that rotates and mosaics Quabo data into a 32x32 camera image.
-- **`CameraImages`**: A container for holding stacks of camera images and associated metadata in memory, supporting GTI filtering and pedestal correction.
+- **`CameraImages`**: A container for holding stacks of camera images and associated metadata in memory. Now supports tracking the data source (PCAP or PFF), module ID, and event-wide arrival times (`pcap_times`).
+- **`CameraEventBuilder`**: Robustly groups packets into events using timestamps or packet numbers, ensuring predictable yield order.
 - **`get_camera_events`**: A generator function to stream merged camera events from multiple files, with GTI filtering.
-- **`load_camera_images`**: High-level utility to load data directly into a 3D NumPy array (32x32xN).
+- **`load_camera_images`**: Unified high-level utility that handles both PCAP and PFF files, supporting priority-based merging of overlapping GTIs.
+- **`load_pcap_camera_images`**: Specific utility to load data directly from PCAP/PCAPNG files.
+- **`load_pff_camera_images`**: Specific utility to load data directly from PFF files, including automatic image alignment and record indexing.
+
+### `data_writer.py`
+Utilities for saving PANOSETI data in PCAPNG and PFF formats.
+- **`PcapWriter`**: Generates valid PCAPNG files with reconstructed quabo packets. Supports configurable application names, hardware/OS metadata, and provenance comments.
+- **`PffWriter`**: Writes camera events into the fixed-size PFF record format.
+- **`templated_filename`**: Flexible utility for generating filenames based on site information (from a synchronized `SITES` configuration), date, and time.
 
 ### `pedestals.py`
 Utilities for charge spectra analysis and pedestal management.
@@ -31,10 +40,40 @@ Utilities for charge spectra analysis and pedestal management.
 - **`ChargeSpectra`**: Generates histograms at the pixel, SiPM (8x8), Quabo (16x16), and full camera (32x32) levels.
 - **Pedestal Correction**: Implements time-dependent polynomial pedestal fitting and subtraction to handle drift in detector baselines.
 
+### `plotting.py`
+Standard plotting functions for PANOSETI data.
+- **`plot_image`**: Core function for plotting 32x32 (pixel), 4x4 (SiPM), or 2x2 (Quabo) images with automatic component delineation.
+- **`plot_star_field`**: Plots a star field around a target or specific coordinates.
+- **`overlay_stars`**: Overlays star markers and labels on an image axes using a pointing solution.
+
+### `pointing.py`
+Calculate pointing solutions from reference stars and manage target coordinates.
+- **`PointingSolution`**: Translates between sky (RA/Dec) and image (x, y) coordinates. Can be solved from two reference stars.
+- **`get_target_coordinates`**: Utility to retrieve coordinates for common astronomical targets (e.g., Crab, Mrk 421).
+
+### `stars.py`
+Utilities to query and filter the Yale Bright Star Catalog (YBSC5).
+- **`get_bright_stars`**: Fetches stars near a given RA/Dec within a specified radius and magnitude limit.
+- **Automatic Catalog Fetching**: Automatically downloads and caches the YBSC5 catalog if not found locally.
+
 ### `dqm/`
 Data Quality Monitoring (DQM) subpackage and visualization tools.
 - **`plot_event_rate`**: Plots the event rate (Hz) over time, with support for multiple GTIs, subplots, and absolute UT time.
 - **`plot_delta_t`**: Analyzes the distribution of time intervals between consecutive events. Includes exponential fitting to measure random trigger rates.
+
+## Scripts
+
+The `scripts/` directory contains command-line utilities for data management and format conversion.
+
+### `pff_to_pcap.py`
+Converts PANOSETI PFF files to PCAPNG format.
+- **Usage**: `./scripts/pff_to_pcap.py data/*.pff`
+- **Features**: Automatic module ID detection, metadata preservation, and provenance tracking (stored in PCAPNG comments).
+
+### `pcap_to_pff.py`
+Converts PCAP/PCAPNG files to PFF format.
+- **Usage**: `./scripts/pcap_to_pff.py data/*.pcapng --module-id 252`
+- **Features**: Reconstructs camera events from packets and applies correct image orientation for PFF.
 
 ## Example: decode Quabo packets from one file
 
@@ -76,8 +115,12 @@ GTIs = [
     { "start": "2026-01-11 05:30:00", "end": "2026-01-11 07:45:00" }
 ]
 
-# Load images from multiple PCAP files with GTI filtering
-data = load_camera_images("data/202601*/onsky_*.pcapng", gtis=GTIs)
+# Load images from multiple files (PCAP or PFF) with GTI filtering
+data = load_camera_images("data/202601*/*", gtis=GTIs)
+
+# Check the data source
+print(f"Overall source: {data.data_source}") # PCAP, PFF, or MIXED
+print(f"Source per GTI: {data.source}")      # {0: 'PCAP', 1: 'PFF', ...}
 
 # Plot the event rate
 fig_rate, _ = plot_event_rate(data, subplots=True, uttime=True)
@@ -88,7 +131,7 @@ fig_dt, _ = plot_delta_t(data, fit=True)
 plt.show()
 ```
 
-Here we show how to load the camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files, applies GTI filtering to extract the on-source data, and returns a `CameraImages` object containing the image data and metadata. Once the data is loaded, it can easily be accessed to retrieve the event data or process it.
+Here we show how to load the camera images from multiple runs into memory and then process them. This is the preferred way to work with the data. The `load_camera_images` function reads the specified files (automatically detecting PCAP or PFF format), applies GTI filtering to extract the on-source data, and returns a `CameraImages` object containing the image data and metadata. Once the data is loaded, it can easily be accessed to retrieve the event data or process it. The `data.source` attribute tracks the origin of each GTI.
 
 In this example we use the DQM plotting functions to plot the event rate histogram and inter-event (Delta-T) time distribution. The `plot_event_rate` is configured to create subplots for each GTI and display time in absolute UT time. The `plot_delta_t` function fits an exponential model to the inter-event time distribution to estimate the random trigger rate.
 
