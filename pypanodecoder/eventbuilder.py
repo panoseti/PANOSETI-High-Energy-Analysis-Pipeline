@@ -186,11 +186,49 @@ class CameraImages:
         if not objects:
             raise ValueError("concatenate() requires a non-empty list of CameraImages objects")
         
-        merged_gtis = {}
-        merged_source = {}
+        unique_gtis = set()
         for o in objects:
-            merged_gtis.update(o.gtis)
-            merged_source.update(o.source)
+            for gti in o.gtis.values():
+                unique_gtis.add((gti['start'], gti['stop']))
+                
+        sorted_gtis = sorted(list(unique_gtis), key=lambda x: x[0])
+        gti_to_new_idx = {gti: i for i, gti in enumerate(sorted_gtis)}
+        
+        merged_gtis = {i: {'start': start, 'stop': stop} for i, (start, stop) in enumerate(sorted_gtis)}
+        merged_source = {}
+        
+        new_gti_indexes_list = []
+        new_events_list = []
+        
+        import copy
+        for o in objects:
+            old_to_new = {}
+            for old_idx, gti in o.gtis.items():
+                new_idx = gti_to_new_idx[(gti['start'], gti['stop'])]
+                old_to_new[old_idx] = new_idx
+                if old_idx in o.source:
+                    if new_idx in merged_source and merged_source[new_idx] != o.source[old_idx]:
+                        merged_source[new_idx] = 'MIXED'
+                    else:
+                        merged_source[new_idx] = o.source[old_idx]
+                        
+            if len(o.gti_indexes) > 0:
+                remapped = o.gti_indexes.copy()
+                for old_idx, new_idx in old_to_new.items():
+                    if old_idx != new_idx:
+                        remapped[o.gti_indexes == old_idx] = new_idx
+            else:
+                remapped = o.gti_indexes.copy()
+            new_gti_indexes_list.append(remapped)
+            
+            for ev in o.events:
+                new_idx = old_to_new.get(ev.gti_index, ev.gti_index)
+                if new_idx != ev.gti_index:
+                    ev_copy = copy.copy(ev)
+                    ev_copy.gti_index = new_idx
+                    new_events_list.append(ev_copy)
+                else:
+                    new_events_list.append(ev)
             
         merged_filter = {}
         for o in objects:
@@ -210,11 +248,11 @@ class CameraImages:
             images=np.concatenate([o.images for o in objects], axis=2),
             event_times=np.concatenate([o.event_times for o in objects]),
             pcap_times=_concat_timing('pcap_times'),
-            gti_indexes=np.concatenate([o.gti_indexes for o in objects]),
+            gti_indexes=np.concatenate(new_gti_indexes_list),
             gti_pcap_times=np.concatenate([o.gti_pcap_times for o in objects]),
             quabo_masks=np.concatenate([o.quabo_masks for o in objects]),
             gtis=merged_gtis,
-            events=[ev for o in objects for ev in o.events],
+            events=new_events_list,
             filter=merged_filter,
             source=merged_source,
             quabo_pcap_time=_concat_timing('quabo_pcap_time'),
@@ -648,6 +686,25 @@ def load_pcap_camera_images(filenames, gtis=None, min_quabos=None, store_camera_
         q_event_time = np.zeros((0, 4), dtype=np.int64)
         events_list = None
 
+    if gtis is None and len(pcap_times) > 0:
+        min_pcap_ns = np.min(pcap_times)
+        max_pcap_ns = np.max(pcap_times)
+        for idx, gti in gtis_dict.items():
+            updated_start = False
+            if gti['start'] == -float('inf'):
+                gti['start'] = float(min_pcap_ns) / 1e9
+                updated_start = True
+            if gti['stop'] == float('inf'):
+                gti['stop'] = float(max_pcap_ns) / 1e9
+                
+            if updated_start:
+                mask = (gti_indexes == idx)
+                gti_pcap_times[mask] = pcap_times[mask] - min_pcap_ns
+                if events_list is not None:
+                    for event in events_list:
+                        if event.gti_index == idx:
+                            event.gti_pcap_time = event.pcap_time - min_pcap_ns
+
     filter_dict = {}
     if min_quabos is not None:
         filter_dict['min_quabos'] = min_quabos
@@ -866,6 +923,25 @@ def load_pff_camera_images(filenames, gtis=None, min_quabos=None, store_camera_e
         q_pcap_time = np.zeros((0, 4), dtype=np.int64)
         q_event_time = np.zeros((0, 4), dtype=np.int64)
         events_list = None
+
+    if gtis is None and len(pcap_times) > 0:
+        min_pcap_ns = np.min(pcap_times)
+        max_pcap_ns = np.max(pcap_times)
+        for idx, gti in gtis_dict.items():
+            updated_start = False
+            if gti['start'] == -float('inf'):
+                gti['start'] = float(min_pcap_ns) / 1e9
+                updated_start = True
+            if gti['stop'] == float('inf'):
+                gti['stop'] = float(max_pcap_ns) / 1e9
+                
+            if updated_start:
+                mask = (gti_indexes == idx)
+                gti_pcap_times[mask] = pcap_times[mask] - min_pcap_ns
+                if events_list is not None:
+                    for event in events_list:
+                        if event.gti_index == idx:
+                            event.gti_pcap_time = event.pcap_time - min_pcap_ns
 
     filter_dict = {}
     if min_quabos is not None:
