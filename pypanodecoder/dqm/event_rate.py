@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import datetime
+import math
 from scipy.optimize import curve_fit
 
 from ..eventbuilder import CameraImages
@@ -185,7 +186,8 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
                         bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
 
     if not subplots:
-        axes[0].legend()
+        if num_gtis > 1:
+            axes[0].legend()
         axes[0].set_ylabel(ylabel)
     else:
         # Single common Y-axis label for subplots
