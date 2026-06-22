@@ -54,15 +54,9 @@ class PointingSolution:
             ref_sky (tuple, optional): Sky coordinates (ra, dec) to set as the reference point.
                                        If provided, overrides ref_pos.
         """
-        # Create temporary instance to use _sky_to_tangent (which depends on self.ra0/dec0)
-        # We'll use star1 as the reference point
+        # We'll use star1 as the provisional reference point
         ps = cls(star1['ra_deg'], star1['dec_deg'], east_on_left=east_on_left, pos0=pos1)
 
-        # Tangent plane coordinates of star2 relative to star1
-        xi2, eta2 = ps._sky_to_tangent(star2['ra_deg'], star2['dec_deg'])
-        d_tp = math.sqrt(xi2**2 + eta2**2)
-
-        # Image coordinates of star2 relative to star1
         dx = pos2[0] - pos1[0]
         dy = pos2[1] - pos1[1]
         d_pix = math.sqrt(dx**2 + dy**2)
@@ -70,24 +64,52 @@ class PointingSolution:
         if d_pix == 0:
             raise ValueError("Star positions in image must be distinct.")
 
-        if plate_scale is not None:
-            ps.plate_scale = plate_scale
-        else:
-            ps.plate_scale = d_tp / d_pix
-
-        # Parity factor
         f = -1.0 if east_on_left else 1.0
-
-        # Calculate rotation angle theta
         phi_img = math.atan2(dy, f * dx)
-        phi_tp = math.atan2(eta2, xi2)
-        theta = phi_tp - phi_img
-        ps.theta = (theta + math.pi) % (2 * math.pi) - math.pi
+
+        def compute_params(ra0, dec0):
+            ps.ra0 = ra0
+            ps.dec0 = dec0
+            xi1, eta1 = ps._sky_to_tangent(star1['ra_deg'], star1['dec_deg'])
+            xi2, eta2 = ps._sky_to_tangent(star2['ra_deg'], star2['dec_deg'])
+            
+            dxi = xi2 - xi1
+            deta = eta2 - eta1
+            d_tp = math.sqrt(dxi**2 + deta**2)
+            
+            scale = plate_scale if plate_scale is not None else d_tp / d_pix
+            
+            phi_tp = math.atan2(deta, dxi)
+            theta = phi_tp - phi_img
+            ps.theta = (theta + math.pi) % (2 * math.pi) - math.pi
+            ps.plate_scale = scale
+            
+            xi1_s = xi1 / scale
+            eta1_s = eta1 / scale
+            cos_th = math.cos(ps.theta)
+            sin_th = math.sin(ps.theta)
+            
+            x0 = pos1[0] - f * (xi1_s * cos_th + eta1_s * sin_th)
+            y0 = pos1[1] - (-xi1_s * sin_th + eta1_s * cos_th)
+            
+            ps.x1 = x0
+            ps.y1 = y0
+
+        # Initial solve with star1 as the tangent point
+        compute_params(star1['ra_deg'], star1['dec_deg'])
 
         if ref_sky is not None:
-            return ps.reset_reference_point(sky=ref_sky)
-        elif ref_pos is not None:
-            return ps.reset_reference_point(pos=ref_pos)
+            compute_params(ref_sky[0], ref_sky[1])
+            return ps
+
+        if ref_pos is not None:
+            target_x, target_y = ref_pos
+            ra0, dec0 = ps.image_to_sky(target_x, target_y)
+            for _ in range(20):
+                compute_params(ra0, dec0)
+                if abs(ps.x1 - target_x) < 1e-10 and abs(ps.y1 - target_y) < 1e-10:
+                    break
+                ra0, dec0 = ps.image_to_sky(target_x, target_y)
 
         return ps
 
