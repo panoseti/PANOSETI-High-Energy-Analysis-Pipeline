@@ -37,7 +37,7 @@ class PointingSolution:
         self.xy_units = xy_units
 
     @classmethod
-    def solve(cls, star1, pos1, star2, pos2, east_on_left=True, plate_scale=None):
+    def solve(cls, star1, pos1, star2, pos2, east_on_left=True, plate_scale=None, ref_pos=(0, 0), ref_sky=None):
         """
         Calculates a pointing solution from two stars.
 
@@ -50,6 +50,9 @@ class PointingSolution:
             plate_scale (float, optional): If provided, force this plate scale (deg/pix).
                                            The distance between pos1 and pos2 will be
                                            ignored for scale but used for orientation.
+            ref_pos (tuple, optional): Image coordinates (x, y) to set as the reference point. Default is (0, 0).
+            ref_sky (tuple, optional): Sky coordinates (ra, dec) to set as the reference point.
+                                       If provided, overrides ref_pos.
         """
         # Create temporary instance to use _sky_to_tangent (which depends on self.ra0/dec0)
         # We'll use star1 as the reference point
@@ -79,6 +82,11 @@ class PointingSolution:
         phi_img = math.atan2(dy, f * dx)
         phi_tp = math.atan2(eta2, xi2)
         ps.theta = phi_tp - phi_img
+
+        if ref_sky is not None:
+            return ps.reset_reference_point(sky=ref_sky)
+        elif ref_pos is not None:
+            return ps.reset_reference_point(pos=ref_pos)
 
         return ps
 
@@ -183,6 +191,43 @@ class PointingSolution:
             lines[i+2] += f" {x:10.2f} {y:10.2f}"
 
         print("\n".join(lines))
+
+    def reset_reference_point(self, pos=None, sky=None):
+        """
+        Returns a new PointingSolution with the reference point reset to a 
+        new image position (pos) or sky coordinates (sky). All translations 
+        between sky and image will be the same (to leading order).
+        
+        Args:
+            pos (tuple, optional): (x, y) image coordinates.
+            sky (tuple, optional): (ra, dec) sky coordinates in degrees.
+        """
+        if pos is not None and sky is not None:
+            raise ValueError("Provide either pos or sky, not both.")
+        
+        if pos is not None:
+            new_x, new_y = pos
+            new_ra, new_dec = self.image_to_sky(new_x, new_y)
+        elif sky is not None:
+            new_ra, new_dec = sky
+            new_x, new_y = self.sky_to_image(new_ra, new_dec)
+        else:
+            raise ValueError("Must provide either pos or sky.")
+            
+        pos2 = (new_x, new_y + 1.0)
+        ra2, dec2 = self.image_to_sky(*pos2)
+        
+        new_ps = PointingSolution.solve(
+            star1={'ra_deg': new_ra, 'dec_deg': new_dec},
+            pos1=(new_x, new_y),
+            star2={'ra_deg': ra2, 'dec_deg': dec2},
+            pos2=pos2,
+            east_on_left=self.east_on_left,
+            plate_scale=self.plate_scale,
+            ref_pos=None
+        )
+        new_ps.xy_units = self.xy_units
+        return new_ps
 
     def shift_origin(self, dx, dy):
         """
