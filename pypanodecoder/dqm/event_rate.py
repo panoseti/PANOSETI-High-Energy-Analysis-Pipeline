@@ -14,7 +14,7 @@ from scipy.optimize import curve_fit
 
 from ..eventbuilder import CameraImages
 
-def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, **kwargs):
+def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, gti_labels=None, **kwargs):
     """
     Plots the event rate in Hz as a function of GTI event time.
 
@@ -151,6 +151,9 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
             except (AttributeError, IndexError, TypeError, ValueError):
                 pass
 
+        if gti_labels is not None and gti_idx in gti_labels:
+            label = gti_labels[gti_idx]
+
         if uttime:
             # Convert bin edges and centers to datetime objects (time of day)
             # We use UTC timestamps % 86400 which are seconds since midnight 1970-01-01
@@ -201,7 +204,7 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
 
     return fig, axes
 
-def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), time_type='event', **kwargs):
+def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), time_type='event', gti_labels=None,  **kwargs):
     """
     Plots the distribution of times between consecutive events (delta_t).
 
@@ -331,6 +334,9 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True,
                     else:
                         label = f"{start} ({label})"
             except: pass
+
+        if gti_labels is not None and gti_idx in gti_labels:
+            label = gti_labels[gti_idx]
 
         if fit:
             # Fit exponential model. Ignore empty bins.
