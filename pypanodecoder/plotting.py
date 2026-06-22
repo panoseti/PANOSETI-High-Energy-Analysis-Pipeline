@@ -372,6 +372,11 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
                 current_text_kwargs['ha'] = 'right'
             else:
                 current_text_kwargs['ha'] = 'left'
+            y_min, y_max = min(ylim), max(ylim)
+            if (y - y_min) / (y_max - y_min) > 0.95:
+                current_text_kwargs['va'] = 'top'
+            else:
+                current_text_kwargs['va'] = 'bottom'
 
         radius = math.sqrt(size) / 2.0 * 1.2
         offset_x = radius if current_text_kwargs.get('ha') == 'left' else -radius
