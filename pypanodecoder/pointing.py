@@ -24,7 +24,7 @@ class PointingSolution:
         self.ra0 = ra0
         self.dec0 = dec0
         self.plate_scale = plate_scale
-        self.theta = math.radians(theta)
+        self.theta = math.radians((theta + 180.0) % 360.0 - 180.0)
         self.east_on_left = east_on_left
         self.x1, self.y1 = pos0
         if xy_units is None:
@@ -81,7 +81,8 @@ class PointingSolution:
         # Calculate rotation angle theta
         phi_img = math.atan2(dy, f * dx)
         phi_tp = math.atan2(eta2, xi2)
-        ps.theta = phi_tp - phi_img
+        theta = phi_tp - phi_img
+        ps.theta = (theta + math.pi) % (2 * math.pi) - math.pi
 
         if ref_sky is not None:
             return ps.reset_reference_point(sky=ref_sky)
