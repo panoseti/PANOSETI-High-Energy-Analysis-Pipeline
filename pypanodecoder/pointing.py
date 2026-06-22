@@ -253,13 +253,98 @@ class PointingSolution:
                 f"scale={self.plate_scale:.6f} deg/pix theta={math.degrees(self.theta):.2f}deg "
                 f"east_on_left={self.east_on_left}>")
 
+def hms_to_deg(hms):
+    """
+    Convert an angle string in hours/minutes/seconds to degrees.
+
+    Accepts separators spaces, colons, or h/m/s notation.
+    Examples:
+        "19 59 59.8520303688"
+        "19:59:59.8520303688"
+        "19h59m59.8520303688s"
+    """
+    if isinstance(hms, (int, float)):
+        return float(hms)
+
+    text = str(hms).strip().lower()
+    if not text:
+        raise ValueError("Empty HMS string")
+
+    text = text.replace("h", " ").replace("m", " ").replace("s", " ")
+    text = text.replace(":", " ")
+    parts = [p for p in text.split() if p]
+
+    if not parts:
+        raise ValueError(f"Invalid HMS value: {hms!r}")
+
+    if len(parts) == 1:
+        hours = float(parts[0])
+        minutes = 0.0
+        seconds = 0.0
+    elif len(parts) == 2:
+        hours = float(parts[0])
+        minutes = float(parts[1])
+        seconds = 0.0
+    else:
+        hours = float(parts[0])
+        minutes = float(parts[1])
+        seconds = float(parts[2])
+
+    sign = -1.0 if hours < 0 else 1.0
+    hours = abs(hours)
+    return sign * (hours + minutes / 60.0 + seconds / 3600.0) * 15.0
+
+def dms_to_deg(dms):
+    """
+    Convert an angle string in degrees/minutes/seconds to decimal degrees.
+
+    Accepts separators spaces, colons, or d/m/s or degree symbols.
+    Examples:
+        "19 59 59.8520303688"
+        "19:59:59.8520303688"
+        "19d59m59.8520303688s"
+        "-19 59 59.85"
+    """
+    if isinstance(dms, (int, float)):
+        return float(dms)
+
+    text = str(dms).strip().lower()
+    if not text:
+        raise ValueError("Empty DMS string")
+
+    # Normalize various symbols to spaces
+    for ch in ['d', '°', "'", 'm', '"', 's', ':']:
+        text = text.replace(ch, ' ')
+
+    parts = [p for p in text.split() if p]
+    if not parts:
+        raise ValueError(f"Invalid DMS value: {dms!r}")
+
+    if len(parts) == 1:
+        deg = float(parts[0])
+        minutes = 0.0
+        seconds = 0.0
+    elif len(parts) == 2:
+        deg = float(parts[0])
+        minutes = float(parts[1])
+        seconds = 0.0
+    else:
+        deg = float(parts[0])
+        minutes = float(parts[1])
+        seconds = float(parts[2])
+
+    sign = -1.0 if str(parts[0]).lstrip().startswith('-') or deg < 0 else 1.0
+    deg = abs(deg)
+    return sign * (deg + minutes / 60.0 + seconds / 3600.0)
+
 OBSERVATION_TARGETS = {
-    "crab":            (83.63308, 22.01450),
-    "mrk421":          (166.11379, 38.20883),
-    "mrk501":          (253.46758, 39.76017),
+    "crab":            ( 83.63308,  22.01450),
+    "mrk421":          (166.11379,  38.20883),
+    "mrk501":          (253.46758,  39.76017),
     "galactic_center": (266.41683, -29.00781),
-    "hessj1837-069":   (279.41500, -6.95000),
-    "mgroj2019+37":    (303.15708, 36.18417),
+    "hessj1837-069":   (279.41500,  -6.95000),
+    "1es1959+650":     (299.99938,  65.14851),
+    "mgroj2019+37":    (303.15708,  36.18417),
 }
 
 def get_target_coordinates(name):
