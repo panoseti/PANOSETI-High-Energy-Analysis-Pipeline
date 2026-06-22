@@ -298,7 +298,7 @@ def plot_north_west_guide(ps, ax=None, loc=1, color='r', **kwargs):
     ax.text(x_N, y_N, 'N', color=color, rotation=text_rot, **text_kwargs)
     ax.text(x_W, y_W, 'W', color=color, rotation=text_rot, **text_kwargs)
 
-def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, loc=0, **kwargs):
+def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, show_cross=False, auto_align=False, loc=0, **kwargs):
     """
     Overlays stars on a field and optionally calculates the pointing solution.
 
@@ -353,13 +353,24 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         # Use vmag for size
         size = max(5, (10 - star['vmag'])**2)
         ax.scatter(x, y, s=size, edgecolors=color, facecolors='none', alpha=0.7)
+        if show_cross:
+            ax.scatter(x, y, marker='x', s=75, facecolors=color, linewidth=0.2)
 
         if use_index:
             label = str(i)
         else:
             name = star['name'] if star['name'] else f"HR{star['hr']}"
             # Merge multiple whitespaces
-            label = " ".join(name.split())
+            bits = name.split()
+            
+            # If the first part has leading digits followed by letters, remove the digits
+            if bits and bits[0]:
+                stripped = bits[0].lstrip('0123456789')
+                if stripped and stripped != bits[0]:
+                    # Only replace if there are leftover characters (not purely digits)
+                    bits[0] = stripped
+            
+            label = " ".join(bits)
 
         if show_mags:
             label = f"{label} ({star['vmag']:.1f})"
@@ -368,7 +379,7 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         current_text_kwargs = text_kwargs.copy()
         if auto_align:
             x_min, x_max = min(xlim), max(xlim)
-            if (x - x_min) / (x_max - x_min) > 0.8:
+            if (x - x_min) / (x_max - x_min) > 0.75:
                 current_text_kwargs['ha'] = 'right'
             else:
                 current_text_kwargs['ha'] = 'left'
