@@ -1,5 +1,5 @@
 {
-  "optics": {
+  "thin_optical_model": {
     "F": 60.78,
     "D": 46.09,
     "ev_ref": 2.270772893772894,
