@@ -238,8 +238,8 @@ void makeevents_softwaretrigger(const char *infile, int this_scope_id)
 				       
       }
     camdata->Write();    
+    cout << "Wrote " << camdata->GetEntries() << " events" << endl;
     root_outfile->Close();
-    cout << endl;
 }
 
 
