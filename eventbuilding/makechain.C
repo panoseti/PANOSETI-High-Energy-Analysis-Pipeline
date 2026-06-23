@@ -45,10 +45,10 @@ void make_chain(const char *infile = "filelist.dat", const char *outfile = "all.
   TCanvas *mycanv=new TCanvas("mycanv","mycanv");
   mycanv->Draw();
   mycanv->cd();
- TH1D *hrate=new TH1D("hrate","Event rate",420,tstart,tend);
+  TH1D *hrate=new TH1D("hrate","Event rate",(tend-tstart)/100.,tstart,tend);
  hrate->SetLineWidth(2);
  hrate->SetStats(0);
- hrate->SetMaximum(80);
+ //hrate->SetMaximum(80);
  hrate->SetXTitle("Time(s)");
  hrate->SetYTitle("Events per 100 secs");
 
