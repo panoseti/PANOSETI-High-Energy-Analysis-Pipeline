@@ -99,16 +99,162 @@ void makeavecameraimage(const char *infile, int scope)
   //mycanv2->SaveAs(full_outfile);
 }
 
+void makeevents_softwaretrigger(const char *infile, int this_scope_id)
+{
+  //Let's try a simple brute force approach to QUABO matching, which is a software coincidence trigger between exactly four modules within a very short coincidence window. Everything else gets discarded. Since the coincidence time is so short (<20ns), I am going to allow duplicates (i.e. a QUABO packet can be used twice). But this should very rarely happen.
+  //WR_time is TAI+nanosec. This seems to clock over at 1024 (10 bits). But so long as it's counting, and the run is less than 1024 seconds long (17 minutes) that should be OK for this application. 
+
+  TTree *pdata=loadpdata(infile);    
+  int npdata=pdata->GetEntries();
+  pdata->GetEntry(npdata-1);
+  double duration=pcap_time_since_start+1;
+  cout << "Run duration = " << duration << endl;					   
+  if (duration>1023) cout << "CAUTION: run duration is longer than 1023 seconds. This QUABO matching algorithm may get confused (TAI time only uses 10 bits = 1024s)" << endl; 
+
+  double WR_time;
+  pdata->SetBranchAddress("WR_time", &WR_time);
+   // 3. Extract and fill individual time vectors
+    std::vector<double> ts1, ts2, ts3, ts4;    
+    for (Long64_t i = 0; i < npdata; ++i) {
+        pdata->GetEntry(i);
+        if (boardloc-this_scope_id==0) ts1.push_back(WR_time);
+        if (boardloc-this_scope_id==1) ts2.push_back(WR_time);
+        if (boardloc-this_scope_id==2) ts3.push_back(WR_time);
+        if (boardloc-this_scope_id==3) ts4.push_back(WR_time);
+    }
+    //inFile->Close(); // Close input file since data is in memory
+    std::sort(ts1.begin(), ts1.end());
+    std::sort(ts2.begin(), ts2.end());
+    std::sort(ts3.begin(), ts3.end());
+    std::sort(ts4.begin(), ts4.end());
+
+    std::vector<double> mt1,mt2,mt3,mt4;
+      
+    // 6. Sliding window coincidence search
+    const Double_t window = 20e-9; // 20 ns window
+    size_t i2 = 0, i3 = 0, i4 = 0;
+    long long matchCount = 0;
+  
+    // I used Gemini for this bit. So it's confusing, but fast... 
+    for (size_t i1 = 0; i1 < ts1.size(); ++i1) {
+        Double_t t1 = ts1[i1];
+
+        // Advance baseline pointers to minimize search iterations
+        while (i2 < ts2.size() && ts2[i2] < t1 - window) i2++;
+        while (i3 < ts3.size() && ts3[i3] < t1 - window) i3++;
+        while (i4 < ts4.size() && ts4[i4] < t1 - window) i4++;
+
+        // Evaluate nearby candidate events
+        for (size_t k2 = i2; k2 < ts2.size() && ts2[k2] <= t1 + window; ++k2) {
+            for (size_t k3 = i3; k3 < ts3.size() && ts3[k3] <= t1 + window; ++k3) {
+                for (size_t k4 = i4; k4 < ts4.size() && ts4[k4] <= t1 + window; ++k4) {
+                    
+                    Double_t min_t = std::min({t1, ts2[k2], ts3[k3], ts4[k4]});
+                    Double_t max_t = std::max({t1, ts2[k2], ts3[k3], ts4[k4]});
+
+                    if ((max_t - min_t) <= window) {
+		      mt1.push_back(t1);
+		      mt2.push_back(ts2[k2]);
+		      mt3.push_back(ts3[k3]);
+		      mt4.push_back(ts4[k4]);
+		      //out_t3 = ts3[k3];
+		      //out_t4 = ts4[k4];
+		      //out_dt = max_t - min_t;
+		      
+		      //outTree->Fill();
+		      matchCount++;
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "Found " << matchCount << " coincidences." << std::endl;
+
+    //OK - I've matched up the QUABO packets into camera events.
+    //Now create those camera events
+    char outfile_name[200];
+    snprintf(outfile_name,200,"%s.T%d",infile,this_scope_id);
+    cout << "Done. Writing to: " << outfile_name << endl;
+    TFile *root_outfile = TFile::Open(outfile_name,"RECREATE");
+    TTree *camdata=define_camdata();
+    TH2D *hquabo;
+
+    // Clever ROOT trick: Maps "WR_time" branch directly to entry number - allows quick lookup
+    pdata->BuildIndex("WR_time");
+
+    for (size_t i = 0; i < mt1.size(); ++i)    
+      {
+	//I just want to loop over QUABO packet entries close in time to this event  
+	int this_entry = pdata->GetEntryNumberWithBestIndex(mt1[i]);
+	int start_entry=this_entry-10;
+	if (start_entry<0) start_entry=0;
+	int end_entry=this_entry+10;
+	if (end_entry>npdata) end_entry=npdata;      
+	//cout << i << " " << start_entry << " " << end_entry << endl;
+							       
+	for (int j=start_entry;j<end_entry;j++)
+	  {	    
+	    pdata->GetEntry(j);
+	    bool found1=0,found2=0,found3=0,found4=0;
+	    if (WR_time==mt1[i] && boardloc-this_scope_id==0)
+	      {
+		UShort_t scope_id=getScopeID(boardloc);		
+		if (scope_id!=this_scope_id) continue;
+		// assign event time stamps etc based on the first quabo
+		cam_pcap_time=pcap_time;
+		cam_pcap_time_since_start=pcap_time_since_start;
+		cam_acq_mode=acq_mode;
+		cam_TAI=TAI;
+		cam_nanosec=nanosec;
+		cam_WR_time=WR_time;
+		cam_scope_id=scope_id;
+		hquabo = makequabohist(pdata,1,-30,100); //puts the quabo packet into a 2D hist and rotates it based on its position in the camera
+		fillCamera(getCameraPosition(boardloc),hquabo);
+		found1=1;
+	      }
+	    if (WR_time==mt2[i] && boardloc-this_scope_id==1)
+	      {
+		hquabo = makequabohist(pdata,1,-30,100); //puts the quabo packet into a 2D hist and rotates it based on its position in the camera
+		fillCamera(getCameraPosition(boardloc),hquabo);
+		found2=1;
+	      }
+	    if (WR_time==mt3[i] && boardloc-this_scope_id==2)
+	      {
+		hquabo = makequabohist(pdata,1,-30,100); //puts the quabo packet into a 2D hist and rotates it based on its position in the camera
+		fillCamera(getCameraPosition(boardloc),hquabo);
+		found3=1;
+	      }
+	    if (WR_time==mt4[i] && boardloc-this_scope_id==3)
+	      {
+		hquabo = makequabohist(pdata,1,-30,100); //puts the quabo packet into a 2D hist and rotates it based on its position in the camera
+		fillCamera(getCameraPosition(boardloc),hquabo);
+		found4=1;
+	      }
+	    if (found1 && found2 && found3 && found4) break;
+	
+	  }
+	camdata->Fill();
+	//cout << "found event " << i << endl;
+				       
+      }
+    camdata->Write();    
+    root_outfile->Close();
+    cout << endl;
+}
+
+
+
+
 // There are three scopes in the triangle data. IDs are: 760 (dorm), 12 (kron) and 1016 (crocker)
 // This method matches quabo packets together using a time histogram approach. Simple and robust, but might struggle at high rates.
 void makeevents_timehistomatch(const char *infile, int this_scope_id)
 {
 
   TTree *pdata=loadpdata(infile);    
-    int npdata=pdata->GetEntries();
-    pdata->GetEntry(npdata-1);
-    double duration=pcap_time_since_start;
-    //How many histogram bins do we need such that there are a maximum of 4 packets per bin?
+  int npdata=pdata->GetEntries();
+  pdata->GetEntry(npdata-1);
+  double duration=pcap_time_since_start;
+  //How many histogram bins do we need such that there are a maximum of 4 packets per bin?
     int nbins=(int)(duration*100);
     TCanvas *mycanv=new TCanvas();
     mycanv->cd();
@@ -516,7 +662,8 @@ void ProcessFiles(const char* listFileName = "filelist.dat",int scope_id=0) {
         line.erase(line.find_last_not_of(" \t\r\n") + 1);
         
         if (!line.empty() && line[0] != '#') { // Ignore empty lines and comments
-	  makeevents_timehistomatch(line.c_str(),scope_id);
+	  //makeevents_timehistomatch(line.c_str(),scope_id);
+	  makeevents_softwaretrigger(line.c_str(),scope_id);
         }
     }
 
