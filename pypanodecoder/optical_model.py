@@ -128,6 +128,56 @@ class RayBundle:
         # Update time: t = t0 + s / speed
         self.t[valid_idx] += s[valid_idx] / speed
 
+    def scatter_directions(self, sigma_theta):
+        """
+        Scatters the valid ray directions using a 2D Gaussian profile.
+        
+        Args:
+            sigma_theta: The standard deviation of the scattering angle in radians.
+        """
+        if sigma_theta <= 0:
+            return
+            
+        valid_idx = self.valid
+        num_valid = np.sum(valid_idx)
+        if num_valid == 0:
+            return
+            
+        # Sample polar angle theta from Rayleigh distribution (equivalent to 2D Gaussian)
+        # and azimuthal angle phi uniformly
+        u1 = np.random.uniform(0, 1, num_valid)
+        u2 = np.random.uniform(0, 1, num_valid)
+        
+        theta = sigma_theta * np.sqrt(-2.0 * np.log(u1 + 1e-12))
+        phi = 2.0 * np.pi * u2
+        
+        cos_theta = np.cos(theta)[:, np.newaxis]
+        sin_theta = np.sin(theta)[:, np.newaxis]
+        cos_phi = np.cos(phi)[:, np.newaxis]
+        sin_phi = np.sin(phi)[:, np.newaxis]
+        
+        V = self.dir[valid_idx]
+        
+        # Create orthogonal basis (U, W) for each V
+        A1 = np.array([1.0, 0.0, 0.0])
+        A2 = np.array([0.0, 1.0, 0.0])
+        
+        U1 = np.cross(V, A1)
+        norm1 = np.linalg.norm(U1, axis=1)
+        U2 = np.cross(V, A2)
+        
+        mask = norm1 > 0.5
+        U = np.where(mask[:, np.newaxis], U1, U2)
+        U = U / np.linalg.norm(U, axis=1, keepdims=True)
+        
+        W = np.cross(V, U)
+        
+        # Rotate V by theta and phi
+        V_new = V * cos_theta + (U * cos_phi + W * sin_phi) * sin_theta
+        V_new = V_new / np.linalg.norm(V_new, axis=1, keepdims=True)
+        
+        self.dir[valid_idx] = V_new
+
     def propagate_to_y_plane(self, y_target, speed=1.0):
         """
         Propagate rays forward in time to a given y-coordinate.
@@ -266,7 +316,7 @@ class RayBundle:
         self._refract(normal, n1, n2)
 
 
-def trace_telescope(ray_bundle, n_func, poly_coeffs, aperture_diameter, focal_plane_y):
+def trace_telescope(ray_bundle, n_func, poly_coeffs, aperture_diameter, focal_plane_y, scattering_sigma_theta=0.0):
     """
     Traces a bundle of rays through the telescope optics.
     
@@ -277,6 +327,7 @@ def trace_telescope(ray_bundle, n_func, poly_coeffs, aperture_diameter, focal_pl
         poly_coeffs: Coefficients for the polynomial describing the lens exit surface sag.
         aperture_diameter: Diameter of the entrance aperture.
         focal_plane_y: The y-coordinate of the focal plane.
+        scattering_sigma_theta: Roughness scattering angle std dev in radians.
         
     Returns:
         The updated ray_bundle.
@@ -298,6 +349,10 @@ def trace_telescope(ray_bundle, n_func, poly_coeffs, aperture_diameter, focal_pl
     # 4. Refract out of lens at polynomial surface
     # Refract from lens (n=n_lens) into air (n=1)
     ray_bundle.refract_out_of_lens_poly(n_lens, 1.0, poly_coeffs)
+    
+    # Add surface scattering due to roughness
+    if scattering_sigma_theta > 0:
+        ray_bundle.scatter_directions(scattering_sigma_theta)
     
     # 5. Propagate to focal plane
     ray_bundle.propagate_to_y_plane(focal_plane_y)
@@ -378,7 +433,7 @@ def create_energy_generator(datapack, zn=0):
         
     return generator
 
-def calc_psf(direction, num_rays, datapack, zn=0):
+def calc_psf(direction, num_rays, datapack, zn=0, focal_offset=0.0):
     """
     Calculates the point spread function (PSF) by generating a bundle of rays
     and tracing them through the telescope.
@@ -388,6 +443,7 @@ def calc_psf(direction, num_rays, datapack, zn=0):
         num_rays: Number of rays to simulate.
         datapack: The loaded optical model data pack.
         zn: Zenith angle in radians for atmospheric absorption.
+        focal_offset: Offset added to the nominal focal distance.
         
     Returns:
         The RayBundle object after propagating to the focal plane.
@@ -396,6 +452,8 @@ def calc_psf(direction, num_rays, datapack, zn=0):
     D = optics["D"]
     F = optics["F"]
     poly_coeffs = optics["p_out"]
+    roughness = optics.get("roughness", 0.0)
+    sigma_theta = roughness / F if F > 0 else 0.0
     
     # Assuming rays travel roughly in -y direction towards the telescope at y=0.
     # To start them before the telescope, we place the generating disk behind the origin 
@@ -412,13 +470,14 @@ def calc_psf(direction, num_rays, datapack, zn=0):
     
     n_func = create_n_interpolator(datapack)
     
-    # Focal plane is at y = -F (assuming lens is at y=0 and rays travel towards -y)
+    # Focal plane is at y = -(F + focal_offset)
     traced_bundle = trace_telescope(
         ray_bundle=bundle,
         n_func=n_func,
         poly_coeffs=poly_coeffs,
         aperture_diameter=D,
-        focal_plane_y=-F
+        focal_plane_y=-(F + focal_offset),
+        scattering_sigma_theta=sigma_theta
     )
     
     return traced_bundle
