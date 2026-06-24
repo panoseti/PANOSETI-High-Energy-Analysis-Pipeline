@@ -403,6 +403,8 @@ def create_energy_generator(datapack, zn=0):
     """
     Returns a generator function that produces random photon energies (in eV)
     weighted by atmospheric transmission, lens transmission, and SiPM QE.
+    Source photon flux spectrum is assumed to be flat (Cherenkov) - we 
+    should also suuport simple thermal spectra with a given B-V.
     
     Args:
         datapack: The optical model data pack dictionary.
@@ -520,7 +522,7 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     Generate a PSF image by tracing a parallel ray bundle through the telescope
     and histogramming the ray positions on the focal plane.
 
-    The ray bundle direction is chosen so that the prime (on-axis) ray of the
+    The ray bundle direction is chosen so that the prime ray of the
     bundle arrives at position (x_phys, z_phys) = (x * pixel_spacing, y * pixel_spacing)
     on the focal plane, where x and y are pixel-grid coordinates measured from
     the centre of the array (fractional pixel values are allowed).
@@ -614,6 +616,7 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     # Focal-plane positions of valid rays (X and Z in telescope frame)
     x_fp = bundle.pos[valid, 0]
     z_fp = bundle.pos[valid, 2]
+    nvalid = len(x_fp)
 
     # Convert physical positions to pixel indices.
     # Pixel index 0 corresponds to the range [-npixel/2 * pixel_spacing, (-npixel/2 + 1) * pixel_spacing).
@@ -660,4 +663,4 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     center = (result.x[0], result.x[1])
     diameter = 2.0 * result.fun
 
-    return image, center, diameter
+    return nvalid, image, center, diameter
