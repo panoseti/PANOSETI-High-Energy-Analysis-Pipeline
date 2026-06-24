@@ -633,7 +633,7 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
 
     # Histogram into the image array
     image = np.zeros((npixel, npixel), dtype=int)
-    np.add.at(image, (ix, iz), 1)
+    np.add.at(image, (iz, ix), 1)
 
     if not calc_diameter:
         return image
