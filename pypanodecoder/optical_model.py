@@ -433,10 +433,9 @@ def create_energy_generator(datapack, zn=0):
         
     return generator
 
-def calc_psf(direction, num_rays, datapack, zn=0, focal_offset=0.0):
+def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=0.0, energy_eV=None):
     """
-    Calculates the point spread function (PSF) by generating a bundle of rays
-    and tracing them through the telescope.
+    Generate a bundle of rays and trace them through the telescope.
     
     Args:
         direction: The direction of the incoming parallel rays (e.g. [0, -1, 0] for on-axis).
@@ -458,14 +457,22 @@ def calc_psf(direction, num_rays, datapack, zn=0, focal_offset=0.0):
     # Assuming rays travel roughly in -y direction towards the telescope at y=0.
     # To start them before the telescope, we place the generating disk behind the origin 
     # relative to the ray direction.
-    distance = -10.0
+    distance = -D
     
+    energy_generator = None
+    if energy_eV is None:
+        energy_generator = create_energy_generator(datapack, zn)
+    else:
+        def generator(num_rays=1):
+            return np.full(num_rays, energy_eV)
+        energy_generator = generator
+
     bundle = RayBundle.create_parallel_beam(
         num_rays=num_rays,
         direction=direction,
-        diameter=D * 1.5, # Slightly larger than aperture to fully illuminate
+        diameter=D * 1.01, # Slightly larger than aperture to fully illuminate
         distance=distance,
-        energy_eV=create_energy_generator(datapack, zn)
+        energy_eV=energy_generator
     )
     
     n_func = create_n_interpolator(datapack)
