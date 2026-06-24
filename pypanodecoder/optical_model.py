@@ -636,7 +636,7 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     np.add.at(image, (iz, ix), 1)
 
     if not calc_diameter:
-        return image
+        return nvalid, image
 
     # --- Smallest circle enclosing 80 % of all valid rays (d80) ---
     # All valid rays on the focal plane are included, even those outside the
