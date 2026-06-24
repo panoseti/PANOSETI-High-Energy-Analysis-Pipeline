@@ -2,6 +2,7 @@ import json
 import os
 import numpy as np
 import scipy.interpolate
+import scipy.optimize
 
 _DEFAULT_DATAPACK_FILENAME = "optical_model_data_pack.json"
 
@@ -514,7 +515,7 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=
     return traced_bundle
 
 
-def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None, zn=0, focal_offset=0.0, energy_eV=None):
+def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None, zn=0, focal_offset=0.0, energy_eV=None, calc_diameter=False, diameter_quantile=0.80):
     """
     Generate a PSF image by tracing a parallel ray bundle through the telescope
     and histogramming the ray positions on the focal plane.
@@ -538,18 +539,32 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
         npixel: Number of pixels on each side of the square output image.  If
               None, ``datapack["thin_optical_model"]["npixel"]`` is used.
         pixel_spacing: Physical size of one pixel (same units as the datapack
-                  geometry, typically metres).  If None,
+                  geometry, typically cm).  If None,
                   ``datapack["thin_optical_model"]["pixel_spacing"]`` is used.
         zn: Zenith angle in radians for atmospheric absorption (default 0).
         focal_offset: Offset added to the nominal focal distance (default 0).
         energy_eV: If given, a fixed photon energy (eV) for all rays.  If
                    None the energy is drawn from the combined atmospheric /
                    lens / SiPM efficiency spectrum.
+        calc_diameter: If True, also compute and return the centre and diameter
+                       of the smallest circle enclosing ``diameter_quantile``
+                       of the valid rays.  Default is False.
+        diameter_quantile: Fraction of rays to enclose when computing the
+                           diameter (e.g. 0.80 for d80, 0.50 for d50).
+                           Only used when ``calc_diameter`` is True.
+                           Default is 0.80.
 
     Returns:
-        image: numpy array of shape (npixel, npixel) containing the number of rays
-               that landed in each pixel.  The first axis corresponds to X and
-               the second axis to Z (telescope frame) / Y (user frame).
+        image: numpy array of shape (npixel, npixel) containing the number of
+               rays that landed in each pixel.  The first axis corresponds to X
+               and the second axis to Z (telescope frame) / Y (user frame).
+        If calc_diameter is True, two additional values are returned:
+        center: (cx, cz) tuple giving the centre of the enclosing circle in
+                pixels, measured from the centre of the image (same convention
+                as the x and y input arguments).
+        diameter: diameter of the smallest circle enclosing
+                  ``diameter_quantile`` of all valid rays on the focal plane
+                  (including those outside the image bounds), in pixels.
     """
     optics = datapack["thin_optical_model"]
     F = optics["F"]
@@ -591,7 +606,10 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     # Select only valid rays
     valid = bundle.valid
     if not np.any(valid):
-        return np.zeros((npixel, npixel), dtype=int)
+        image = np.zeros((npixel, npixel), dtype=int)
+        if calc_diameter:
+            return image, (np.nan, np.nan), np.nan
+        return image
 
     # Focal-plane positions of valid rays (X and Z in telescope frame)
     x_fp = bundle.pos[valid, 0]
@@ -614,4 +632,32 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     image = np.zeros((npixel, npixel), dtype=int)
     np.add.at(image, (ix, iz), 1)
 
-    return image
+    if not calc_diameter:
+        return image
+
+    # --- Smallest circle enclosing 80 % of all valid rays (d80) ---
+    # All valid rays on the focal plane are included, even those outside the
+    # image bounds.  Positions are in pixel units measured from the image
+    # centre, for consistency with the x and y input arguments.
+    x_pix = x_fp / pixel_spacing   # pixels from image centre
+    z_pix = z_fp / pixel_spacing
+
+    # For a candidate centre the radius needed to enclose 80 % of the rays
+    # is the 80th percentile of the distances.  Minimising over all candidate
+    # centres gives the smallest such circle.
+    def _radius_for_fraction(centre):
+        dx = x_pix - centre[0]
+        dz = z_pix - centre[1]
+        return np.percentile(np.sqrt(dx**2 + dz**2), diameter_quantile * 100.0)
+
+    x0 = np.array([np.median(x_pix), np.median(z_pix)])
+    result = scipy.optimize.minimize(
+        _radius_for_fraction,
+        x0,
+        method="Nelder-Mead",
+        options={"xatol": 1e-3, "fatol": 1e-3},  # tolerances in pixels
+    )
+    center = (result.x[0], result.x[1])
+    diameter = 2.0 * result.fun
+
+    return image, center, diameter
