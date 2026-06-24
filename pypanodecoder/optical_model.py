@@ -1,5 +1,29 @@
+import json
+import os
 import numpy as np
 import scipy.interpolate
+
+_DEFAULT_DATAPACK_FILENAME = "optical_model_data_pack.json"
+
+def load_datapack(filename=None):
+    """
+    Load the optical model data pack from a JSON file.
+
+    Args:
+        filename: Path to the JSON file.  If None (the default) the bundled
+                  ``resources/optical_model_data_pack.json`` that ships with
+                  this package is used.
+
+    Returns:
+        The data pack as a Python dictionary.
+    """
+    if filename is None:
+        filename = os.path.join(
+            os.path.dirname(__file__), "resources", _DEFAULT_DATAPACK_FILENAME
+        )
+    with open(filename, "r") as f:
+        return json.load(f)
+
 
 class RayBundle:
     def __init__(self, pos, dir, t=None, valid=None, energy_eV=None):
@@ -488,3 +512,106 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=
     )
     
     return traced_bundle
+
+
+def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None, zn=0, focal_offset=0.0, energy_eV=None):
+    """
+    Generate a PSF image by tracing a parallel ray bundle through the telescope
+    and histogramming the ray positions on the focal plane.
+
+    The ray bundle direction is chosen so that the prime (on-axis) ray of the
+    bundle arrives at position (x_phys, z_phys) = (x * pixel_spacing, y * pixel_spacing)
+    on the focal plane, where x and y are pixel-grid coordinates measured from
+    the centre of the array (fractional pixel values are allowed).
+
+    In the telescope coordinate frame the focal plane is the XZ plane (at the
+    appropriate Y coordinate).  The user-facing ``y`` argument therefore maps
+    to the Z axis of the telescope frame.
+
+    Args:
+        x: Target position along the X axis, in pixels from the centre of the
+           image (can be fractional).
+        y: Target position along the Z axis (telescope frame), in pixels from
+           the centre of the image (can be fractional).
+        num_rays: Number of rays to trace.
+        datapack: The loaded optical model data pack.
+        npixel: Number of pixels on each side of the square output image.  If
+              None, ``datapack["thin_optical_model"]["npixel"]`` is used.
+        pixel_spacing: Physical size of one pixel (same units as the datapack
+                  geometry, typically metres).  If None,
+                  ``datapack["thin_optical_model"]["pixel_spacing"]`` is used.
+        zn: Zenith angle in radians for atmospheric absorption (default 0).
+        focal_offset: Offset added to the nominal focal distance (default 0).
+        energy_eV: If given, a fixed photon energy (eV) for all rays.  If
+                   None the energy is drawn from the combined atmospheric /
+                   lens / SiPM efficiency spectrum.
+
+    Returns:
+        image: numpy array of shape (npixel, npixel) containing the number of rays
+               that landed in each pixel.  The first axis corresponds to X and
+               the second axis to Z (telescope frame) / Y (user frame).
+    """
+    optics = datapack["thin_optical_model"]
+    F = optics["F"]
+    focal_length = F + focal_offset
+
+    if npixel is None:
+        npixel = optics["npixel"]
+    if pixel_spacing is None:
+        pixel_spacing = optics["pixel_spacing"]
+
+    # Physical target position on the focal plane (metres)
+    x_target = x * pixel_spacing
+    z_target = y * pixel_spacing   # user's y → telescope Z
+
+    # Direction of the incoming parallel beam.
+    # A ray travelling along direction (dx, dy, dz) with dy < 0 arrives at the
+    # focal plane (y = -focal_length) at approximately:
+    #   x_fp ≈ (dx / |dy|) * focal_length
+    #   z_fp ≈ (dz / |dy|) * focal_length
+    # So to target (x_target, z_target) we need:
+    #   dx/|dy| = x_target / focal_length
+    #   dz/|dy| = z_target / focal_length
+    # Choosing |dy| = 1 (before normalisation):
+    dx = x_target / focal_length
+    dy = -1.0
+    dz = z_target / focal_length
+    direction = np.array([dx, dy, dz])
+
+    # Trace the bundle
+    bundle = trace_parallel_ray_bundle(
+        direction=direction,
+        num_rays=num_rays,
+        datapack=datapack,
+        zn=zn,
+        focal_offset=focal_offset,
+        energy_eV=energy_eV,
+    )
+
+    # Select only valid rays
+    valid = bundle.valid
+    if not np.any(valid):
+        return np.zeros((npixel, npixel), dtype=int)
+
+    # Focal-plane positions of valid rays (X and Z in telescope frame)
+    x_fp = bundle.pos[valid, 0]
+    z_fp = bundle.pos[valid, 2]
+
+    # Convert physical positions to pixel indices.
+    # Pixel index 0 corresponds to the range [-npixel/2 * pixel_spacing, (-npixel/2 + 1) * pixel_spacing).
+    # Centre of the image is between pixels npixel//2 - 1 and npixel//2 for even npixel,
+    # or at pixel npixel//2 for odd npixel.
+    half = npixel / 2.0
+    ix = np.floor(x_fp / pixel_spacing + half).astype(int)
+    iz = np.floor(z_fp / pixel_spacing + half).astype(int)
+
+    # Keep only rays that fall within the image boundaries
+    in_bounds = (ix >= 0) & (ix < npixel) & (iz >= 0) & (iz < npixel)
+    ix = ix[in_bounds]
+    iz = iz[in_bounds]
+
+    # Histogram into the image array
+    image = np.zeros((npixel, npixel), dtype=int)
+    np.add.at(image, (ix, iz), 1)
+
+    return image
