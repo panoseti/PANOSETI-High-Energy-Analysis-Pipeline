@@ -18,7 +18,10 @@
       -6.278781029198747e-28,
       -7.743046248551831e-31
     ],
-    "roughness": 0
+    "roughness": 0,
+    "npixel": 32,
+    "pixel_spacing": 0.32,
+    "pixel_active": 0.3
   },
   "refractive_index": {
     "src": "N0161101.asc",
