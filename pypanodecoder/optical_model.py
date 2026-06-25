@@ -635,32 +635,37 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     image = np.zeros((npixel, npixel), dtype=int)
     np.add.at(image, (iz, ix), 1)
 
-    if not calc_diameter:
-        return nvalid, image
-
-    # --- Smallest circle enclosing 80 % of all valid rays (d80) ---
-    # All valid rays on the focal plane are included, even those outside the
-    # image bounds.  Positions are in pixel units measured from the image
+    # Return median and men positions in pixel units measured from the image
     # centre, for consistency with the x and y input arguments.
     x_pix = x_fp / pixel_spacing   # pixels from image centre
     z_pix = z_fp / pixel_spacing
 
-    # For a candidate centre the radius needed to enclose 80 % of the rays
-    # is the 80th percentile of the distances.  Minimising over all candidate
+    center_median = ( np.median(x_pix), np.median(z_pix) )
+    center_mean = ( np.mean(x_pix), np.mean(z_pix) )
+
+    if not calc_diameter:
+        return nvalid, image, center_mean, center_median
+
+    # --- Smallest circle enclosing 100*Q% of all valid rays (dQ) ---
+    # All valid rays on the focal plane are included, even those outside the
+    # image bounds.  
+
+    # For a candidate centre the radius needed to enclose 100*Q% of the rays
+    # is the 100*Qth percentile of the distances.  Minimising over all candidate
     # centres gives the smallest such circle.
     def _radius_for_fraction(centre):
         dx = x_pix - centre[0]
         dz = z_pix - centre[1]
         return np.percentile(np.sqrt(dx**2 + dz**2), diameter_quantile * 100.0)
 
-    x0 = np.array([np.median(x_pix), np.median(z_pix)])
+    x0 = np.array(center_median)
     result = scipy.optimize.minimize(
         _radius_for_fraction,
         x0,
         method="Nelder-Mead",
         options={"xatol": 1e-3, "fatol": 1e-3},  # tolerances in pixels
     )
-    center = (result.x[0], result.x[1])
-    diameter = 2.0 * result.fun
+    center_Q = (result.x[0], result.x[1])
+    diameter_Q = 2.0 * result.fun
 
-    return nvalid, image, center, diameter
+    return nvalid, image, center_mean, center_median, center_Q, diameter_Q
