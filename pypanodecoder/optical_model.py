@@ -522,7 +522,7 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     Generate a PSF image by tracing a parallel ray bundle through the telescope
     and histogramming the ray positions on the focal plane.
 
-    The ray bundle direction is chosen so that the prime ray of the
+    The ray bundle direction is chosen so that the principal ray of the
     bundle arrives at position (x_phys, z_phys) = (x * pixel_spacing, y * pixel_spacing)
     on the focal plane, where x and y are pixel-grid coordinates measured from
     the centre of the array (fractional pixel values are allowed).
