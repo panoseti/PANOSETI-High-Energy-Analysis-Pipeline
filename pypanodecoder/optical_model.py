@@ -639,12 +639,15 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     # centre, for consistency with the x and y input arguments.
     x_pix = x_fp / pixel_spacing   # pixels from image centre
     z_pix = z_fp / pixel_spacing
+    r_pix = np.sqrt(x_pix**2 + z_pix**2)
 
     center_median = ( np.median(x_pix), np.median(z_pix) )
     center_mean = ( np.mean(x_pix), np.mean(z_pix) )
+    r_median = np.median(r_pix)
+    r_mean = np.median(r_pix)
 
     if not calc_diameter:
-        return nvalid, image, center_mean, center_median
+        return nvalid, image, center_mean, r_mean, center_median, r_median
 
     # --- Smallest circle enclosing 100*Q% of all valid rays (dQ) ---
     # All valid rays on the focal plane are included, even those outside the
@@ -668,4 +671,4 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
     center_Q = (result.x[0], result.x[1])
     diameter_Q = 2.0 * result.fun
 
-    return nvalid, image, center_mean, center_median, center_Q, diameter_Q
+    return nvalid, image, center_mean, r_mean, center_median, r_median, center_Q, diameter_Q
