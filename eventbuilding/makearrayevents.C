@@ -411,7 +411,7 @@ void makefakearrayevents(const char *infile, int real_tel=1)
 
 
 
-void analyzetiming(const char *infile)
+void analyzetiming(const char *infile,int minhits=3, int maxhits=50, double min_tdiff=-0.02,double max_tdiff=0.02)
 {
   // this analyzes the time offset vs time histograms produced by findtimingoffsets, and produces a smoothed graph of timing offset as a function of time, with points evenly spaced in time. 
   TFile *_file0 = TFile::Open(infile);
@@ -419,6 +419,14 @@ void analyzetiming(const char *infile)
   int npoints=0;
   vector<double> xp;
   vector<double> yp;
+
+  //mytdiff_t->Rebin2D(2,1);
+
+  double max=mytdiff_t->GetMaximum();
+  double min=mytdiff_t->GetMinimum();
+
+  
+  TH1D *hits=new TH1D("hits","Histogram of entries in Time Offset vs Time",max,0,max);
   
   for (int i=0;i<mytdiff_t->GetNbinsX();i++)
     {
@@ -427,16 +435,21 @@ void analyzetiming(const char *infile)
 	  int neventsinbin=mytdiff_t->GetBinContent(i+1,j+1);
 	  double binx=mytdiff_t->GetXaxis()->GetBinCenter(i+1);	  
 	  double biny=mytdiff_t->GetYaxis()->GetBinCenter(j+1);
-	  if (neventsinbin>=3)
+	  hits->Fill(neventsinbin);
+	  if (neventsinbin>=minhits && neventsinbin<=maxhits)
 	    {
-	      xp.push_back(binx);
-	      yp.push_back(biny);
-	      npoints+=1;
+	      if (biny>min_tdiff && biny<max_tdiff)
+		{
+		  xp.push_back(binx);
+		  yp.push_back(biny);
+		  npoints+=1;
+		}
 	    }
-	  
 	}
     }
   cout << npoints << endl;
+  hits->Draw();
+
   TGraph *g=new TGraph(npoints);
   for (int i=0;i<npoints;i++)
     {
@@ -444,25 +457,25 @@ void analyzetiming(const char *infile)
       g->SetPoint(i,xp[i],yp[i]);
     }
 
-  //g->Draw("AW*");
+  g->Draw("AW*");
 
-      TGraphSmooth *gs=new TGraphSmooth("normal");
-      TGraph *smoothedGraph = gs->SmoothLowess(g);
-
-      double tmin=mytdiff_t->GetXaxis()->GetXmin();
-      double tmax=mytdiff_t->GetXaxis()->GetXmax();
-      int nbins_smoothed=(int) (tmax-tmin)/60.;
-      gsmoothtime = gs->Approx(g,"linear",nbins_smoothed);
-      gsmoothtime->SetMarkerStyle(21);
-      gsmoothtime->SetMarkerSize(0.4);
-      gsmoothtime->SetMarkerColor(2);
-      gsmoothtime->Draw("AWP");
-      g->Draw("*SAME");
-      gsmoothtime->GetXaxis()->SetTitle("Time(s)");
-      gsmoothtime->GetYaxis()->SetTitle("Time difference (s)");
-      gsmoothtime->GetYaxis()->SetTitleOffset(1.3);
-      gsmoothtime->SetTitle();
-
+  TGraphSmooth *gs=new TGraphSmooth("normal");
+  TGraph *smoothedGraph = gs->SmoothLowess(g);
+  
+  double tmin=mytdiff_t->GetXaxis()->GetXmin();
+  double tmax=mytdiff_t->GetXaxis()->GetXmax();
+  int nbins_smoothed=(int) (tmax-tmin)/60.;
+  gsmoothtime = gs->Approx(g,"linear",nbins_smoothed);
+  gsmoothtime->SetMarkerStyle(21);
+  gsmoothtime->SetMarkerSize(0.4);
+  gsmoothtime->SetMarkerColor(2);
+  gsmoothtime->Draw("AWP");
+  g->Draw("*LSAME");
+  gsmoothtime->GetXaxis()->SetTitle("Time(s)");
+  gsmoothtime->GetYaxis()->SetTitle("Time difference (s)");
+  gsmoothtime->GetYaxis()->SetTitleOffset(1.3);
+  gsmoothtime->SetTitle();
+  
 }
   
   

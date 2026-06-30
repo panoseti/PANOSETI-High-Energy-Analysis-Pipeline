@@ -86,8 +86,96 @@ UShort_t getScopeID(UShort_t i_boardloc)
   UShort_t scope_id=i_boardloc-getCameraPosition(i_boardloc);
   return scope_id;
 }
+#include "TH2D.h"
+
 
 TH2D* transpose(TH2D *hin)
+{
+  // 1. Create a clone with swapped X and Y bin specifications
+  // Cloning the original directly creates the wrong axes layout for non-square histograms
+  TString name = TString::Format("%s_transposed", hin->GetName());
+  TH2D *hout = new TH2D(name, hin->GetTitle(), 
+                        hin->GetNbinsY(), hin->GetYaxis()->GetXmin(), hin->GetYaxis()->GetXmax(),
+                        hin->GetNbinsX(), hin->GetXaxis()->GetXmin(), hin->GetXaxis()->GetXmax());
+  
+  hout->SetDirectory(nullptr); // <-- FIX: Disables automatic ROOT tracking and removes warnings
+  int nBinsX = hin->GetNbinsX();
+  int nBinsY = hin->GetNbinsY();
+  
+  // 2. Loop using global bin indices rather than 2D coordinate calculations
+  for (int ix = 0; ix <= nBinsX + 1; ix++)
+    {
+      for (int iy = 0; iy <= nBinsY + 1; iy++)
+        {
+          int inIdx = hin->GetBin(ix, iy);
+          int outIdx = hout->GetBin(iy, ix);
+          
+          hout->SetBinContent(outIdx, hin->GetBinContent(inIdx));
+          hout->SetBinError(outIdx, hin->GetBinError(inIdx)); // Keep errors intact
+        }
+    }
+  return hout;
+}
+
+TH2D* flipX(TH2D *hin)
+{
+  TH2D *hout = (TH2D*)hin->Clone("hout_flipX");
+  
+  int nBinsX = hin->GetNbinsX();
+  int nBinsY = hin->GetNbinsY();
+  
+  // Grab direct pointers to memory arrays to bypass Get/Set method overhead completely
+  double* inArray  = hin->GetArray();
+  double* outArray = hout->GetArray();
+  double* inErrArray  = hin->GetSumw2()->GetArray();
+  double* outErrArray = hout->GetSumw2()->GetArray();
+  bool hasErrors = (hin->GetSumw2N() > 0);
+
+  for (int ix = 1; ix <= nBinsX; ix++)
+    {
+      int srcX = nBinsX + 1 - ix;
+      for (int iy = 1; iy <= nBinsY; iy++)
+        {
+          int destIdx = hin->GetBin(ix, iy);
+          int srcIdx  = hin->GetBin(srcX, iy);
+          
+          outArray[destIdx] = inArray[srcIdx];
+          if (hasErrors) outErrArray[destIdx] = inErrArray[srcIdx];
+        }
+    }
+  return hout;
+}
+
+TH2D* flipY(TH2D *hin)
+{
+  TH2D *hout = (TH2D*)hin->Clone("hout_flipY");
+  
+  int nBinsX = hin->GetNbinsX();
+  int nBinsY = hin->GetNbinsY();
+  
+  double* inArray  = hin->GetArray();
+  double* outArray = hout->GetArray();
+  double* inErrArray  = hin->GetSumw2()->GetArray();
+  double* outErrArray = hout->GetSumw2()->GetArray();
+  bool hasErrors = (hin->GetSumw2N() > 0);
+
+  for (int ix = 1; ix <= nBinsX; ix++)
+    {
+      for (int iy = 1; iy <= nBinsY; iy++)
+        {
+          int srcY = nBinsY + 1 - iy; // FIXED: Changed from GetNbinsX() to GetNbinsY()
+          int destIdx = hin->GetBin(ix, iy);
+          int srcIdx  = hin->GetBin(ix, srcY);
+          
+          outArray[destIdx] = inArray[srcIdx];
+          if (hasErrors) outErrArray[destIdx] = inErrArray[srcIdx];
+        }
+    }
+  return hout;
+}
+
+
+TH2D* old_transpose(TH2D *hin)
 {
   TH2D *hout = new TH2D(*hin);
   hout->SetName("hout");
@@ -102,6 +190,7 @@ TH2D* transpose(TH2D *hin)
   return hout;
 }
 
+/*
 TH2D* flipX(TH2D *hin)
 {
   TH2D *hout = new TH2D(*hin);
@@ -131,8 +220,120 @@ TH2D* flipY(TH2D *hin)
     }
   return hout;
 }
+*/
+
+#include <vector>
+// Convert a clean 1D vector back to a TH2D (Row-Major: y * nBinsX + x)
+TH2D* convertVectorToTH2(const std::vector<double>& vin, 
+                         int nBinsX, double xmin, double xmax,
+                         int nBinsY, double ymin, double ymax,
+                         const std::string& name = "h2_out", 
+                         const std::string& title = "Transformed Histogram")
+{
+    // Safety check: Ensure the vector matches the specified matrix dimensions
+    if (vin.size() != static_cast<size_t>(nBinsX * nBinsY)) {
+        return nullptr; 
+    }
+
+    // 1. Create the new empty histogram
+    TH2D* h2 = new TH2D(name.c_str(), title.c_str(), 
+                        nBinsX, xmin, xmax, 
+                        nBinsY, ymin, ymax);
+
+    // 2. Populate the bins (skipping ROOT's underflow/overflow bins)
+    for (int iy = 0; iy < nBinsY; ++iy) {
+        for (int ix = 0; ix < nBinsX; ++ix) {
+            // Map 2D loops to flat vector row-major index
+            int vectorIdx = iy * nBinsX + ix; 
+            
+            // Map to ROOT's 1-indexed internal structure
+            int rootBinX = ix + 1;
+            int rootBinY = iy + 1;
+
+            h2->SetBinContent(rootBinX, rootBinY, vin[vectorIdx]);
+        }
+    }
+
+    return h2;
+}
+
+std::vector<double> convertTH2ToVector(TH2D* h2) 
+{
+    if (!h2) return std::vector<double>();
+
+    int nBinsX = h2->GetNbinsX();
+    int nBinsY = h2->GetNbinsY();
+    
+    // Allocate exact memory space upfront (excluding overflows)
+    std::vector<double> vout;
+    vout.reserve(nBinsX * nBinsY);
+
+    // Loop through active bins only (skipping index 0 and NBins+1)
+    for (int iy = 1; iy <= nBinsY; ++iy) {
+        for (int ix = 1; ix <= nBinsX; ++ix) {
+            vout.push_back(h2->GetBinContent(ix, iy));
+        }
+    }
+    return vout;
+}
 
 
+// Helper to convert 2D coordinates to a 1D flat index
+inline int getIndex(int x, int y, int nBinsX) {
+    return y * nBinsX + x;
+}
+
+// 1. Transpose Matrix
+std::vector<double> vtranspose(const std::vector<double>& vin, int nBinsX, int nBinsY)
+{
+    // The output dimensions are swapped (nBinsY becomes the new X/columns)
+    std::vector<double> vout(vin.size(), 0.0);
+
+    for (int ix = 0; ix < nBinsX; ++ix) {
+        for (int iy = 0; iy < nBinsY; ++iy) {
+            int inputIdx  = getIndex(ix, iy, nBinsX);
+            // Swapped geometry: ix becomes the row, iy becomes the column
+            int outputIdx = getIndex(iy, ix, nBinsY); 
+            
+            vout[outputIdx] = vin[inputIdx];
+        }
+    }
+    return vout;
+}
+
+// 2. Flip Horizontally (X-axis)
+std::vector<double> vflipX(const std::vector<double>& vin, int nBinsX, int nBinsY)
+{
+    std::vector<double> vout(vin.size(), 0.0);
+
+    for (int ix = 0; ix < nBinsX; ++ix) {
+        int flippedX = nBinsX - 1 - ix; // 0-indexed flip
+        for (int iy = 0; iy < nBinsY; ++iy) {
+            int inputIdx  = getIndex(flippedX, iy, nBinsX);
+            int outputIdx = getIndex(ix, iy, nBinsX);
+            
+            vout[outputIdx] = vin[inputIdx];
+        }
+    }
+    return vout;
+}
+
+// 3. Flip Vertically (Y-axis)
+std::vector<double> vflipY(const std::vector<double>& vin, int nBinsX, int nBinsY)
+{
+    std::vector<double> vout(vin.size(), 0.0);
+
+    for (int ix = 0; ix < nBinsX; ++ix) {
+        for (int iy = 0; iy < nBinsY; ++iy) {
+            int flippedY = nBinsY - 1 - iy; // FIX: Use nBinsY for vertical flip
+            int inputIdx  = getIndex(ix, flippedY, nBinsX);
+            int outputIdx = getIndex(ix, iy, nBinsX);
+            
+            vout[outputIdx] = vin[inputIdx];
+        }
+    }
+    return vout;
+}
 
 
 /*
@@ -215,9 +416,99 @@ TH2D * fixquabo763(TH2D *hq)
 TH2D * makequabohist(TTree * pdata, bool rotate, int zmin, int zmax)
 {
   char quabo_id[20];
+  snprintf(quabo_id, 20, "QUABO %d", boardloc);
+  
+  // 1. Create the initial histogram and immediately unregister from the global directory.
+  // This safely eliminates memory warnings without globally setting AddDirectory(kFALSE).
+  TH2D *hq = new TH2D("hq", quabo_id, 16, 0, 16, 16, 0, 16);
+  hq->SetDirectory(nullptr);
+  hq->SetStats(0);
+  
+  // 2. Optimization: Use raw pointers for direct array filling instead of SetBinContent loops
+  double* hq_array = hq->GetArray();
+  
+  for (int i = 0; i < 256; i++) {
+    int xbin = 16 - (i / 16); 
+    int ybin = 1 + (i % 16);
+    
+    // Choose the data source based on acquisition mode
+    if (acq_mode == 1)      pix_data[i] = pix_data_signed[i];
+    else if (acq_mode >= 2) pix_data[i] = pix_data_unsigned[i]; // Merged 2 and 3 into single logic check
+    
+    // Convert 2D bin coordinates directly to internal ROOT global bin index
+    int global_bin = hq->GetBin(xbin, ybin);
+    hq_array[global_bin] = pix_data[i];
+  }
+  
+  // Create a pointer to keep track of our final result histogram
+  TH2D *hq_transformed = nullptr;
+  
+  if (rotate) {
+    UShort_t cam_pos = getCameraPosition(boardloc); 
+    
+    // 0b00: top right (180 deg) -> flip X then flip Y
+    if (cam_pos == 0b00) {
+      TH2D *hq_flippedX = flipX(hq);
+      hq_flippedX->SetDirectory(nullptr);
+      
+      hq_transformed = flipY(hq_flippedX);
+      hq_transformed->SetDirectory(nullptr);
+      
+      delete hq_flippedX; // Clean up intermediate allocation immediately
+    }
+    
+    // 0b01: top left (90 deg) -> transpose then flip Y
+    else if (cam_pos == 0b01) {
+      TH2D *hq_transposed = transpose(hq);
+      hq_transposed->SetDirectory(nullptr);
+      
+      hq_transformed = flipY(hq_transposed);
+      hq_transformed->SetDirectory(nullptr);
+      
+      delete hq_transposed;
+    }
+
+    // 0b10: bottom left (no rotation) -> use hq directly
+    else if (cam_pos == 0b10) {
+      hq_transformed = hq;
+      hq = nullptr; // Clear pointer so we don't accidentally delete it later
+    }
+
+    // 0b11: bottom right (270 deg) -> transpose then flip X
+    else if (cam_pos == 0b11) {
+      TH2D *hq_transposed = transpose(hq);
+      hq_transposed->SetDirectory(nullptr);
+      
+      hq_transformed = flipX(hq_transposed);
+      hq_transformed->SetDirectory(nullptr);
+      
+      delete hq_transposed;
+      //if (boardloc==763) hq_transformed = fixquabo763(hq_transformed);
+    }
+    
+  } else {
+    // No rotation -> use hq directly
+    hq_transformed = hq;
+    hq = nullptr; 
+  }
+  
+  // 3. Clean up the original hq histogram if it wasn't adopted as the final object
+  if (hq != nullptr) {
+    delete hq;
+  }
+  
+  // 4. Safely set final name string and return the object without cloning it again!
+  hq_transformed->SetName("hq_transformed_return");
+  return hq_transformed;
+}
+
+TH2D * old_makequabohist(TTree * pdata, bool rotate, int zmin, int zmax)
+{
+  char quabo_id[20];
   snprintf(quabo_id,20,"QUABO %d",boardloc);
   //TH1::AddDirectory(kFALSE); //this is dangerous. don't do it.
   TH2D *hq=new TH2D("hq",quabo_id,16,0,16,16,0,16);
+  
   //first we get the data from the QUABO into a 2D histogram
   for (int i=0;i<256;i++){
     int xbin=16-(int)i/16; // the "16-" flips the x-axis - seems to be required based on Jerome's star images
@@ -228,14 +519,14 @@ TH2D * makequabohist(TTree * pdata, bool rotate, int zmin, int zmax)
     hq->SetBinContent(xbin,ybin,pix_data[i]);
   }
   hq->SetStats(0);
-  //hq->SetMinimum(zmin);
-  //hq->SetMaximum(zmax);
+
+  
 
   TH2D *hq_transformed=new TH2D(*hq);
   hq_transformed->SetName("hq_transformed");
   hq_transformed->Reset();
   UShort_t cam_pos=getCameraPosition(boardloc); 
-
+  
   if (rotate){
     // Now we need to rotate the QUABO pixel data, based on the QUABO's location in the camera  
     // positions in the camera are:
@@ -291,6 +582,8 @@ TH2D * makequabohist(TTree * pdata, bool rotate, int zmin, int zmax)
   delete hq;  //Now delete to avoid a memory leak
   return hq_transformed_return;
   //return hq_transformed;  
+ 
+  
 }
 
 void initializeCamera()

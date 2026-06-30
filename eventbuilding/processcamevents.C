@@ -84,7 +84,8 @@ HillasParams calculateHillas(double image[32][32], double threshold) {
 }
 
 
-void calcPedestals_Gemini(const char *infile, bool do_fit = true) {
+
+void calcPedestals(const char *infile, bool do_fit = true) {
     camdata = loadcamdata(infile);
     long nEntries = camdata->GetEntries();
     
@@ -110,8 +111,8 @@ void calcPedestals_Gemini(const char *infile, bool do_fit = true) {
     }
 
     // 3. Extract results (Mean/RMS or Fit)
-    TH2D *peds_hist = new TH2D("peds", "Pedestals", 32, 0, 32, 32, 0, 32);
-    TH2D *vars_hist = new TH2D("vars", "Pedestal Variances", 32, 0, 32, 32, 0, 32);
+    TH2D *peds_hist = new TH2D("peds_2D_hist", "Pedestals", 32, 0, 32, 32, 0, 32);
+    TH2D *vars_hist = new TH2D("pedvars_2D_hist", "Pedestal Variances", 32, 0, 32, 32, 0, 32);
 
     for (int i = 0; i < 32; ++i) {
         for (int j = 0; j < 32; ++j) {
@@ -139,11 +140,20 @@ void calcPedestals_Gemini(const char *infile, bool do_fit = true) {
     TFile *fOut = TFile::Open(Form("%s.pedvars", infile), "RECREATE");
     peds_hist->Write();
     vars_hist->Write();
+
+    TCanvas *c1 = new TCanvas("c1", "Sequential Image Display", 800, 400);
+    c1->Divide(2,1);
+    c1->cd(1);
+    peds_hist->Draw("COLZ");
+    c1->cd(2);
+    vars_hist->Draw("COLZ");
+
     fOut->Close();
 }
 
-void calcPedestals(const char *infile, bool do_fit=1)
+void calcPedestals_old(const char *infile, bool do_fit=1)
 {
+  // this was the initial pedestal calculation routine. It is very slow. 
   camdata=loadcamdata(infile);
   camdata->GetEntry(0);
   cout << "Acquisition mode " << (int)cam_acq_mode << endl;
@@ -273,6 +283,119 @@ void read_gains(const char *infile)
     }
   
 
+}
+
+void prefilter(const char *infile, const char *pedfile, double image_thresh=4.25, double border_thresh=2.25)
+{
+  //apply a low level cleaning to the camera files to remove obvious noise events. Makes the following stages of the analysis much more manageable when the rates are high.
+  gSystem->mkdir("./prefiltered/", kTRUE);
+  
+  camdata = loadcamdata(infile);
+  long nEntries = camdata->GetEntries();
+
+  char outfile_name[200];
+  snprintf(outfile_name,200,"prefiltered/%s",infile);
+  TFile *newfile = new TFile(outfile_name,"recreate");
+  TTree *camdata_prefilter = camdata->CloneTree(0);
+
+  read_pedestals(pedfile);
+  for (int i=0; i<nEntries; i++)
+    {
+      camdata->GetEntry(i);
+      int nimage=0;
+      int nborder=0;
+      int nborderorimage=0;
+      for (int i=0;i<32;i++)
+	{
+	  for (int j=0;j<32;j++)
+	    {
+	      double SN=(cam_pix_data[i][j]-ped[i][j])/pedvar[i][j];
+	      if (SN>image_thresh) nimage+=1;
+	      if (SN>border_thresh && SN<image_thresh) nborder+=1;
+	      if (SN>border_thresh) nborderorimage+=1;
+	    }
+	}
+      if (nimage>2 && nborderorimage>4) camdata_prefilter->Fill();
+    }
+  camdata_prefilter->AutoSave();
+  cout << "Started with " << nEntries << endl;
+  cout << "Filtered down to  " << camdata_prefilter->GetEntries() << endl;
+  cout << "Written to: "<< outfile_name << endl;
+  newfile->Close();
+}
+
+void eventdisplay_fast(int start=0, int end=-1, bool display=false) {
+    double image_thresh=4.25;
+    double border_thresh=2.25;
+    
+    if (!display) gROOT->SetBatch(kTRUE);
+    
+    // 1. Move canvas creation inside the conditional block
+    TCanvas *c1 = nullptr;
+    if (display) {
+        c1 = new TCanvas("c1", "sequential image display", 1200, 400);
+        c1->Divide(3,1);
+    }
+    
+    long long max_entries = camdata->GetEntries();
+    if (end > max_entries || end < start) end = max_entries;
+    
+    std::ofstream outfile("output.txt");
+    //camdata->GetEntry(1);
+    TH2D *cam_ped_subtracted = cam_ped_subtracted=new TH2D(*cam_2D_hist);
+    TH2D *cam_gain_corrected = cam_gain_corrected=new TH2D(*cam_2D_hist);
+
+    // 2. Reuse histogram objects out of the loop to avoid heavy allocations
+    //TH2D *cam_ped_subtracted = (TH2D*)cam_2d_hist->Clone("cam_ped_subtracted");
+    //TH2D *cam_gain_corrected = (TH2D*)cam_2d_hist->Clone("cam_gain_corrected");
+    
+    cam_ped_subtracted->SetStats(0);
+    cam_gain_corrected->SetStats(0);
+    
+    char mytitle[128]; // Smaller stack allocation
+    
+    // 3. Main Loop
+    for (int i=start; i<end; i++) {
+        camdata->GetEntry(i);
+        
+        // Update titles without recreating objects
+        snprintf(mytitle, sizeof(mytitle), "event %i pedestal subtracted camera", i);
+        cam_ped_subtracted->SetTitle(mytitle);
+        
+        snprintf(mytitle, sizeof(mytitle), "event %i pedestal subtracted and gain corrected camera", i);
+        cam_gain_corrected->SetTitle(mytitle);
+        
+        // 4. Cache multi-dimensional array data to continuous pointers if possible, 
+        // or ensure fast 1D array indexing into ROOT histograms
+        for (int x=0; x<32; x++) {
+            for (int y=0; y<32; y++) {
+                // Pedestal subtraction
+                double ped_sub_val = cam_pix_data[x][y] - ped[x][y];
+                cam_ped_subtracted->SetBinContent(x+1, y+1, ped_sub_val);
+                
+                // Gain correction logic (safeguard division by zero)
+                double current_gain = gain[x][y];
+                if (current_gain <= 0.0) current_gain = 1.0;
+                
+                double gain_corr_val = ped_sub_val * current_gain; 
+                cam_gain_corrected->SetBinContent(x+1, y+1, gain_corr_val);
+                
+                // (Your cleaning logic using image_thresh / border_thresh goes here)
+            }
+        }
+        
+        if (display && c1) {
+            c1->cd(1);
+            cam_ped_subtracted->Draw("colz");
+            c1->Update(); // Force canvas updates if displaying interactively
+        }
+    }
+    
+    // 5. Clean up ROOT objects from memory safely when finished
+    if (!display) {
+        delete cam_ped_subtracted;
+        delete cam_gain_corrected;
+    }
 }
  
 void eventdisplay(int start=0, int end=-1, bool display=false)

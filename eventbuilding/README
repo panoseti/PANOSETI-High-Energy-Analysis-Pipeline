@@ -1,35 +1,110 @@
-% compile the data reader
+% if you haven't already done so, compile the data reader
 source make_pcapreader.sh
 
-% convert pcap data to root
-pcapreader Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng
+I have been unpacking the pcapdata into this directory structure
+20260616/Fern/rawdata/onsky_Fern_20260616_092425.pcapng
 
-% clean out the rate spikes
-root:
-> .L clean_ratespikes.C
-> clean_ratespikes("Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",25);
+% first convert pcap data files to root
+pcapreader onsky_Fern_20260616_092425.pcapng
+I usually do this for all runs in a shell script, and then delete any runs with very few events.
 
-% move the output file to its own directory
-mkdir cleaned
-mv Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.cleaned cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root
+% then merge the four quabos to make camera events for each telescope
+make a list of files to convert:
+ls *.pcapng.root > filelist.dat
 
-% merge the four quabos to make camera events for each telescope
-root:
+% then in root:
 > .L makeevents.C
-> makeevents_timehistomatch("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",12);
-> makeevents_timehistomatch("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",1016);
-> makeevents_timehistomatch("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root",760);
+> ProcessFiles("filelist.dat",1000)
+Fern is 1008; PTI is 1000; Winter is 1012
 
-% calculate the peds and pedvars 
-root: 
-> gROOT->LoadMacro("processcamevents.C");
-> calcPedestals("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.T12");
-> calcPedestals("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.T760");
-> calcPedestals("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root.T1016");
+% then make a list of files to chain together
+ls *.T1000 > filelist.dat
+> .L makechain.C
+> make_chain("filelist.dat","all.root")
 
-% build array events
-root:
-> gROOT->LoadMacro("makearrayevents.C");
-> makearrayevents("cleaned/Pause_Crabph0pe_ima0pe__20241101_100532_796.pcapng.root");
+This will chain all of the runs from the night together into one file (all.root). To get subsets (e.g. preflip or postflip), comment out lines in filelist.dat with a "#", and change the output file name. The rate histogram displayed is useful to help with this - there is usually a time gap when the flip occurred. make_chain will overwrite any previously generated output file, so you can modify the filelist and re-run multiple times until you are sure you have divided the data correctly.
+
+> .L processcamevents.C
+> calcPedestals("1ES1959_preflip.root",1) 
+> calcPedestals("1ES1959_postflip.root",1)
+
+The pedestal files should now be in e.g. 1ES1959_preflip.root.pedvars
+
+> .L gain_from_pedvars.C
+> gain_from_pedvars("1ES1959_preflip.root.pedvars","1ES1959_postflip.root.pedvars", "1ES1959_preflip.root.pedvars.gain")
+> gain_from_pedvars("1ES1959_postflip.root.pedvars","1ES1959_preflip.root.pedvars", "1ES1959_postflip.root.pedvars.gain")
+note that, with the current algorithm, both gain files should be identical (see presentation for details).
+
+You now have a single large root file for preflip and postflip data, with associated pedvars and gain files. I usually clean up the individual pcap files and their products at this stage.
+
+Note that this approach should be OK for data taken under similar conditions - but if the conditions are changing due to e.g. bright Moon or weather, you may need to work with smaller subsets of data. 
+
+Repeat the above process for all three telescopes
+
+The next stage is to find coincident events between the different telescopes in the array.
+
+If the rates are very high (>10 Hz), prefiltering the data makes the subsequent steps more manageable. In the rawdata directory for each telescope do: 
+> .L processcamevents.C
+> prefilter("all.root","all.root.pedvars");
+
+Move up to a higher directory (20260616/ in my example).
+Then:
+
+> .L makearrayevents.C
+> findtimingoffsets("all.root",2,0)
+> findtimingoffsets("all.root",2,1)
+
+if you are using prefiltered data, do:
+
+mkdir prefiltered
+> .L makearrayevents.C
+> findtimingoffsets("prefiltered/all.root",2,0)
+> findtimingoffsets("prefiltered/all.root",2,1)
+
+The goal is to find the relative timing offset between different telescopes (0=PTI, 1=Fern, 2=Winter). So you first have to pick one as the "reference" telescope - I choose Winter (2) in this example. Then you search for matched events between e.g. Winter and PTI.
+Note that you can use the "all.root" files for this, which will allow you to build one timing correction lookup graph that is valid for the whole night, and can then be used by any of the subsets (pre-flip, post-flip, bright-Moon etc).
+
+The output is written to e.g.
+all.root_T1000-T1012.timing
+
+A graph is displayed of the time difference between two telescopes, as a function of time.
+There should be a clearly visible line which shows what the time difference is for coincident cosmic ray events at a given time.
+
+The next step is to analyze this output, in order to fit a smooth graph to the data which can be used to lookup the time correction.
+
+> .L makearrayevents.C
+> analyzetiming("all.root_T1000-T1012.timing")
+without quitting root, you then use this smoothed graph to correct the timing in the data:
+> correcttiming("PTI/rawdata/1ES1959_preflip.root")
+
+---
+If the data have a high rate of noise events, you may need to play with this a bit, even after pre-filtering.
+You can do this by setting upper and lower bounds on the allowed number of events in each bin of the time difference vs time histogram, and on the maximum and minimum allowed time offsets. e.g.:
+
+> analyzetiming("prefiltered/all.root_T1000-T1012.timing",8,50,-0.0004,0.0012)
+> correcttiming("PTI/rawdata/prefiltered/1ES1959_preflip.root")
+---
+
+This produces an output file with corrected times:
+PTI/rawdata/1ES1959_preflip.root.corr
+(or PTI/rawdata/prefiltered/1ES1959_preflip.root.corr)
+
+repeat this step for Fern
+e.g.
+> analyzetiming("prefiltered/all.root_T1008-T1012.timing",8,50,-0.0004,0.0012)
+> correcttiming("Fern/rawdata/prefiltered/1ES1959_preflip.root")
+
+For Winter, the telescope used as timing reference, there are no timing corrections - so simply make a copy of the root file and give it a .corr extension: 
+cp Winter/rawdata/1ES1959_preflip.root Winter/rawdata/1ES1959_preflip.root.corr
+or cp Winter/rawdata/prefiltered/1ES1959_preflip.root Winter/rawdata/prefiltered/1ES1959_preflip.root.corr
+
+You now have 3 files with matching event times, so you can search for coincident events and make an array event file:
+
+in the higher directory (20260616/, in my example), do:
+
+makearrayevents("1ES1959_preflip.root.corr");
+or
+makearrayevents("prefiltered/1ES1959_preflip.root.corr");
+
 
 

@@ -15,3 +15,4 @@ HEAP.egg-info
 *.so
 *.pcm
 eventbuilding/pcapreader
+eventbuilding/.\#README
