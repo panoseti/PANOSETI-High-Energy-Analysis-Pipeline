@@ -111,12 +111,13 @@ def _load_ybsc():
             bv   = float(bv_s) if bv_s else None
 
             ybsc.append({
-                "hr":     hr,
-                "name":   name,
-                "ra_deg": ra,
-                "dec_deg": dec,
-                "vmag":   vmag,
-                "bv":     bv,
+                "hr":       hr,
+                "name":     name,
+                "ra_deg":   ra,
+                "dec_deg":  dec,
+                "coords":   (ra, dec),
+                "vmag":     vmag,
+                "bv":       bv,
             })
 
         except (ValueError, IndexError):

@@ -5,6 +5,82 @@
 import numpy as np
 import math
 
+
+def walk_uphill(x0, y0, image, xgrid=None, ygrid=None):
+    """
+    Walk uphill from an initial point to find a local maximum in an image.
+
+    The search starts at the pixel nearest to ``(x0, y0)`` and then moves to the
+    neighboring pixel with the highest image value, continuing until no higher
+    neighboring value is found.  The returned coordinates are the grid coordinates
+    corresponding to the final pixel.
+
+    Args:
+        x0 (float): Starting X coordinate.
+        y0 (float): Starting Y coordinate.
+        image (array_like): 2D image array.
+        xgrid (array_like, optional): X coordinates of the image columns. If not
+            provided, a linear grid over the pixel indices is used.
+        ygrid (array_like, optional): Y coordinates of the image rows. If not
+            provided, a linear grid over the pixel indices is used.
+
+    Returns:
+        tuple: (x, y, value, ix, iy) where ``x`` and ``y`` are the coordinates of
+        the maximum, ``value`` is the image value at that position, and ``ix``/``iy``
+        are the corresponding pixel indices.
+    """
+    image = np.asarray(image)
+    if image.ndim != 2:
+        raise ValueError("image must be a 2D array")
+
+    ny, nx = image.shape
+
+    if xgrid is None:
+        xgrid = np.linspace(0.0, nx - 1.0, nx)
+    else:
+        xgrid = np.asarray(xgrid, dtype=float)
+        if xgrid.size != nx:
+            raise ValueError("xgrid must have one entry per image column")
+
+    if ygrid is None:
+        ygrid = np.linspace(0.0, ny - 1.0, ny)
+    else:
+        ygrid = np.asarray(ygrid, dtype=float)
+        if ygrid.size != ny:
+            raise ValueError("ygrid must have one entry per image row")
+
+    ix = int(np.argmin(np.abs(xgrid - x0)))
+    iy = int(np.argmin(np.abs(ygrid - y0)))
+
+    current_value = image[iy, ix]
+    current_ix, current_iy = ix, iy
+
+    while True:
+        best_value = current_value
+        best_ix, best_iy = current_ix, current_iy
+
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+
+                nx_ix = current_ix + dx
+                ny_iy = current_iy + dy
+                if 0 <= nx_ix < nx and 0 <= ny_iy < ny:
+                    candidate_value = image[ny_iy, nx_ix]
+                    if candidate_value > best_value:
+                        best_value = candidate_value
+                        best_ix, best_iy = nx_ix, ny_iy
+
+        if best_ix == current_ix and best_iy == current_iy:
+            break
+
+        current_ix, current_iy = best_ix, best_iy
+        current_value = best_value
+
+    return xgrid[current_ix], ygrid[current_iy], current_value, current_ix, current_iy
+
+
 class PointingSolution:
     """
     Represents a pointing solution for translating between sky and image coordinates.
@@ -426,3 +502,4 @@ def get_target_coordinates(name):
         tuple: (RA, Dec) in decimal degrees, or None if not found.
     """
     return OBSERVATION_TARGETS.get(name.lower())
+

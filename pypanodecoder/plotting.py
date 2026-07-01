@@ -363,7 +363,7 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
             scatter_kwargs['zorder'] = zorder
         ax.scatter(x, y, **scatter_kwargs)
         if show_cross:
-            cross_kwargs = {'marker': 'x', 's': 75, 'facecolors': color, 'linewidth': 0.2}
+            cross_kwargs = {'marker': 'x', 's': 75, 'facecolors': color, 'linewidth': 0.3}
             if zorder is not None:
                 cross_kwargs['zorder'] = zorder
             ax.scatter(x, y, **cross_kwargs)
