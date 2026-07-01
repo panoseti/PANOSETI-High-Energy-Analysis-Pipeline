@@ -153,6 +153,99 @@ class RayBundle:
         # Update time: t = t0 + s / speed
         self.t[valid_idx] += s[valid_idx] / speed
 
+    def propagate_to_cone_y(self, m, d, speed=1.0):
+        """
+        Propagate rays forward in time to a cone aligned with the y-axis.
+
+        The cone surface is defined by
+
+            y + d = m * sqrt(x^2 + z^2)
+
+        so m=0 is the plane y + d = 0, matching propagate_to_plane_y(d).
+
+        Args:
+            m: The cone slope in y per radial distance.
+            d: The cone vertex offset; the vertex is at (0, -d, 0).
+            speed: The speed of the rays (default 1.0, e.g., c in vacuum)
+        """
+        if m == 0:
+            self.propagate_to_plane_y(d, speed)
+            return
+
+        x0 = self.pos[:, 0]
+        y0 = self.pos[:, 1] + d
+        z0 = self.pos[:, 2]
+        vx = self.dir[:, 0]
+        vy = self.dir[:, 1]
+        vz = self.dir[:, 2]
+        m2 = m * m
+
+        # Solve (y0 + s*vy)^2 = m^2*((x0 + s*vx)^2 + (z0 + s*vz)^2).
+        a = vy**2 - m2 * (vx**2 + vz**2)
+        b = 2.0 * (y0 * vy - m2 * (x0 * vx + z0 * vz))
+        c = y0**2 - m2 * (x0**2 + z0**2)
+
+        eps = 1e-14
+        tol = 1e-10
+        N = self.pos.shape[0]
+        candidates = np.full((N, 3), np.inf)
+        active = self.valid
+
+        disc = b**2 - 4.0 * a * c
+        quad_idx = active & (np.abs(a) > eps) & (disc >= -tol)
+        if np.any(quad_idx):
+            sqrt_disc = np.sqrt(np.maximum(disc[quad_idx], 0.0))
+            candidates[quad_idx, 0] = (-b[quad_idx] - sqrt_disc) / (2.0 * a[quad_idx])
+            candidates[quad_idx, 1] = (-b[quad_idx] + sqrt_disc) / (2.0 * a[quad_idx])
+
+        linear_idx = active & (np.abs(a) <= eps) & (np.abs(b) > eps)
+        if np.any(linear_idx):
+            candidates[linear_idx, 0] = -c[linear_idx] / b[linear_idx]
+
+        on_surface_idx = (
+            active
+            & (np.abs(a) <= eps)
+            & (np.abs(b) <= eps)
+            & (np.abs(c) <= tol)
+            & (np.abs(y0 - m * np.sqrt(x0**2 + z0**2)) <= tol)
+        )
+        candidates[on_surface_idx, 0] = 0.0
+
+        s = candidates
+        finite_candidates = np.isfinite(s)
+        x = np.full_like(s, np.inf)
+        y = np.full_like(s, np.inf)
+        z = np.full_like(s, np.inf)
+        finite_rows, finite_cols = np.where(finite_candidates)
+        finite_s = s[finite_rows, finite_cols]
+        x[finite_rows, finite_cols] = x0[finite_rows] + finite_s * vx[finite_rows]
+        y[finite_rows, finite_cols] = y0[finite_rows] + finite_s * vy[finite_rows]
+        z[finite_rows, finite_cols] = z0[finite_rows] + finite_s * vz[finite_rows]
+        rho = np.full_like(s, np.inf)
+        residual = np.full_like(s, np.inf)
+        residual_tol = np.full_like(s, np.inf)
+        rho[finite_rows, finite_cols] = np.sqrt(
+            x[finite_rows, finite_cols]**2 + z[finite_rows, finite_cols]**2
+        )
+        residual[finite_rows, finite_cols] = (
+            y[finite_rows, finite_cols] - m * rho[finite_rows, finite_cols]
+        )
+        residual_tol[finite_rows, finite_cols] = tol * (
+            1.0
+            + np.abs(y[finite_rows, finite_cols])
+            + np.abs(m * rho[finite_rows, finite_cols])
+        )
+
+        valid_candidates = finite_candidates & (s >= 0.0) & (np.abs(residual) <= residual_tol)
+        candidates = np.where(valid_candidates, candidates, np.inf)
+        s_hit = np.min(candidates, axis=1)
+
+        hit_idx = active & np.isfinite(s_hit)
+        self.valid[active & ~hit_idx] = False
+
+        self.pos[hit_idx] += s_hit[hit_idx, np.newaxis] * self.dir[hit_idx]
+        self.t[hit_idx] += s_hit[hit_idx] / speed
+
     def scatter_directions(self, sigma_theta):
         """
         Scatters the valid ray directions using a 2D Gaussian profile.
@@ -279,6 +372,38 @@ class RayBundle:
         normal = np.zeros((N, 3))
         normal[:, 1] = 1.0
         
+        self._refract(normal, n1, n2)
+
+    def refract_out_of_lens_cone(self, n1, n2, m):
+        """
+        Refract rays out of the lens at their current position on a cone.
+
+        The cone surface is assumed to be y + d = m * sqrt(x^2 + z^2).
+        The offset d is not needed because it does not affect the surface
+        normal.
+
+        Args:
+            n1: refractive index of current medium
+            n2: refractive index of next medium
+            m: The cone slope in y per radial distance.
+        """
+        N = self.pos.shape[0]
+        normal = np.zeros((N, 3))
+        normal[:, 1] = 1.0
+
+        if m != 0:
+            x = self.pos[:, 0]
+            z = self.pos[:, 2]
+            rho = np.sqrt(x**2 + z**2)
+            non_vertex_idx = rho > 0.0
+
+            normal[non_vertex_idx, 0] = -m * x[non_vertex_idx] / rho[non_vertex_idx]
+            normal[non_vertex_idx, 2] = -m * z[non_vertex_idx] / rho[non_vertex_idx]
+            self.valid[~non_vertex_idx] = False
+
+        norms = np.linalg.norm(normal, axis=1, keepdims=True)
+        normal = normal / norms
+
         self._refract(normal, n1, n2)
 
     def refract_out_of_lens_poly(self, n1, n2, poly_coeffs):
