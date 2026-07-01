@@ -67,6 +67,18 @@ class RayBundle:
             else:
                 self.energy_eV = np.array(energy_eV, dtype=float)
 
+    def _ray_parameter(self, value, name):
+        """
+        Return a scalar or per-ray parameter as an array of shape (N,).
+        """
+        N = self.pos.shape[0]
+        value = np.asarray(value, dtype=float)
+        if value.ndim == 0 or value.size == 1:
+            return np.full(N, value.item(), dtype=float)
+        if value.size != N:
+            raise ValueError(f"{name} must be a scalar or have one value per ray")
+        return value.reshape(N)
+
     @classmethod
     def create_parallel_beam(cls, num_rays, direction, diameter, distance, energy_eV=None):
         """
@@ -164,14 +176,20 @@ class RayBundle:
         so m=0 is the plane y + d = 0, matching propagate_to_plane_y(d).
 
         Args:
-            m: The cone slope in y per radial distance.
-            d: The cone vertex offset; the vertex is at (0, -d, 0).
+            m: The cone slope in y per radial distance. Can be a scalar or
+               one value per ray.
+            d: The cone vertex offset; the vertex is at (0, -d, 0). Can be a
+               scalar or one value per ray.
             speed: The speed of the rays (default 1.0, e.g., c in vacuum)
         """
-        if m == 0:
+        m = self._ray_parameter(m, "m")
+        d = self._ray_parameter(d, "d")
+
+        if np.all(m == 0):
             self.propagate_to_plane_y(d, speed)
             return
 
+        N = self.pos.shape[0]
         x0 = self.pos[:, 0]
         y0 = self.pos[:, 1] + d
         z0 = self.pos[:, 2]
@@ -187,23 +205,31 @@ class RayBundle:
 
         eps = 1e-14
         tol = 1e-10
-        N = self.pos.shape[0]
         candidates = np.full((N, 3), np.inf)
         active = self.valid
 
+        plane_idx = active & (m == 0.0)
+        if np.any(plane_idx):
+            with np.errstate(divide='ignore', invalid='ignore'):
+                s_plane = -y0[plane_idx] / vy[plane_idx]
+            valid_plane = (vy[plane_idx] != 0) & np.isfinite(s_plane) & (s_plane >= 0.0)
+            plane_rows = np.flatnonzero(plane_idx)
+            candidates[plane_rows[valid_plane], 0] = s_plane[valid_plane]
+
         disc = b**2 - 4.0 * a * c
-        quad_idx = active & (np.abs(a) > eps) & (disc >= -tol)
+        cone_idx = active & (m != 0.0)
+        quad_idx = cone_idx & (np.abs(a) > eps) & (disc >= -tol)
         if np.any(quad_idx):
             sqrt_disc = np.sqrt(np.maximum(disc[quad_idx], 0.0))
             candidates[quad_idx, 0] = (-b[quad_idx] - sqrt_disc) / (2.0 * a[quad_idx])
             candidates[quad_idx, 1] = (-b[quad_idx] + sqrt_disc) / (2.0 * a[quad_idx])
 
-        linear_idx = active & (np.abs(a) <= eps) & (np.abs(b) > eps)
+        linear_idx = cone_idx & (np.abs(a) <= eps) & (np.abs(b) > eps)
         if np.any(linear_idx):
             candidates[linear_idx, 0] = -c[linear_idx] / b[linear_idx]
 
         on_surface_idx = (
-            active
+            cone_idx
             & (np.abs(a) <= eps)
             & (np.abs(b) <= eps)
             & (np.abs(c) <= tol)
@@ -228,12 +254,13 @@ class RayBundle:
             x[finite_rows, finite_cols]**2 + z[finite_rows, finite_cols]**2
         )
         residual[finite_rows, finite_cols] = (
-            y[finite_rows, finite_cols] - m * rho[finite_rows, finite_cols]
+            y[finite_rows, finite_cols]
+            - m[finite_rows] * rho[finite_rows, finite_cols]
         )
         residual_tol[finite_rows, finite_cols] = tol * (
             1.0
             + np.abs(y[finite_rows, finite_cols])
-            + np.abs(m * rho[finite_rows, finite_cols])
+            + np.abs(m[finite_rows] * rho[finite_rows, finite_cols])
         )
 
         valid_candidates = finite_candidates & (s >= 0.0) & (np.abs(residual) <= residual_tol)
@@ -385,21 +412,27 @@ class RayBundle:
         Args:
             n1: refractive index of current medium
             n2: refractive index of next medium
-            m: The cone slope in y per radial distance.
+            m: The cone slope in y per radial distance. Can be a scalar or
+               one value per ray.
         """
         N = self.pos.shape[0]
+        m = self._ray_parameter(m, "m")
         normal = np.zeros((N, 3))
         normal[:, 1] = 1.0
 
-        if m != 0:
-            x = self.pos[:, 0]
-            z = self.pos[:, 2]
-            rho = np.sqrt(x**2 + z**2)
-            non_vertex_idx = rho > 0.0
+        x = self.pos[:, 0]
+        z = self.pos[:, 2]
+        rho = np.sqrt(x**2 + z**2)
+        cone_idx = m != 0.0
+        non_vertex_idx = cone_idx & (rho > 0.0)
 
-            normal[non_vertex_idx, 0] = -m * x[non_vertex_idx] / rho[non_vertex_idx]
-            normal[non_vertex_idx, 2] = -m * z[non_vertex_idx] / rho[non_vertex_idx]
-            self.valid[~non_vertex_idx] = False
+        normal[non_vertex_idx, 0] = (
+            -m[non_vertex_idx] * x[non_vertex_idx] / rho[non_vertex_idx]
+        )
+        normal[non_vertex_idx, 2] = (
+            -m[non_vertex_idx] * z[non_vertex_idx] / rho[non_vertex_idx]
+        )
+        self.valid[cone_idx & ~non_vertex_idx] = False
 
         norms = np.linalg.norm(normal, axis=1, keepdims=True)
         normal = normal / norms
@@ -466,22 +499,29 @@ class RayBundle:
         self._refract(normal, n1, n2)
 
 
-def trace_telescope(ray_bundle, n_func, poly_coeffs, aperture_diameter, focal_plane_y, scattering_sigma_theta=0.0):
+def trace_telescope_thin(ray_bundle, n_func, optics, focal_offset=0.0):
     """
-    Traces a bundle of rays through the telescope optics.
+    Traces a bundle of rays through the telescope optics with the thin lens approximation.
     
     Args:
         ray_bundle: RayBundle object containing the rays to trace.
         n_func: A callable that takes an array of photon energies (in eV) and 
                 returns an array or scalar of refractive indices for the lens material.
-        poly_coeffs: Coefficients for the polynomial describing the lens exit surface sag.
-        aperture_diameter: Diameter of the entrance aperture.
-        focal_plane_y: The y-coordinate of the focal plane.
-        scattering_sigma_theta: Roughness scattering angle std dev in radians.
+        optics: An object containing the optical properties of the lens.
+        focal_offset: The offset of the focal plane from the default position.
         
     Returns:
         The updated ray_bundle.
     """
+
+    # 0. Extract optical parameters
+    aperture_diameter = optics["D"]
+    F = optics["F"]
+    focal_plane_y = -(F + focal_offset)
+    poly_coeffs = optics["p_out"]
+    roughness = optics.get("roughness", 0.0)
+    scattering_sigma_theta = roughness / F if F > 0 else 0.0
+
     # 1. Propagate to entrance aperture at y=0
     ray_bundle.propagate_to_y_plane(0.0)
     
@@ -495,6 +535,75 @@ def trace_telescope(ray_bundle, n_func, poly_coeffs, aperture_diameter, focal_pl
     n_lens = n_func(ray_bundle.energy_eV)
     # Refract from air (n=1) into lens (n=n_lens)
     ray_bundle.refract_into_lens_y(1.0, n_lens)
+    
+    # 4. Refract out of lens at polynomial surface
+    # Refract from lens (n=n_lens) into air (n=1)
+    ray_bundle.refract_out_of_lens_poly(n_lens, 1.0, poly_coeffs)
+    
+    # Add surface scattering due to roughness
+    if scattering_sigma_theta > 0:
+        ray_bundle.scatter_directions(scattering_sigma_theta)
+    
+    # 5. Propagate to focal plane
+    ray_bundle.propagate_to_y_plane(focal_plane_y)
+    
+    return ray_bundle
+
+def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
+    """
+    Traces a bundle of rays through the telescope optics with the thick lens approximation.
+    
+    Args:
+        ray_bundle: RayBundle object containing the rays to trace.
+        n_func: A callable that takes an array of photon energies (in eV) and 
+                returns an array or scalar of refractive indices for the lens material.
+        optics: An object containing the optical properties of the lens.
+        focal_offset: The offset of the focal plane from the default position.
+        
+    Returns:
+        The updated ray_bundle.
+    """
+
+    # 0. Extract optical parameters and compute grooves
+    aperture_diameter   = optics["D"]
+    focal_length        = optics["F"]
+    roughness           = optics.get("roughness", 0.0)
+    thickness           = optics["thickness"]
+    groove_width        = optics["groove_width"]
+
+    focal_plane_y = -(focal_length + focal_offset)
+    poly_coeffs = np.flipud(np.array(optics["p_out"]))
+    scattering_sigma_theta = roughness / focal_length
+    groove_thickness = optics["groove_width"]
+
+    poly_derivative_coeffs = np.polyder(poly_coeffs)
+    ngroove = int(np.ceil(aperture_diameter/2/groove_thickness))
+    groove_rho_inner = np.arange(ngroove) * groove_width
+    groove_rho_outer = groove_rho_inner + groove_width
+    groove_rho_mid = (groove_rho_inner + groove_rho_outer)/2
+    groove_m = np.polyval(poly_derivative_coeffs, groove_rho_mid**2) * 2 * groove_rho_mid
+    groove_d = -(groove_m * groove_rho_inner)
+
+    # 1. Propagate to entrance aperture at y=0
+    ray_bundle.propagate_to_y_plane(thickness)
+    
+    # 2. Entrance aperture cut
+    r2 = ray_bundle.pos[:, 0]**2 + ray_bundle.pos[:, 2]**2
+    aperture_mask = r2 > (aperture_diameter / 2.0)**2
+    ray_bundle.valid[aperture_mask] = False
+    
+    # 3. Refract into lens
+    # Calculate refractive index for each ray's energy
+    n_lens = n_func(ray_bundle.energy_eV)
+    # Refract from air (n=1) into lens (n=n_lens)
+    ray_bundle.refract_into_lens_y(1.0, n_lens)
+    
+    # 4. Propagate through the lens thickness to find groove
+    test_ray_bundle = ray_bundle.copy()
+    test_ray_bundle.propagate_to_y_plane(0.0)
+    rho = np.sqrt(test_ray_bundle.pos[:, 0]**2 + test_ray_bundle.pos[:, 2]**2)
+    igroove = int(rho/groove_thickness)
+
     
     # 4. Refract out of lens at polynomial surface
     # Refract from lens (n=n_lens) into air (n=1)
@@ -601,10 +710,6 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=
     """
     optics = datapack["thin_optical_model"]
     D = optics["D"]
-    F = optics["F"]
-    poly_coeffs = optics["p_out"]
-    roughness = optics.get("roughness", 0.0)
-    sigma_theta = roughness / F if F > 0 else 0.0
     
     # Assuming rays travel roughly in -y direction towards the telescope at y=0.
     # To start them before the telescope, we place the generating disk behind the origin 
@@ -630,13 +735,11 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=
     n_func = create_n_interpolator(datapack)
     
     # Focal plane is at y = -(F + focal_offset)
-    traced_bundle = trace_telescope(
+    traced_bundle = trace_telescope_thin(
         ray_bundle=bundle,
         n_func=n_func,
-        poly_coeffs=poly_coeffs,
-        aperture_diameter=D,
-        focal_plane_y=-(F + focal_offset),
-        scattering_sigma_theta=sigma_theta
+        optics=optics,
+        focal_offset=focal_offset
     )
     
     return traced_bundle
