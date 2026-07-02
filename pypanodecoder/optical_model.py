@@ -67,6 +67,51 @@ class RayBundle:
             else:
                 self.energy_eV = np.array(energy_eV, dtype=float)
 
+    def _select_values(self, values, key):
+        """Return a subset of a ray attribute using NumPy-style indexing."""
+        selected = np.asarray(values[key])
+        if values.ndim == 2 and selected.ndim == 1:
+            selected = selected.reshape(1, -1)
+        elif values.ndim == 1 and selected.ndim == 0:
+            selected = selected.reshape(1)
+        return selected
+
+    def __getitem__(self, key):
+        """Return a new RayBundle containing the rays selected by key."""
+        return RayBundle(
+            self._select_values(self.pos, key),
+            self._select_values(self.dir, key),
+            t=self._select_values(self.t, key),
+            valid=self._select_values(self.valid, key),
+            energy_eV=self._select_values(self.energy_eV, key),
+        )
+
+    def __setitem__(self, key, value):
+        """Assign another RayBundle or a subset of one into the selected rays."""
+        if not isinstance(value, RayBundle):
+            raise TypeError("RayBundle assignment requires another RayBundle")
+
+        target_pos = self.pos[key]
+        source_pos = value.pos
+        if np.shape(target_pos) != np.shape(source_pos):
+            raise ValueError("Assigned RayBundle has incompatible shape")
+
+        self.pos[key] = source_pos
+        self.dir[key] = value.dir
+        self.t[key] = value.t
+        self.valid[key] = value.valid
+        self.energy_eV[key] = value.energy_eV
+
+    def copy(self):
+        """Return a copy of the ray bundle with independent arrays."""
+        return RayBundle(
+            self.pos.copy(),
+            self.dir.copy(),
+            t=self.t.copy(),
+            valid=self.valid.copy(),
+            energy_eV=self.energy_eV.copy(),
+        )
+
     def _ray_parameter(self, value, name):
         """
         Return a scalar or per-ray parameter as an array of shape (N,).
@@ -432,7 +477,8 @@ class RayBundle:
         normal[non_vertex_idx, 2] = (
             -m[non_vertex_idx] * z[non_vertex_idx] / rho[non_vertex_idx]
         )
-        self.valid[cone_idx & ~non_vertex_idx] = False
+        # Rays at the vertex (rho=0) to refract along the normal direction (y-axis)
+        # self.valid[cone_idx & ~non_vertex_idx] = False
 
         norms = np.linalg.norm(normal, axis=1, keepdims=True)
         normal = normal / norms
@@ -570,6 +616,7 @@ def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     roughness           = optics.get("roughness", 0.0)
     thickness           = optics["thickness"]
     groove_width        = optics["groove_width"]
+    draft_angle         = max(optics.get("draft_angle", 0.0), 0.0)
 
     focal_plane_y = -(focal_length + focal_offset)
     poly_coeffs = np.flipud(np.array(optics["p_out"]))
@@ -579,10 +626,10 @@ def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     poly_derivative_coeffs = np.polyder(poly_coeffs)
     ngroove = int(np.ceil(aperture_diameter/2/groove_thickness))
     groove_rho_inner = np.arange(ngroove) * groove_width
-    groove_rho_outer = groove_rho_inner + groove_width
-    groove_rho_mid = (groove_rho_inner + groove_rho_outer)/2
+    groove_rho_mid = groove_rho_inner + groove_width/2
     groove_m = np.polyval(poly_derivative_coeffs, groove_rho_mid**2) * 2 * groove_rho_mid
-    groove_d = -(groove_m * groove_rho_inner)
+    groove_d = groove_m * groove_rho_inner
+    groove_rho_outer = groove_rho_inner + groove_width/(1 + groove_m*np.tan(draft_angle))
 
     # 1. Propagate to entrance aperture at y=0
     ray_bundle.propagate_to_y_plane(thickness)
@@ -601,19 +648,36 @@ def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     # 4. Propagate through the lens thickness to find groove
     test_ray_bundle = ray_bundle.copy()
     test_ray_bundle.propagate_to_y_plane(0.0)
-    rho = np.sqrt(test_ray_bundle.pos[:, 0]**2 + test_ray_bundle.pos[:, 2]**2)
-    igroove = int(rho/groove_thickness)
+    rhoexit = np.sqrt(test_ray_bundle.pos[:, 0]**2 + test_ray_bundle.pos[:, 2]**2)
+    igroove = np.minimum(np.floor(rhoexit / groove_thickness).astype(int), ngroove - 1)
 
-    
-    # 4. Refract out of lens at polynomial surface
+    # 5. Propagate to the nominal conical groove surface
+    test_ray_bundle = ray_bundle.copy()
+    test_ray_bundle.propagate_to_cone_y(groove_m[igroove], groove_d[igroove])
+    rhogroove = np.sqrt(test_ray_bundle.pos[:, 0]**2 + test_ray_bundle.pos[:, 2]**2)
+    test_ray_bundle.valid &= (rhogroove >= groove_rho_inner[igroove]) & (rhogroove <= groove_rho_outer[igroove])
+
+    # 6. Test propagation to the previous conical groove surface
+    igroove2 = np.maximum(np.minimum(np.floor(rhoexit / groove_thickness).astype(int) - 1, ngroove - 1), 0)
+    test_ray_bundle2 = ray_bundle.copy()
+    test_ray_bundle2.propagate_to_cone_y(groove_m[igroove2], groove_d[igroove2])
+    rhogroove2 = np.sqrt(test_ray_bundle2.pos[:, 0]**2 + test_ray_bundle2.pos[:, 2]**2)
+    test_ray_bundle2.valid &= (rhogroove2 >= groove_rho_inner[igroove2]) & (rhogroove2 <= groove_rho_outer[igroove2])
+
+    # 7. Merge the two groove tests
+    ray_bundle = test_ray_bundle
+    ray_bundle[test_ray_bundle2.valid] = test_ray_bundle2[test_ray_bundle2.valid]
+    igroove[test_ray_bundle2.valid] = igroove2[test_ray_bundle2.valid]
+
+    # 8. Refract out of lens at conical surface
     # Refract from lens (n=n_lens) into air (n=1)
-    ray_bundle.refract_out_of_lens_poly(n_lens, 1.0, poly_coeffs)
+    ray_bundle.refract_out_of_lens_cone(n_lens, 1.0, groove_m[igroove])
     
     # Add surface scattering due to roughness
     if scattering_sigma_theta > 0:
         ray_bundle.scatter_directions(scattering_sigma_theta)
     
-    # 5. Propagate to focal plane
+    # 9. Propagate to focal plane
     ray_bundle.propagate_to_y_plane(focal_plane_y)
     
     return ray_bundle
