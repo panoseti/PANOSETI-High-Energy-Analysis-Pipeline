@@ -629,7 +629,7 @@ def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     groove_rho_mid = groove_rho_inner + groove_width/2
     groove_m = np.polyval(poly_derivative_coeffs, groove_rho_mid**2) * 2 * groove_rho_mid
     groove_d = groove_m * groove_rho_inner
-    groove_rho_outer = groove_rho_inner + groove_width/(1 + groove_m*np.tan(draft_angle))
+    groove_rho_outer = groove_rho_inner + groove_width/(1 + groove_m*np.tan(np.deg2rad(draft_angle)))
 
     # 1. Propagate to entrance aperture at y=0
     ray_bundle.propagate_to_y_plane(thickness)
@@ -758,7 +758,7 @@ def create_energy_generator(datapack, zn=0):
         
     return generator
 
-def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=0.0, energy_eV=None):
+def trace_parallel_ray_bundle(direction, num_rays, datapack, thick_lens=False, zn=0, focal_offset=0.0, energy_eV=None):
     """
     Generate a bundle of rays and trace them through the telescope.
     
@@ -766,13 +766,14 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=
         direction: The direction of the incoming parallel rays (e.g. [0, -1, 0] for on-axis).
         num_rays: Number of rays to simulate.
         datapack: The loaded optical model data pack.
+        thick_lens: If True, use the thick lens model; otherwise, use the thin lens model.
         zn: Zenith angle in radians for atmospheric absorption.
         focal_offset: Offset added to the nominal focal distance.
         
     Returns:
         The RayBundle object after propagating to the focal plane.
     """
-    optics = datapack["thin_optical_model"]
+    optics = datapack["optical_model"]
     D = optics["D"]
     
     # Assuming rays travel roughly in -y direction towards the telescope at y=0.
@@ -799,17 +800,25 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, zn=0, focal_offset=
     n_func = create_n_interpolator(datapack)
     
     # Focal plane is at y = -(F + focal_offset)
-    traced_bundle = trace_telescope_thin(
-        ray_bundle=bundle,
-        n_func=n_func,
-        optics=optics,
-        focal_offset=focal_offset
-    )
+    if thick_lens:
+        traced_bundle = trace_telescope_thick(
+            ray_bundle=bundle,
+            n_func=n_func,
+            optics=optics,
+            focal_offset=focal_offset
+        )
+    else:
+        traced_bundle = trace_telescope_thin(
+            ray_bundle=bundle,
+            n_func=n_func,
+            optics=optics,
+            focal_offset=focal_offset
+        )
     
     return traced_bundle
 
 
-def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None, zn=0, focal_offset=0.0, energy_eV=None, calc_diameter=False, diameter_quantile=0.80):
+def generate_psf_image(x, y, num_rays, datapack, thick_lens=False, npixel=None, pixel_spacing=None, zn=0, focal_offset=0.0, energy_eV=None, calc_diameter=False, diameter_quantile=0.80):
     """
     Generate a PSF image by tracing a parallel ray bundle through the telescope
     and histogramming the ray positions on the focal plane.
@@ -830,11 +839,12 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
            the centre of the image (can be fractional).
         num_rays: Number of rays to trace.
         datapack: The loaded optical model data pack.
+        thick_lens: If True, use the thick lens model; otherwise, use the thin lens model.
         npixel: Number of pixels on each side of the square output image.  If
-              None, ``datapack["thin_optical_model"]["npixel"]`` is used.
+              None, ``datapack["optical_model"]["npixel"]`` is used.
         pixel_spacing: Physical size of one pixel (same units as the datapack
                   geometry, typically cm).  If None,
-                  ``datapack["thin_optical_model"]["pixel_spacing"]`` is used.
+                  ``datapack["optical_model"]["pixel_spacing"]`` is used.
         zn: Zenith angle in radians for atmospheric absorption (default 0).
         focal_offset: Offset added to the nominal focal distance (default 0).
         energy_eV: If given, a fixed photon energy (eV) for all rays.  If
@@ -860,7 +870,7 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
                   ``diameter_quantile`` of all valid rays on the focal plane
                   (including those outside the image bounds), in pixels.
     """
-    optics = datapack["thin_optical_model"]
+    optics = datapack["optical_model"]
     F = optics["F"]
     focal_length = F + focal_offset
 
@@ -892,6 +902,7 @@ def generate_psf_image(x, y, num_rays, datapack, npixel=None, pixel_spacing=None
         direction=direction,
         num_rays=num_rays,
         datapack=datapack,
+        thick_lens=thick_lens,
         zn=zn,
         focal_offset=focal_offset,
         energy_eV=energy_eV,
