@@ -378,6 +378,73 @@ class RayBundle:
         """
         self.propagate_to_plane_y(-y_target, speed)
 
+    def _normalize_normal(self, normal):
+        """Normalize a surface-normal array of shape (N, 3)."""
+        normal = np.asarray(normal, dtype=float)
+        if normal.ndim == 1:
+            normal = normal.reshape(1, -1)
+
+        norms = np.linalg.norm(normal, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return normal / norms
+
+    def _normal_poly(self, poly_coeffs):
+        """Return the outward unit normal for a polynomial surface y = P(rho^2)."""
+        poly_coeffs = np.asarray(poly_coeffs, dtype=float)
+
+        x = self.pos[:, 0]
+        z = self.pos[:, 2]
+        rho2 = x**2 + z**2
+
+        dp_du = np.zeros_like(rho2)
+        for i in range(1, len(poly_coeffs)):
+            power = i - 1
+            coef = poly_coeffs[i]
+            dp_du += i * coef * (rho2**power)
+
+        normal = np.zeros((self.pos.shape[0], 3), dtype=float)
+        normal[:, 0] = -2.0 * dp_du * x
+        normal[:, 1] = 1.0
+        normal[:, 2] = -2.0 * dp_du * z
+        return self._normalize_normal(normal)
+
+    def _normal_cone(self, m):
+        """Return the outward unit normal for a cone y + d = m * sqrt(x^2 + z^2)."""
+        m = self._ray_parameter(m, "m")
+
+        x = self.pos[:, 0]
+        z = self.pos[:, 2]
+        rho = np.sqrt(x**2 + z**2)
+
+        normal = np.zeros((self.pos.shape[0], 3), dtype=float)
+        normal[:, 1] = 1.0
+
+        cone_idx = m != 0.0
+        non_vertex_idx = cone_idx & (rho > 0.0)
+        normal[non_vertex_idx, 0] = -m[non_vertex_idx] * x[non_vertex_idx] / rho[non_vertex_idx]
+        normal[non_vertex_idx, 2] = -m[non_vertex_idx] * z[non_vertex_idx] / rho[non_vertex_idx]
+        return self._normalize_normal(normal)
+
+    def _reflect(self, normal):
+        """Reflect the ray directions across the given surface normal vectors."""
+        normal = self._normalize_normal(normal)
+        dot = np.sum(self.dir * normal, axis=1)
+        self.dir = self.dir - 2.0 * dot[:, np.newaxis] * normal
+
+    def reflect_in_y_plane(self):
+        """Reflect rays in a plane parallel to the x-z plane."""
+        normal = np.zeros((self.pos.shape[0], 3), dtype=float)
+        normal[:, 1] = 1.0
+        self._reflect(normal)
+
+    def reflect_in_poly(self, poly_coeffs):
+        """Reflect rays in a polynomial surface y = P(rho^2)."""
+        self._reflect(self._normal_poly(poly_coeffs))
+
+    def reflect_in_cone(self, m):
+        """Reflect rays in a cone defined by y + d = m * sqrt(x^2 + z^2)."""
+        self._reflect(self._normal_cone(m))
+
     def _refract(self, normal, n1, n2):
         """
         Helper function to perform vector refraction.
@@ -460,29 +527,7 @@ class RayBundle:
             m: The cone slope in y per radial distance. Can be a scalar or
                one value per ray.
         """
-        N = self.pos.shape[0]
-        m = self._ray_parameter(m, "m")
-        normal = np.zeros((N, 3))
-        normal[:, 1] = 1.0
-
-        x = self.pos[:, 0]
-        z = self.pos[:, 2]
-        rho = np.sqrt(x**2 + z**2)
-        cone_idx = m != 0.0
-        non_vertex_idx = cone_idx & (rho > 0.0)
-
-        normal[non_vertex_idx, 0] = (
-            -m[non_vertex_idx] * x[non_vertex_idx] / rho[non_vertex_idx]
-        )
-        normal[non_vertex_idx, 2] = (
-            -m[non_vertex_idx] * z[non_vertex_idx] / rho[non_vertex_idx]
-        )
-        # Rays at the vertex (rho=0) to refract along the normal direction (y-axis)
-        # self.valid[cone_idx & ~non_vertex_idx] = False
-
-        norms = np.linalg.norm(normal, axis=1, keepdims=True)
-        normal = normal / norms
-
+        normal = self._normal_cone(m)
         self._refract(normal, n1, n2)
 
     def refract_out_of_lens_poly(self, n1, n2, poly_coeffs):
@@ -501,47 +546,7 @@ class RayBundle:
                          The polynomial is assumed to be y = P(rho^2)
         """
         
-        # rho^2 = x^2 + z^2
-        x = self.pos[:, 0]
-        z = self.pos[:, 2]
-        rho2 = x**2 + z**2
-        
-        # The surface is F(x, y, z) = y - P(rho^2) = 0
-        # Gradient of F:
-        # dF/dx = -P'(rho^2) * 2x
-        # dF/dy = 1
-        # dF/dz = -P'(rho^2) * 2z
-        
-        # Calculate P'(rho^2)
-        # P(u) = a0 + a1*u + a2*u^2 + ...
-        # P'(u) = a1 + 2*a2*u + 3*a3*u^2 + ...
-        
-        # Ignore zeroth element by slicing from index 1
-        # Polyval wants coefficients in highest-to-lowest order, 
-        # so we handle evaluation manually for clarity since we have an array of rho2
-        
-        dp_du = np.zeros_like(rho2)
-        
-        for i in range(1, len(poly_coeffs)):
-            power = i - 1
-            coef = poly_coeffs[i]
-            dp_du += i * coef * (rho2 ** power)
-            
-        df_dx = -dp_du * 2 * x
-        df_dy = np.ones_like(rho2)
-        df_dz = -dp_du * 2 * z
-        
-        N = self.pos.shape[0]
-        normal = np.zeros((N, 3))
-        normal[:, 0] = df_dx
-        normal[:, 1] = df_dy
-        normal[:, 2] = df_dz
-        
-        # Normalize the normal vectors
-        norms = np.linalg.norm(normal, axis=1, keepdims=True)
-        # Avoid div by zero (shouldn't happen since df_dy = 1)
-        normal = normal / norms
-        
+        normal = self._normal_poly(poly_coeffs)
         self._refract(normal, n1, n2)
 
 
@@ -561,12 +566,13 @@ def trace_telescope_thin(ray_bundle, n_func, optics, focal_offset=0.0):
     """
 
     # 0. Extract optical parameters
-    aperture_diameter = optics["D"]
-    F = optics["F"]
-    focal_plane_y = -(F + focal_offset)
-    poly_coeffs = optics["p_out"]
-    roughness = optics.get("roughness", 0.0)
-    scattering_sigma_theta = roughness / F if F > 0 else 0.0
+    aperture_diameter       = optics["D"]
+    focal_length            = optics["F"]
+    poly_coeffs             = optics["p_out"]
+    roughness               = optics.get("roughness", 0.0)
+    reflection_probability  = max(optics.get("reflection_probability", 0.0), 0.0)
+    focal_plane_y = -(focal_length + focal_offset)
+    scattering_sigma_theta = roughness / focal_length if focal_length > 0 else 0.0
 
     # 1. Propagate to entrance aperture at y=0
     ray_bundle.propagate_to_y_plane(0.0)
