@@ -1,7 +1,10 @@
 {
-  "thin_optical_model": {
+  "optical_model": {
     "F": 60.78,
     "D": 46.09,
+    "thickness": 0.18,
+    "groove_width": 0.0508,
+    "draft_angle": 3,
     "ev_ref": 2.270772893772894,
     "nm_ref": 546,
     "n_ref": 1.4820583082771652,
