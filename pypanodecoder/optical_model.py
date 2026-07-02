@@ -588,18 +588,43 @@ def trace_telescope_thin(ray_bundle, n_func, optics, focal_offset=0.0):
     # Refract from air (n=1) into lens (n=n_lens)
     ray_bundle.refract_into_lens_y(1.0, n_lens)
     
-    # 4. Refract out of lens at polynomial surface
+    # 4. Reflect some rays due to surface reflection if configured
+    if reflection_probability > 0:
+        eligable_rays = ray_bundle.valid.copy()
+        while True:
+            eligable_rays &= np.random.uniform(0.0, 1.0, len(eligable_rays)) < reflection_probability
+            if not np.any(eligable_rays):
+                break
+            reflect_bundle = ray_bundle[eligable_rays]
+            reflect_bundle.reflect_in_poly(poly_coeffs)
+            reflect_bundle.reflect_in_y_plane()
+            ray_bundle[eligable_rays] = reflect_bundle
+
+    # 5. Refract out of lens at polynomial surface
     # Refract from lens (n=n_lens) into air (n=1)
     ray_bundle.refract_out_of_lens_poly(n_lens, 1.0, poly_coeffs)
     
-    # Add surface scattering due to roughness
+    # 6. Add surface scattering due to roughness
     if scattering_sigma_theta > 0:
         ray_bundle.scatter_directions(scattering_sigma_theta)
     
-    # 5. Propagate to focal plane
+    # 7. Propagate to focal plane
     ray_bundle.propagate_to_y_plane(focal_plane_y)
     
     return ray_bundle
+
+def _groove_configuration(aperture_diameter, groove_width, draft_angle, poly_coeffs):
+    """
+    Compute the groove configuration for the telescope optics.
+    """
+    poly_derivative_coeffs = np.polyder(poly_coeffs)
+    ngroove = int(np.ceil(aperture_diameter/2/groove_width))
+    groove_rho_inner = np.arange(ngroove) * groove_width
+    groove_rho_mid = groove_rho_inner + groove_width/2
+    groove_m = np.polyval(poly_derivative_coeffs, groove_rho_mid**2) * 2 * groove_rho_mid
+    groove_d = groove_m * groove_rho_inner
+    groove_rho_outer = groove_rho_inner + groove_width/(1 + groove_m*np.tan(np.deg2rad(draft_angle)))
+    return ngroove, groove_rho_inner, groove_rho_outer,  groove_m, groove_d
 
 def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     """
@@ -627,15 +652,8 @@ def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     focal_plane_y = -(focal_length + focal_offset)
     poly_coeffs = np.flipud(np.array(optics["p_out"]))
     scattering_sigma_theta = roughness / focal_length
-    groove_thickness = optics["groove_width"]
 
-    poly_derivative_coeffs = np.polyder(poly_coeffs)
-    ngroove = int(np.ceil(aperture_diameter/2/groove_thickness))
-    groove_rho_inner = np.arange(ngroove) * groove_width
-    groove_rho_mid = groove_rho_inner + groove_width/2
-    groove_m = np.polyval(poly_derivative_coeffs, groove_rho_mid**2) * 2 * groove_rho_mid
-    groove_d = groove_m * groove_rho_inner
-    groove_rho_outer = groove_rho_inner + groove_width/(1 + groove_m*np.tan(np.deg2rad(draft_angle)))
+    ngroove, groove_rho_inner, groove_rho_outer,  groove_m, groove_d = _groove_configuration(aperture_diameter, groove_width, draft_angle, poly_coeffs)
 
     # 1. Propagate to entrance aperture at y=0
     ray_bundle.propagate_to_y_plane(thickness)
@@ -655,7 +673,7 @@ def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     test_ray_bundle = ray_bundle.copy()
     test_ray_bundle.propagate_to_y_plane(0.0)
     rhoexit = np.sqrt(test_ray_bundle.pos[:, 0]**2 + test_ray_bundle.pos[:, 2]**2)
-    igroove = np.minimum(np.floor(rhoexit / groove_thickness).astype(int), ngroove - 1)
+    igroove = np.minimum(np.floor(rhoexit / groove_width).astype(int), ngroove - 1)
 
     # 5. Propagate to the nominal conical groove surface
     test_ray_bundle = ray_bundle.copy()
@@ -664,7 +682,7 @@ def trace_telescope_thick(ray_bundle, n_func, optics, focal_offset=0.0):
     test_ray_bundle.valid &= (rhogroove >= groove_rho_inner[igroove]) & (rhogroove <= groove_rho_outer[igroove])
 
     # 6. Test propagation to the previous conical groove surface
-    igroove2 = np.maximum(np.minimum(np.floor(rhoexit / groove_thickness).astype(int) - 1, ngroove - 1), 0)
+    igroove2 = np.maximum(np.minimum(np.floor(rhoexit / groove_width).astype(int) - 1, ngroove - 1), 0)
     test_ray_bundle2 = ray_bundle.copy()
     test_ray_bundle2.propagate_to_cone_y(groove_m[igroove2], groove_d[igroove2])
     rhogroove2 = np.sqrt(test_ray_bundle2.pos[:, 0]**2 + test_ray_bundle2.pos[:, 2]**2)
