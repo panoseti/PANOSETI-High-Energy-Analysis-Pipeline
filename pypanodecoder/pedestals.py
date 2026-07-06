@@ -1190,3 +1190,133 @@ def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwarg
         return gti_images.apply_pedestal_corrections(pcorr)
 
     return images.map_gtis(_correct_gti_images)
+
+def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, loss='huber'):
+    """
+    Estimates the time-dependent location (center) and scale (standard deviation) of the 
+    distribution simultaneously using a robust loss function assuming a spline for location.
+    The scale result is calibrated to be consistent with the standard deviation for a Gaussian.
+
+    Args:
+        camera_images: images (CameraImages): The image container.
+        tknot: maximum time between knots
+        nknot: force number of knots, overriding tknot if not None
+        loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy').
+                    Defaults to 'huber'.
+
+    Returns:
+        tuple: (tknots, locations, scales)
+            tknot (np.ndarray): Time of the knots. Shape: Nknot
+            locations (np.ndarray): The estimated location for each point in the grid. Shape: 32x32xNknot
+            scales (np.ndarray): The estimated scale for each point in the grid. Shape: 32x32
+    """
+    from scipy.optimize import minimize
+    from scipy.interpolate import CubicSpline
+
+    grid_shape = camera_images.images.shape[:-1]
+    num_elements = int(np.prod(grid_shape)) if grid_shape else 1
+
+    # Use seconds for knot spacing calculations to make tknot argument units clear
+    times_s = camera_images.gti_pcap_times / 1e9
+    t_start_s = np.min(times_s)
+    t_end_s = np.max(times_s)
+    if nknot is None:
+        nknot = np.maximum(2, int(np.ceil((t_end_s - t_start_s) / dtknot)))
+    # knot times in seconds (for interpolation); we'll return knots in the input units (ns)
+    tknot_s = np.linspace(t_start_s, t_end_s, nknot)
+
+    # Flatten for iteration
+    flat_images = camera_images.images.reshape(num_elements, -1)
+
+    # Get initial locations and robust guesses for scale
+    mu0_all = np.median(flat_images, axis=-1)
+    s0_all = (np.quantile(flat_images, 0.75, axis=-1) - np.quantile(flat_images, 0.25, axis=-1)) / 1.349
+
+    # Build per-knot initial guesses by taking the median of samples within
+    # a time window around each knot (window = +/- dtknot/2 seconds).
+    mu0_knots = np.full((num_elements, nknot), np.nan)
+    window = float(dtknot) / 2
+    if window <= 0:
+        # fallback to half the average knot spacing
+        total_dur = np.max(1e-12, (t_end_s - t_start_s))
+        window = total_dur / np.max(2.0 * nknot, 1.0)
+
+    # times_s shape = (n_times,)
+    for k in range(nknot):
+        t_k = tknot_s[k]
+        mask_t = (times_s >= (t_k - window)) & (times_s <= (t_k + window))
+        if not np.any(mask_t):
+            continue
+        # flat_images shape = (num_elements, n_time)
+        vals = flat_images[:, mask_t]
+        mu0_knots[:, k] = np.median(vals, axis=-1)
+
+    # Loss functions rho(z) where z = (x - mu) / scale
+    loss_functions = {
+        'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
+        'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
+        'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
+        'linear':  lambda z: 0.5 * z**2
+    }
+
+    # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1)
+    # These constants ensure the estimator is consistent with Gaussian sigma.
+    beta_map = {
+        'huber':   0.6826894921370859, # norm.cdf(1) - norm.cdf(-1)
+        'soft_l1': 0.6808803445892556,
+        'cauchy':  0.4842562477382487,
+        'linear':  1.0
+    }
+
+    if not loss:
+        loss = 'linear'
+
+    if loss not in loss_functions:
+        raise ValueError(f"Unknown loss function for joint estimation: {loss}. "
+                            f"Supported: {list(loss_functions.keys())}")
+
+    rho = loss_functions[loss]
+    beta = beta_map[loss]
+
+    results_mu = np.full((num_elements,nknot), np.nan)
+    results_s = np.full(num_elements, np.nan)
+
+    for i in range(num_elements):
+        s0 = s0_all[i]
+        if np.isnan(s0) or s0 <= 0:
+            continue
+
+        if np.isnan(mu0_all[i]):
+            continue
+        # per-knot initial guesses; fallback to global median where a knot window had no samples
+        mu0_vals = mu0_knots[i].copy()
+        nan_mask = np.isnan(mu0_vals)
+        if np.any(nan_mask):
+            mu0_vals[nan_mask] = mu0_all[i]
+        mu0 = mu0_vals.tolist()
+
+        q = flat_images[i, :]
+        qlen = len(q)
+
+        # The objective function minimizes J(mu, s) = sum(w * rho((c - mu) / s)) + beta * sum(w) * log(s)
+        def objective(params):
+            qknots = params[:-1]
+            s = params[-1]
+            if s <= 0:
+                return np.inf
+            # Interpolate mu at each time point using cubic spline (work in seconds)
+            mu_interp = CubicSpline(tknot_s, qknots)(times_s)
+            return np.sum(rho((q - mu_interp) / s)) + beta * qlen * np.log(s)
+
+        try:
+            res = minimize(objective, x0=[*mu0, s0], bounds=[*[(None, None)]*nknot, (1e-6 * s0, 100 * s0)])
+            results_mu[i, :] = res.x[:-1]
+            results_s[i] = res.x[-1]
+        except Exception:
+            pass
+
+    res_mu = results_mu.reshape(np.append(grid_shape, nknot)) if grid_shape else results_mu[0]
+    res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
+    # Return knot times in the same units as the input times (ns) for backward compatibility
+    tknot_ns = (tknot_s * 1e9)
+    return tknot_ns, res_mu, res_s
