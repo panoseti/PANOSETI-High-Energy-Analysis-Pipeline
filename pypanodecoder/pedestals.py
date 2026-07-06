@@ -1191,132 +1191,202 @@ def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwarg
 
     return images.map_gtis(_correct_gti_images)
 
-def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, loss='huber'):
+def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, loss='huber',
+                                         max_iter=20, tol=1e-6, ridge=1e-8):
     """
-    Estimates the time-dependent location (center) and scale (standard deviation) of the 
+    Estimates the time-dependent location (center) and scale (standard deviation) of the
     distribution simultaneously using a robust loss function assuming a spline for location.
     The scale result is calibrated to be consistent with the standard deviation for a Gaussian.
-
+ 
+    Performance notes vs. the scipy.optimize.minimize version:
+      1. The cubic-spline basis matrix B (mu_interp = B @ knots) depends only on tknot_s and
+         times_s, which are identical for every pixel, so it is built once instead of being
+         reconstructed (as a CubicSpline object) on every objective evaluation of every pixel.
+      2. The per-pixel optimization is solved via Iteratively Reweighted Least Squares (IRLS):
+         each iteration is a weighted linear solve for the knot values (closed form) plus a 1D
+         root-find for the scale, instead of a generic bounded quasi-Newton search with
+         finite-difference gradients over (nknot + 1) parameters.
+ 
+    Caveat: for convex losses (huber, soft_l1, linear) IRLS is a majorize-minimize algorithm
+    and is guaranteed to decrease the same objective monotonically to a stationary point, so
+    results should match the old optimizer to numerical precision. 'cauchy' is a non-convex
+    (redescending) loss, so IRLS and BFGS can in principle converge to different local minima
+    depending on the starting point -- worth spot-checking a subset of pixels against the old
+    implementation before fully switching over, especially for 'cauchy'.
+ 
     Args:
         camera_images: images (CameraImages): The image container.
-        tknot: maximum time between knots
+        dtknot: maximum time between knots
         nknot: force number of knots, overriding tknot if not None
-        loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy').
+        loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'linear').
                     Defaults to 'huber'.
-
+        max_iter (int): maximum number of IRLS iterations per pixel.
+        tol (float): relative convergence tolerance on knot values and scale between
+                     IRLS iterations.
+        ridge (float): small Tikhonov regularization added to the normal equations for
+                       numerical stability (e.g. knots with little/no data nearby).
+ 
     Returns:
         tuple: (tknots, locations, scales)
             tknot (np.ndarray): Time of the knots. Shape: Nknot
             locations (np.ndarray): The estimated location for each point in the grid. Shape: 32x32xNknot
             scales (np.ndarray): The estimated scale for each point in the grid. Shape: 32x32
     """
-    from scipy.optimize import minimize
     from scipy.interpolate import CubicSpline
-
+    from scipy.optimize import brentq
+ 
     grid_shape = camera_images.images.shape[:-1]
     num_elements = int(np.prod(grid_shape)) if grid_shape else 1
-
+ 
     # Use seconds for knot spacing calculations to make tknot argument units clear
     times_s = camera_images.gti_pcap_times / 1e9
     t_start_s = np.min(times_s)
     t_end_s = np.max(times_s)
     if nknot is None:
         nknot = np.maximum(2, int(np.ceil((t_end_s - t_start_s) / dtknot)))
-    # knot times in seconds (for interpolation); we'll return knots in the input units (ns)
     tknot_s = np.linspace(t_start_s, t_end_s, nknot)
-
+ 
     # Flatten for iteration
     flat_images = camera_images.images.reshape(num_elements, -1)
-
+ 
     # Get initial locations and robust guesses for scale
     mu0_all = np.median(flat_images, axis=-1)
     s0_all = (np.quantile(flat_images, 0.75, axis=-1) - np.quantile(flat_images, 0.25, axis=-1)) / 1.349
-
+ 
     # Build per-knot initial guesses by taking the median of samples within
     # a time window around each knot (window = +/- dtknot/2 seconds).
     mu0_knots = np.full((num_elements, nknot), np.nan)
     window = float(dtknot) / 2
     if window <= 0:
-        # fallback to half the average knot spacing
-        total_dur = np.max(1e-12, (t_end_s - t_start_s))
-        window = total_dur / np.max(2.0 * nknot, 1.0)
-
-    # times_s shape = (n_times,)
+        total_dur = max(1e-12, (t_end_s - t_start_s))
+        window = total_dur / max(2.0 * nknot, 1.0)
+ 
     for k in range(nknot):
         t_k = tknot_s[k]
         mask_t = (times_s >= (t_k - window)) & (times_s <= (t_k + window))
         if not np.any(mask_t):
             continue
-        # flat_images shape = (num_elements, n_time)
         vals = flat_images[:, mask_t]
         mu0_knots[:, k] = np.median(vals, axis=-1)
-
-    # Loss functions rho(z) where z = (x - mu) / scale
-    loss_functions = {
-        'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
-        'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
-        'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
-        'linear':  lambda z: 0.5 * z**2
+ 
+    # --- (1) Precompute the spline basis matrix once ---
+    # CubicSpline(tknot_s, knots)(times_s) is linear in `knots` for fixed tknot_s/times_s,
+    # so mu_interp = B @ knots. Build B by evaluating the spline for each unit knot vector,
+    # once total, instead of reconstructing a CubicSpline per pixel per objective call.
+    n_time = times_s.shape[0]
+    B = np.empty((n_time, nknot))
+    for k in range(nknot):
+        e_k = np.zeros(nknot)
+        e_k[k] = 1.0
+        B[:, k] = CubicSpline(tknot_s, e_k)(times_s)
+ 
+    # IRLS weight functions w(z) = psi(z)/z (finite at z=0 for all four losses below).
+    weight_functions = {
+        'huber':   lambda z: np.divide(1.0, np.abs(z), out=np.ones_like(z, dtype=float), where=np.abs(z) > 1.0),
+        'soft_l1': lambda z: 1.0 / np.sqrt(1 + 0.5 * z ** 2),
+        'cauchy':  lambda z: 1.0 / (1 + 0.5 * z ** 2),
+        'linear':  lambda z: np.ones_like(z),
     }
-
-    # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1)
-    # These constants ensure the estimator is consistent with Gaussian sigma.
+    # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1); same values as the
+    # original implementation, since the scale stationarity condition is
+    # sum(psi(z)*z) = beta*qlen, i.e. sum(w(z)*z**2) = beta*qlen.
     beta_map = {
-        'huber':   0.6826894921370859, # norm.cdf(1) - norm.cdf(-1)
+        'huber':   0.6826894921370859,
         'soft_l1': 0.6808803445892556,
         'cauchy':  0.4842562477382487,
-        'linear':  1.0
+        'linear':  1.0,
     }
-
+ 
     if not loss:
         loss = 'linear'
-
-    if loss not in loss_functions:
+    if loss not in weight_functions:
         raise ValueError(f"Unknown loss function for joint estimation: {loss}. "
-                            f"Supported: {list(loss_functions.keys())}")
-
-    rho = loss_functions[loss]
+                          f"Supported: {list(weight_functions.keys())}")
+ 
+    wfun = weight_functions[loss]
     beta = beta_map[loss]
-
-    results_mu = np.full((num_elements,nknot), np.nan)
+    ridge_matrix = ridge * np.eye(nknot)
+ 
+    def solve_scale(r, s_guess, qlen):
+        """Solve sum(w(r/s) * (r/s)**2) == beta * qlen for s (bracket + Brent's method)."""
+        def g(s):
+            z = r / s
+            return np.sum(wfun(z) * z ** 2) - beta * qlen
+ 
+        lo, hi = s_guess * 1e-3, s_guess * 1e3
+        glo, ghi = g(lo), g(hi)
+        tries = 0
+        while glo * ghi > 0 and tries < 12:
+            lo *= 0.1
+            hi *= 10.0
+            glo, ghi = g(lo), g(hi)
+            tries += 1
+        if glo * ghi > 0:
+            # Could not bracket a root (shouldn't normally happen); keep previous estimate.
+            return s_guess
+        return brentq(g, lo, hi, xtol=1e-6 * s_guess, maxiter=100)
+ 
+    def solve_pixel(q, mu0, s0, qlen):
+        knots = np.asarray(mu0, dtype=float)
+        s = s0
+        for _ in range(max_iter):
+            r = q - B @ knots
+            z = r / s
+            w = wfun(z)
+ 
+            A = B.T @ (w[:, None] * B) + ridge_matrix
+            b = B.T @ (w * q)
+            try:
+                knots_new = np.linalg.solve(A, b)
+            except np.linalg.LinAlgError:
+                break
+ 
+            r_new = q - B @ knots_new
+            s_new = solve_scale(r_new, s, qlen)
+ 
+            d_knots = np.max(np.abs(knots_new - knots)) / max(1.0, np.max(np.abs(knots)))
+            d_s = abs(s_new - s) / s
+            knots, s = knots_new, s_new
+            if d_knots < tol and d_s < tol:
+                break
+        return knots, s
+ 
+    results_mu = np.full((num_elements, nknot), np.nan)
     results_s = np.full(num_elements, np.nan)
-
+ 
     for i in range(num_elements):
+        if i%32==0:
+            print(f'{i//32+1:02d}: ',end='')
+        print('#',end='')
+        if i%32==31:
+            print()
+
         s0 = s0_all[i]
         if np.isnan(s0) or s0 <= 0:
             continue
-
         if np.isnan(mu0_all[i]):
             continue
+ 
         # per-knot initial guesses; fallback to global median where a knot window had no samples
         mu0_vals = mu0_knots[i].copy()
         nan_mask = np.isnan(mu0_vals)
         if np.any(nan_mask):
             mu0_vals[nan_mask] = mu0_all[i]
-        mu0 = mu0_vals.tolist()
-
+ 
         q = flat_images[i, :]
         qlen = len(q)
-
-        # The objective function minimizes J(mu, s) = sum(w * rho((c - mu) / s)) + beta * sum(w) * log(s)
-        def objective(params):
-            qknots = params[:-1]
-            s = params[-1]
-            if s <= 0:
-                return np.inf
-            # Interpolate mu at each time point using cubic spline (work in seconds)
-            mu_interp = CubicSpline(tknot_s, qknots)(times_s)
-            return np.sum(rho((q - mu_interp) / s)) + beta * qlen * np.log(s)
-
+ 
         try:
-            res = minimize(objective, x0=[*mu0, s0], bounds=[*[(None, None)]*nknot, (1e-6 * s0, 100 * s0)])
-            results_mu[i, :] = res.x[:-1]
-            results_s[i] = res.x[-1]
-        except Exception:
+            knots, s = solve_pixel(q, mu0_vals, s0, qlen)
+            results_mu[i, :] = knots
+            results_s[i] = s
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             pass
-
+ 
     res_mu = results_mu.reshape(np.append(grid_shape, nknot)) if grid_shape else results_mu[0]
     res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
-    # Return knot times in the same units as the input times (ns) for backward compatibility
     tknot_ns = (tknot_s * 1e9)
     return tknot_ns, res_mu, res_s
+ 
