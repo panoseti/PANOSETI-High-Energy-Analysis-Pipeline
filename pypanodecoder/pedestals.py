@@ -1389,4 +1389,65 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
     res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
     tknot_ns = (tknot_s * 1e9)
     return tknot_ns, res_mu, res_s
- 
+
+def apply_precomputed_spline_pedestal_correction(camera_images, tknot_ns, knots):
+    """
+    Applies a precomputed spline pedestal correction to each pixel's image values.
+
+    Args:
+        camera_images (CameraImages): The image container.
+        tknot_ns (np.ndarray): Time of the knots in nanoseconds.
+        knots (np.ndarray): 3D array of shape (32, 32, Nknot) containing knot values.
+
+    Returns:
+        CameraImages: A new object with adjusted images.
+    """
+    from scipy.interpolate import CubicSpline
+    t_sec = camera_images.gti_pcap_times / 1e9
+    tknot_s = tknot_ns / 1e9
+    
+    cs = CubicSpline(tknot_s, knots, axis=-1)
+    res = cs(t_sec)
+    
+    return CameraImages(
+        images=camera_images.images - res,
+        event_times=camera_images.event_times,
+        pcap_times=camera_images.pcap_times,
+        gti_indexes=camera_images.gti_indexes,
+        gti_pcap_times=camera_images.gti_pcap_times,
+        quabo_masks=camera_images.quabo_masks,
+        gtis=camera_images.gtis,
+        events=camera_images.events,
+        filter=dict(camera_images.filter),
+        source=dict(camera_images.source),
+        quabo_pcap_time=camera_images.quabo_pcap_time,
+        quabo_event_time=camera_images.quabo_event_time
+    )
+
+def apply_spline_pedestal_correction(camera_images, dtknot=600, nknot=None, loss='huber',
+                                     max_iter=20, tol=1e-6, ridge=1e-8):
+    """
+    Calculates a spline pedestal model for each pixel and subtracts it.
+    The fit is performed independently for each GTI.
+
+    Args:
+        camera_images (CameraImages): The image container.
+        dtknot (float): maximum time between knots
+        nknot (int): force number of knots, overriding tknot if not None
+        loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'linear').
+                    Defaults to 'huber'.
+        max_iter (int): maximum number of IRLS iterations per pixel.
+        tol (float): relative convergence tolerance.
+        ridge (float): small Tikhonov regularization.
+
+    Returns:
+        CameraImages: A new container with pedestal-subtracted images.
+    """
+    def _correct_gti_images(gti_images):
+        tknot_ns, locations, scales = calculate_spline_location_and_scale(
+            gti_images, dtknot=dtknot, nknot=nknot, loss=loss,
+            max_iter=max_iter, tol=tol, ridge=ridge
+        )
+        return apply_precomputed_spline_pedestal_correction(gti_images, tknot_ns, locations)
+
+    return camera_images.map_gtis(_correct_gti_images)
