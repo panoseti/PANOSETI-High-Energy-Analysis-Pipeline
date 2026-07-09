@@ -48,9 +48,9 @@ int Ntel;
 
 // Magnetic Declination in Degrees (unrotate CORSIKA i.e. ARRANG)
 // float fMag_Dec = 12.77; // LICK
-//float fMag_Dec = 11.03;// PALOMAR
+float fMag_Dec = 11.03;// PALOMAR
 // float fMag_Dec = 10.4; // FLWO
-float fMag_Dec = 0;
+// float fMag_Dec = 0;
 
 // Reconstructed params
 float fShower_Xoffset = -99999.;
@@ -1474,6 +1474,7 @@ void paramCSV(bool reconstruct=false){
         double* phi = new double[Ntel];
         double* phi_rad = new double[Ntel];
         double* size = new double[Ntel];
+        int* npix = new int[Ntel];
         double* length = new double[Ntel];
         double* width = new double[Ntel];
         double* miss = new double[Ntel];
@@ -1488,6 +1489,7 @@ void paramCSV(bool reconstruct=false){
         for(int i=0; i<Ntel; i++){
             TH2D* image = telEvent(i+1, eventNumber);
             auto params = parameterize(image);
+            npix[i] = countSignalPixels(image);
             image->Delete();
 
             meanx[i] = std::get<0>(params);
@@ -1542,9 +1544,9 @@ void paramCSV(bool reconstruct=false){
         if(!reconstruct){
             // write data to file
             for(int i = 0; i<Ntel; i++){
-                datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
-                    << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << az << "," << ze << "," << xCore 
-                    << "," << yCore << "," << energy << std::endl;   
+                datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << npix[i] << "," << length[i] << "," << width[i] << "," << miss[i]
+                    << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << az << "," << ze << "," << xCore
+                    << "," << yCore << "," << energy << std::endl;
             }
         }else{
             // reconstruction
@@ -1554,19 +1556,19 @@ void paramCSV(bool reconstruct=false){
 
                     // write data to file
                     for(int i = 0; i<Ntel; i++){
-                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
-                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << fShower_Az << "," 
-                            << fShower_Ze << "," << fShower_Xcore << "," << fShower_Ycore << "," << fShower_stdP << "," 
-                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;   
+                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << npix[i] << "," << length[i] << "," << width[i] << "," << miss[i]
+                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << fShower_Az << ","
+                            << fShower_Ze << "," << fShower_Xcore << "," << fShower_Ycore << "," << fShower_stdP << ","
+                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;
                     }
                 }
             }else{
                 // write data to file
                 for(int i = 0; i<Ntel; i++){
-                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
-                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << "nan" << "," 
-                            << "nan" << "," << "nan" << "," << "nan" << "," << "nan" << "," 
-                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;   
+                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << npix[i] << "," << length[i] << "," << width[i] << "," << miss[i]
+                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << "nan" << ","
+                            << "nan" << "," << "nan" << "," << "nan" << "," << "nan" << ","
+                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;
                     }
             }
         }
