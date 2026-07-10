@@ -488,7 +488,7 @@ OBSERVATION_TARGETS = {
     "galactic_center": (266.41683, -29.00781),
     "hessj1837-069":   (279.41500,  -6.95000),
     "1es1959+650":     (299.99938,  65.14851),
-    "mgroj2019+37":    (303.15708,  36.18417),
+    "mgroj2019+37":    (304.646  ,  36.847),
 }
 
 def get_target_coordinates(name):
