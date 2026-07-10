@@ -412,6 +412,9 @@ class CameraImages:
             CameraImages: The concatenated result of applying the functor 
                            to each GTI.
         """
+        if not len(self):
+            return self
+
         results = []
         for gti_idx in self.unique_gti_indexes:
             gti_images = self.filter_gtis(gti_idx)
