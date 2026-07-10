@@ -1192,7 +1192,7 @@ def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwarg
     return images.map_gtis(_correct_gti_images)
 
 def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, loss='huber',
-                                         max_iter=20, tol=1e-6, ridge=1e-8):
+                                         max_iter=20, tol=1e-6, ridge=1e-8, loud=False):
     """
     Estimates the time-dependent location (center) and scale (standard deviation) of the
     distribution simultaneously using a robust loss function assuming a spline for location.
@@ -1245,6 +1245,18 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
     if nknot is None:
         nknot = np.maximum(2, int(np.ceil((t_end_s - t_start_s) / dtknot)))
     tknot_s = np.linspace(t_start_s, t_end_s, nknot)
+
+    if loud:
+        import datetime
+        dtknot_actual = int(np.round((t_end_s - t_start_s) / max(1, nknot - 1)))
+        
+        if camera_images.pcap_times is not None and len(camera_images.pcap_times) > 0:
+            display_t_start_s = np.min(camera_images.pcap_times) / 1e9
+        else:
+            display_t_start_s = t_start_s
+            
+        start_time_str = datetime.datetime.fromtimestamp(display_t_start_s).strftime('%Y-%m-%d %H:%M:%S')
+        prefix = f"{start_time_str} {nknot:3d}*{dtknot_actual:3d}s : "
  
     # Flatten for iteration
     flat_images = camera_images.images.reshape(num_elements, -1)
@@ -1355,11 +1367,11 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
     results_s = np.full(num_elements, np.nan)
  
     for i in range(num_elements):
-        if i%32==0:
-            print(f'{i//32+1:02d}: ',end='')
-        print('#',end='')
-        if i%32==31:
-            print()
+        if loud:
+            r = i // 32
+            c = i % 32
+            hashes = '#' * (r + 1)
+            print(f"\r{prefix}{hashes:<32} (R{r+1:02d}C{c+1:02d})", end='', flush=True)
 
         s0 = s0_all[i]
         if np.isnan(s0) or s0 <= 0:
@@ -1385,15 +1397,19 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
             traceback.print_exc()
             pass
  
+    if loud:
+        hashes = '#' * 32
+        print(f"\r{prefix}{hashes}         ")
+ 
     res_mu = results_mu.reshape(np.append(grid_shape, nknot)) if grid_shape else results_mu[0]
     res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
     tknot_ns = (tknot_s * 1e9)
     return tknot_ns, res_mu, res_s
-
+ 
 def apply_precomputed_spline_pedestal_correction(camera_images, tknot_ns, knots):
     """
     Applies a precomputed spline pedestal correction to each pixel's image values.
-
+ 
     Args:
         camera_images (CameraImages): The image container.
         tknot_ns (np.ndarray): Time of the knots in nanoseconds.
@@ -1425,7 +1441,7 @@ def apply_precomputed_spline_pedestal_correction(camera_images, tknot_ns, knots)
     )
 
 def apply_spline_pedestal_correction(camera_images, dtknot=600, nknot=None, loss='huber',
-                                     max_iter=20, tol=1e-6, ridge=1e-8):
+                                     max_iter=20, tol=1e-6, ridge=1e-8, loud=False):
     """
     Calculates a spline pedestal model for each pixel and subtracts it.
     The fit is performed independently for each GTI.
@@ -1446,7 +1462,7 @@ def apply_spline_pedestal_correction(camera_images, dtknot=600, nknot=None, loss
     def _correct_gti_images(gti_images):
         tknot_ns, locations, scales = calculate_spline_location_and_scale(
             gti_images, dtknot=dtknot, nknot=nknot, loss=loss,
-            max_iter=max_iter, tol=tol, ridge=ridge
+            max_iter=max_iter, tol=tol, ridge=ridge, loud=loud
         )
         return apply_precomputed_spline_pedestal_correction(gti_images, tknot_ns, locations)
 
