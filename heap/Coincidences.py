@@ -8,30 +8,39 @@ import pandas as pd
 from pathlib import Path
 import os
 
-def load_telescope_tv(module_str, base_dir, plotting=True):
+def load_telescope_tv(module_str, base_dir, rate_cut, plotting=True, out_dir=None):
     """
     Reads in all files for one telescope, applies
     read_pff -> cut_pkt_loss_old (tv-timestamps) -> spike_cut
+    base_dir is where the raw .pff files are read from; plots are written under
+    out_dir (defaults to base_dir if not given, e.g. for in-place runs)
+    rate_cut is spike_cut's trigger-rate threshold (Hz) and must be passed explicitly: telescopes
+    with a higher steady-state rate need a higher rate_cut or spike_cut will discard real data as
+    "spikes" (e.g. PTI/Fern vs. Winter).
     Returns combined timestamps and data
     """
+    if out_dir is None:
+        out_dir = base_dir
+
     files = sorted(base_dir.glob(f"*{module_str}*.pff"))
     print(f"{module_str}: {len(files)} files found")
 
     all_timestamps = []
     all_data=[]
-    os.system("mkdir -p "+ f"{base_dir}/{module_str}/")
+    os.system("mkdir -p "+ f"{out_dir}/{module_str}/")
 
     for f in files:
         print(f"  -> {f}")
         data, metadata = pre_cleaning.read_pff(str(f))
         data, timestamps = pre_cleaning.cut_pkt_loss_old(data, metadata)
-        
-        plot_path = f"{base_dir}/{module_str}/"
+
+        plot_path = f"{out_dir}/{module_str}/"
         data_clean, timestamps_clean = pre_cleaning.spike_cut(
             data,
             timestamps,
             plotting=plotting,
-            path=plot_path
+            path=plot_path,
+            rate_cut=rate_cut
         )
 
         all_timestamps.append(timestamps_clean)

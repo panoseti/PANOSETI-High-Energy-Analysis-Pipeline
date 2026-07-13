@@ -1,0 +1,21 @@
+# Config for run_nextday_pipeline.py.
+# Paths are resolved relative to the project root if not absolute.
+
+paths:
+  # Directory containing dated raw-data subfolders, e.g. raw_data_dir/20260116/*.pff
+  raw_data_dir: test_data
+  # Directory where dated report subfolders (plots, manifest.json, index.html) are written.
+  # Can be the same as raw_data_dir (writes in place) or a separate tree, e.g. one that
+  # gets rsync'd to a web-facing server.
+  output_dir: test_data
+
+telescopes:
+  # module number -> telescope name, used to find files and label plots.
+  module_250: PTI
+  module_252: Fern
+  module_253: Winter
+  module_254: Gattini
+
+pipeline:
+  # Telescope other telescopes' timestamps get corrected against.
+  reference: PTI
