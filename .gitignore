@@ -9,6 +9,9 @@
 # python cached files
 *.pyc
 
+# python package files
+*.egg-info
+
 eventbuilding/pcapreader
 __pycache__
-test_data/simulations
+test_data/

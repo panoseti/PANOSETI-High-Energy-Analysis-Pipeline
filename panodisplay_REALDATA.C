@@ -1246,20 +1246,24 @@ TH2D* telEvent(int telNumber, int eventNumber){
 
     double rel_tel_efficiency = 1.0;
     TString label="";
-    switch(telNumber){
-        case 1:
-            label="PTI";
-            rel_tel_efficiency = 0.46; // January 2026 data
-            break;
-        case 2:
-            label="Fern";
-            rel_tel_efficiency = 1.49; // January 2026 data
-            break;
-        case 3:
-            label="Winter";
-            rel_tel_efficiency = 1.0; // January 2026 data
-            break;
-    }
+
+    // uncomment to scale telescope efficiencies wrt one another
+
+    // switch(telNumber){
+    //     case 1:
+    //         label="PTI";
+    //         rel_tel_efficiency = 0.46; // January 2026 data
+    //         break;
+    //     case 2:
+    //         label="Fern";
+    //         rel_tel_efficiency = 1.49; // January 2026 data
+    //         break;
+    //     case 3:
+    //         label="Winter";
+    //         rel_tel_efficiency = 1.0; // January 2026 data
+    //         break;
+    // }
+    
 
     // from Jamie's arraydisplay.C
     t->GetEntry(eventNumber);
