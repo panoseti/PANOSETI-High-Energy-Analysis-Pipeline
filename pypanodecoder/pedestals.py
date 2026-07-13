@@ -9,6 +9,7 @@ import os
 import json
 import glob
 import bisect
+import time
 import numpy as np
 
 from .pcapdecoder import parse_time
@@ -1341,7 +1342,9 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
     def solve_pixel(q, mu0, s0, qlen):
         knots = np.asarray(mu0, dtype=float)
         s = s0
-        for _ in range(max_iter):
+        converged = False
+        niter = 0
+        for iter in range(max_iter):
             r = q - B @ knots
             z = r / s
             w = wfun(z)
@@ -1356,16 +1359,27 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
             r_new = q - B @ knots_new
             s_new = solve_scale(r_new, s, qlen)
  
+            if iter == 0: # or iter >= 2*num_iter//3:
+                s_new = solve_scale(r_new, s, qlen)
+            else:
+                s_step = np.sqrt(np.sum(w * r_new**2) / (beta * qlen))
+                s_new = np.clip(s_step, 0.5 * s, 2.0 * s)
+
             d_knots = np.max(np.abs(knots_new - knots)) / max(1.0, np.max(np.abs(knots)))
             d_s = abs(s_new - s) / s
             knots, s = knots_new, s_new
+            niter += 1
             if d_knots < tol and d_s < tol:
+                converged = True
                 break
-        return knots, s
+        return knots, s, converged, niter
  
     results_mu = np.full((num_elements, nknot), np.nan)
     results_s = np.full(num_elements, np.nan)
  
+    num_pix_converged = 0
+    num_iter = 0
+    start_time = time.monotonic()
     for i in range(num_elements):
         if loud:
             r = i // 32
@@ -1389,17 +1403,21 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
         qlen = len(q)
  
         try:
-            knots, s = solve_pixel(q, mu0_vals, s0, qlen)
+            knots, s, converged, niter = solve_pixel(q, mu0_vals, s0, qlen)
             results_mu[i, :] = knots
             results_s[i] = s
+            if converged:
+                num_pix_converged += 1
+            num_iter += niter
         except Exception as e:
             import traceback
             traceback.print_exc()
             pass
  
     if loud:
+        end_time = time.monotonic()
         hashes = '#' * 32
-        print(f"\r{prefix}{hashes}         ")
+        print(f"\r{prefix}{hashes} (Converged: {num_pix_converged}, Time: {end_time - start_time:.2f}s)", flush=True)
  
     res_mu = results_mu.reshape(np.append(grid_shape, nknot)) if grid_shape else results_mu[0]
     res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
