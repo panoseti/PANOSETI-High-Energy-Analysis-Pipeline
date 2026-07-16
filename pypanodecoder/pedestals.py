@@ -1357,7 +1357,6 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
                 break
  
             r_new = q - B @ knots_new
-            s_new = solve_scale(r_new, s, qlen)
  
             if iter == 0: # or iter >= 2*num_iter//3:
                 s_new = solve_scale(r_new, s, qlen)
