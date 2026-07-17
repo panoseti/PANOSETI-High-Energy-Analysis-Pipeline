@@ -1,0 +1,60 @@
+initing  thread 'net_thread' with databufs 0 and 1
+hashpipe_databuf_create: shared memory key 800000d1 already exists
+
+-----------Start Setup of Input Thread--------------
+-----------Finished Setup of Input Thread------------
+
+inited   thread 'net_thread'
+initing  thread 'compute_thread' with databufs 1 and 2
+hashpipe_databuf_create: shared memory key 800000d1 already existshashpipe_databuf_create: shared memory key 800000d2 already exists
+
+-----------Start Setup of Compute Thread--------------
+Config Location: ./module.config
+Group frames is 1 (True). Hashpipe will group incoming PH frames.
+Created Module (Image mode): 3.232-235
+Created Module (Pulse-height): 3.232-235
+-----------Finished Setup of Compute Thread-----------
+
+inited   thread 'compute_thread'
+initing  thread 'output_thread' with databufs 2 and 3
+hashpipe_databuf_create: shared memory key 800000d2 already exists
+
+-----------Start Setup of Output Thread--------------
+Run directory: obs_Palomar.start_2026-07-09T08:35:09Z.runtype_obs-test.pffd
+Config Location: ./module.config
+Max file size is 100 megabytes
+
+---------------SETTING UP DATA File------------------
+Created file module_250/obs_Palomar.start_2026-07-09T08:35:09Z.runtype_obs-test.pffd//start_2026-07-09T08:35:54Z.dp_img16.bpp_2.module_250.seqno_0.pff
+Created file module_250/obs_Palomar.start_2026-07-09T08:35:09Z.runtype_obs-test.pffd//start_2026-07-09T08:35:54Z.dp_img8.bpp_1.module_250.seqno_0.pff
+Created file module_250/obs_Palomar.start_2026-07-09T08:35:09Z.runtype_obs-test.pffd//start_2026-07-09T08:35:54Z.dp_ph256.bpp_2.module_250.seqno_0.pff
+Created file module_250/obs_Palomar.start_2026-07-09T08:35:09Z.runtype_obs-test.pffd//start_2026-07-09T08:35:54Z.dp_ph1024.bpp_2.module_250.seqno_0.pff
+Created Data file for Module 250
+Use Ctrl+\ to create a new file and Ctrl+c to close program
+-----------Finished Setup of Output Thread-----------
+
+inited   thread 'output_thread'
+starting thread 'output_thread' with databufs 2 and 3
+---------------Running Output Thread-----------------
+
+starting thread 'compute_thread' with databufs 1 and 2
+
+---------------Running Compute Thread-----------------
+
+starting thread 'net_thread' with databufs 0 and 1
+
+---------------Running Input Thread-----------------
+
+New Quabo Detected ID:3.232
+New Quabo Detected ID:3.233
+New Quabo Detected ID:3.234
+New Quabo Detected ID:3.235
+NET_THREAD Ended
+COMPUTE_THREAD Ended
+Returned Compute_thread
+OUTPUT_THREAD Ended
+Returned Output_thread
+Returned Net_thread
+Joined thread 'output_thread'
+Joined thread 'compute_thread'
+Joined thread 'net_thread'

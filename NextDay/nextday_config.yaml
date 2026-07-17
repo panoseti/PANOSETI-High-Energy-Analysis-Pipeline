@@ -11,11 +11,11 @@ paths:
 
 telescopes:
   # module number -> telescope name, used to find files and label plots.
-  module_250: PTI
+  module_250: Heli
   module_252: Fern
   module_253: Winter
   module_254: Gattini
 
 pipeline:
   # Telescope other telescopes' timestamps get corrected against.
-  reference: PTI
+  reference: Winter

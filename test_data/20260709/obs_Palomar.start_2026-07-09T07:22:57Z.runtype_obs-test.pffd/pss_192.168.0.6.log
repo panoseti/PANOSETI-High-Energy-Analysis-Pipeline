@@ -1,0 +1,16 @@
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+panoseti  528284  0.0  0.0  20936 12060 ?        Ss   May07   0:00 /usr/lib/systemd/systemd --user --deserialize=24
+panoseti  528285  0.0  0.0  21192  3328 ?        S    May07   0:00 (sd-pam)
+panoseti  528303  0.0  0.0 244472 13008 ?        Ssl  May07   0:01 /usr/bin/pulseaudio --daemonize=no --log-target=journal
+panoseti  528339  0.0  0.0   9448  5120 ?        Ss   May07   0:00 /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+panoseti  528378  0.0  0.0  15128  5632 ?        S    May07   0:00 sshd: panoseti@pts/4
+panoseti  528379  0.0  0.0  12084  9076 pts/4    Ss+  May07   0:00 -bash
+panoseti 2877795  0.0  0.0   7340  3696 ?        Ss   Jul04   0:00 /bin/bash /home/panoseti/panoseti_grpc/scripts/start_grpc.sh
+panoseti 2877919  0.0  0.2 1727116 96764 ?       Sl   Jul04   5:15 python -m daq_data.server
+panoseti 2998218  0.0  0.0   8428  2492 ?        Ss   Jul08   0:00 SCREEN -dmS gnss_agent bash -c set -o pipefail; /home/panoseti/miniconda3/envs/pygnss_312/bin/python -u /home/panoseti/U-Blox_F9T_Config/agent_v1.py --cast_addr 10.200.146.1:50054 --ctrl_addr 10.200.146.1:50054 --log-dir /home/panoseti/gnss_logging --telem-dir /home/panoseti/gnss_telem -v 2 2>&1 | TZ=UTC awk '{ print strftime("%Y-%m-%dT%H:%M:%SZ"), $0; fflush(); }' >> /home/panoseti/gnss_logging/gnss_agent_20260709_063939Z.log
+panoseti 2998220  0.0  0.0   7340  3704 pts/9    Ss+  Jul08   0:00 bash -c set -o pipefail; /home/panoseti/miniconda3/envs/pygnss_312/bin/python -u /home/panoseti/U-Blox_F9T_Config/agent_v1.py --cast_addr 10.200.146.1:50054 --ctrl_addr 10.200.146.1:50054 --log-dir /home/panoseti/gnss_logging --telem-dir /home/panoseti/gnss_telem -v 2 2>&1 | TZ=UTC awk '{ print strftime("%Y-%m-%dT%H:%M:%SZ"), $0; fflush(); }' >> /home/panoseti/gnss_logging/gnss_agent_20260709_063939Z.log
+panoseti 2998221  6.1  0.1 1316944 45884 pts/9   Sl+  Jul08   2:38 /home/panoseti/miniconda3/envs/pygnss_312/bin/python -u /home/panoseti/U-Blox_F9T_Config/agent_v1.py --cast_addr 10.200.146.1:50054 --ctrl_addr 10.200.146.1:50054 --log-dir /home/panoseti/gnss_logging --telem-dir /home/panoseti/gnss_telem -v 2
+panoseti 2998222  0.0  0.0   9216  4104 pts/9    S+   Jul08   0:00 awk { print strftime("%Y-%m-%dT%H:%M:%SZ"), $0; fflush(); }
+panoseti 2999192  0.0  0.0  15000  7164 ?        S    00:22   0:00 sshd: panoseti@notty
+panoseti 2999193  0.0  0.0   7340  3728 ?        Ss   00:22   0:00 bash -c mkdir /mnt/panoseti/obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd;mkdir -p /mnt/panoseti/module_253/obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd;cd /mnt/panoseti/obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd; ps -ux > pss_192.168.0.6.log
+panoseti 2999196  0.0  0.0  12532  5472 ?        R    00:22   0:00 ps -ux

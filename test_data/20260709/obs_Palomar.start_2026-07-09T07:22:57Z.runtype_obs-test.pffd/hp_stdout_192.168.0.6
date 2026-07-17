@@ -1,0 +1,84 @@
+initing  thread 'net_thread' with databufs 0 and 1
+hashpipe_databuf_create: shared memory key 8000000c already exists
+
+-----------Start Setup of Input Thread--------------
+-----------Finished Setup of Input Thread------------
+
+inited   thread 'net_thread'
+initing  thread 'compute_thread' with databufs 1 and 2
+hashpipe_databuf_create: shared memory key 8000000c already existshashpipe_databuf_create: shared memory key 8000000d already exists
+
+-----------Start Setup of Compute Thread--------------
+Config Location: ./module.config
+Group frames is 1 (True). Hashpipe will group incoming PH frames.
+Created Module (Image mode): 3.244-247
+Created Module (Pulse-height): 3.244-247
+-----------Finished Setup of Compute Thread-----------
+
+inited   thread 'compute_thread'
+initing  thread 'output_thread' with databufs 2 and 3
+hashpipe_databuf_create: shared memory key 8000000d already exists
+
+-----------Start Setup of Output Thread--------------
+Run directory: obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd
+Config Location: ./module.config
+Max file size is 100 megabytes
+
+---------------SETTING UP DATA File------------------
+Created file module_253/obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd//start_2026-07-09T07:23:42Z.dp_img16.bpp_2.module_253.seqno_0.pff
+Created file module_253/obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd//start_2026-07-09T07:23:42Z.dp_img8.bpp_1.module_253.seqno_0.pff
+Created file module_253/obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd//start_2026-07-09T07:23:42Z.dp_ph256.bpp_2.module_253.seqno_0.pff
+Created file module_253/obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd//start_2026-07-09T07:23:42Z.dp_ph1024.bpp_2.module_253.seqno_0.pff
+Created Data file for Module 253
+Use Ctrl+\ to create a new file and Ctrl+c to close program
+-----------Finished Setup of Output Thread-----------
+
+inited   thread 'output_thread'
+starting thread 'output_thread' with databufs 2 and 3
+---------------Running Output Thread-----------------
+
+starting thread 'compute_thread' with databufs 1 and 2
+
+---------------Running Compute Thread-----------------
+
+starting thread 'net_thread' with databufs 0 and 1
+
+---------------Running Input Thread-----------------
+
+New Quabo Detected ID:3.244
+New Quabo Detected ID:3.245
+New Quabo Detected ID:3.246
+New Quabo Detected ID:3.247
+Wrote partial PH1024 image:
+group_ph_frames = 1
+mod_num = 253
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+acq_mode = 1 pkt_num = 1275 mod_num = 253 quabo_num = 2 pkt_tai = 158 pkt_nsec = 80272282 tv_sec = 1783582665 tv_sec = 621703
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+
+Wrote partial PH1024 image:
+group_ph_frames = 1
+mod_num = 253
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+acq_mode = 1 pkt_num = 3431 mod_num = 253 quabo_num = 2 pkt_tai = 504 pkt_nsec = 878385997 tv_sec = 1783584036 tv_sec = 420838
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+
+NET_THREAD Ended
+Wrote partial PH1024 image:
+group_ph_frames = 1
+mod_num = 253
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+acq_mode = 0 pkt_num = 0 mod_num = 0 quabo_num = 0 pkt_tai = 0 pkt_nsec = 0 tv_sec = 0 tv_sec = 0
+acq_mode = 1 pkt_num = 5874 mod_num = 253 quabo_num = 2 pkt_tai = 999 pkt_nsec = 80446257 tv_sec = 1783585554 tv_sec = 622878
+acq_mode = 1 pkt_num = 5872 mod_num = 253 quabo_num = 3 pkt_tai = 999 pkt_nsec = 80446248 tv_sec = 1783585554 tv_sec = 622879
+
+COMPUTE_THREAD Ended
+Returned Compute_thread
+OUTPUT_THREAD Ended
+Returned Output_thread
+Returned Net_thread
+Joined thread 'output_thread'
+Joined thread 'compute_thread'
+Joined thread 'net_thread'

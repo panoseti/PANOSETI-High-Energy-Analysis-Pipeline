@@ -36,6 +36,7 @@ import html
 import json
 import re
 import sys
+import matplotlib.pyplot as plt
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,7 +45,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = Path(__file__).resolve().parent / "nextday_config.yaml"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from heap import Coincidences as coinc
+from heap import coincidences as coinc
 
 
 def resolve(path_str):
@@ -73,6 +74,14 @@ def discover_runs(raw_dir):
     chronologically (their names sort lexicographically since they're timestamps).
     """
     return sorted(p for p in raw_dir.iterdir() if p.is_dir())
+
+
+def save_plot(path):
+    """Saves the current matplotlib figure to path (creating parent dirs) and closes it.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(path, dpi=300)
+    plt.close()
 
 
 def plot_entry(path, plot_type, telescopes, date_out_dir):
@@ -106,9 +115,11 @@ def load_all_telescopes(telescope_map, raw_dir, run_out_dir, date_out_dir, manif
         if not sorted(raw_dir.glob(f"*{module_pattern}*.pff")):
             print(f"Skipping {name} ({module}): no {DATA_PRODUCT} .pff files found in {raw_dir}")
             continue
-        data, timestamps = coinc.load_telescope_tv(module_pattern, raw_dir, plotting=True, out_dir=run_out_dir)
+        data, timestamps = coinc.load_telescope_tv(module_pattern, raw_dir, plotting=True)
         telescopes[name] = (data, timestamps)
-        entry = plot_entry(run_out_dir / module_pattern / "spike_cut.png", "spike_cut", [name], date_out_dir)
+        spike_cut_path = run_out_dir / module_pattern / "spike_cut.png"
+        save_plot(spike_cut_path)
+        entry = plot_entry(spike_cut_path, "spike_cut", [name], date_out_dir)
         if entry:
             manifest["plots"].append(entry)
     return telescopes
@@ -130,16 +141,20 @@ def process_pairs(telescopes, reference, run_out_dir, date_out_dir, manifest):
         pair_dir = run_out_dir / "pairs" / pair_name
         pair_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamps_corr = coinc.correct_time(timestamps, ref_timestamps, plot_name=pair_name, base_dir=pair_dir)
+        timestamps_corr = coinc.correct_time(timestamps, ref_timestamps, plot_name=pair_name, base_dir=pair_dir, plotting=True)
         corrected[name] = timestamps_corr
-        entry = plot_entry(pair_dir / f"{pair_name}_dt_corr.png", "timing_offset_correction", [reference, name], date_out_dir)
+        dt_corr_path = pair_dir / f"{pair_name}_dt_corr.png"
+        save_plot(dt_corr_path)
+        entry = plot_entry(dt_corr_path, "timing_offset_correction", [reference, name], date_out_dir)
         if entry:
             manifest["plots"].append(entry)
 
         time_coinc, _, _, _ = coinc.match_coinc(timestamps_corr, data, ref_timestamps, ref_data)
         if len(time_coinc):
-            coinc.coinc_rate(time_coinc, pair_name, pair_dir, bin_width=300)
-            entry = plot_entry(pair_dir / f"{pair_name}_coinc_rate.png", "coincidence_rate", [reference, name], date_out_dir)
+            coinc.coinc_rate(time_coinc, pair_name, pair_dir, bin_width=300, plotting=True)
+            coinc_rate_path = pair_dir / f"{pair_name}_coinc_rate.png"
+            save_plot(coinc_rate_path)
+            entry = plot_entry(coinc_rate_path, "coincidence_rate", [reference, name], date_out_dir)
             if entry:
                 manifest["plots"].append(entry)
 
@@ -170,8 +185,10 @@ def process_triples(telescopes, corrected, reference, run_out_dir, date_out_dir,
                 continue
 
             if len(time_coinc_ref):
-                coinc.coinc_rate(time_coinc_ref, triple_name, triple_dir, bin_width=600)
-                entry = plot_entry(triple_dir / f"{triple_name}_coinc_rate.png", "triple_coincidence_rate", [reference, a, b], date_out_dir)
+                coinc.coinc_rate(time_coinc_ref, triple_name, triple_dir, bin_width=600, plotting=True)
+                triple_coinc_rate_path = triple_dir / f"{triple_name}_coinc_rate.png"
+                save_plot(triple_coinc_rate_path)
+                entry = plot_entry(triple_coinc_rate_path, "triple_coincidence_rate", [reference, a, b], date_out_dir)
                 if entry:
                     manifest["plots"].append(entry)
 
