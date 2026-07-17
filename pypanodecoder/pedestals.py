@@ -1422,7 +1422,346 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
     res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
     tknot_ns = (tknot_s * 1e9)
     return tknot_ns, res_mu, res_s
- 
+
+def calculate_spline_location_and_scale_batch(camera_images, dtknot=600, nknot=None, loss='huber',
+                                         max_iter=20, tol=1e-6, ridge=1e-8, loud=False, profile=False):
+    """
+    Estimates the time-dependent location (center) and scale (standard deviation) of the
+    distribution simultaneously using a robust loss function assuming a spline for location.
+    The scale result is calibrated to be consistent with the standard deviation for a Gaussian.
+
+    Performance notes vs. the scipy.optimize.minimize version:
+      1. The cubic-spline basis matrix B (mu_interp = B @ knots) depends only on tknot_s and
+         times_s, which are identical for every pixel, so it is built once instead of being
+         reconstructed (as a CubicSpline object) on every objective evaluation of every pixel.
+      2. The per-pixel optimization is solved via Iteratively Reweighted Least Squares (IRLS):
+         each iteration is a weighted linear solve for the knot values (closed form) plus a 1D
+         root-find for the scale, instead of a generic bounded quasi-Newton search with
+         finite-difference gradients over (nknot + 1) parameters.
+      3. All pixels are solved *simultaneously* rather than in a per-pixel Python loop:
+         - The knot normal-equations (A, b) are built with two batched GEMMs using a
+           precomputed pairwise-basis tensor G = einsum('ti,tj->tij', B, B), and solved with
+           a single batched np.linalg.solve call instead of ~num_elements small (nknot,nknot)
+           solves.
+         - The scale root-find (previously a per-pixel scipy.optimize.brentq call) is replaced
+           with a vectorized bisection over all active pixels at once. Bisection needs more
+           iterations than Brent's method for the same tolerance, but collapsing ~1e6 tiny
+           scalar calls (brentq's internal per-pixel evaluations) into ~60 calls on full-size
+           arrays is a large net win at these array sizes. If the scale solve is later shown
+           (via profiling) to dominate wall-clock, replacing bisection with a vectorized
+           Illinois-modified regula falsi would cut ~60 iterations down to ~15-20.
+         - Pixels are dropped out of the active set as soon as they converge, so later
+           iterations only pay for pixels that still need work.
+
+    Caveat: for convex losses (huber, soft_l1, linear) IRLS is a majorize-minimize algorithm
+    and is guaranteed to decrease the same objective monotonically to a stationary point, so
+    results should match the old optimizer to numerical precision. 'cauchy' is a non-convex
+    (redescending) loss, so IRLS and BFGS can in principle converge to different local minima
+    depending on the starting point -- worth spot-checking a subset of pixels against the old
+    implementation before fully switching over, especially for 'cauchy'.
+
+    Args:
+        camera_images: images (CameraImages): The image container.
+        dtknot: maximum time between knots
+        nknot: force number of knots, overriding tknot if not None
+        loss (str): The loss function to use ('huber', 'soft_l1', 'cauchy', 'linear').
+                    Defaults to 'huber'.
+        max_iter (int): maximum number of IRLS iterations per pixel.
+        tol (float): relative convergence tolerance on knot values and scale between
+                     IRLS iterations.
+        ridge (float): small Tikhonov regularization added to the normal equations for
+                       numerical stability (e.g. knots with little/no data nearby).
+
+    Returns:
+        tuple: (tknots, locations, scales)
+            tknot (np.ndarray): Time of the knots. Shape: Nknot
+            locations (np.ndarray): The estimated location for each point in the grid. Shape: 32x32xNknot
+            scales (np.ndarray): The estimated scale for each point in the grid. Shape: 32x32
+    """
+    from scipy.interpolate import CubicSpline
+
+    grid_shape = camera_images.images.shape[:-1]
+    num_elements = int(np.prod(grid_shape)) if grid_shape else 1
+
+    # Use seconds for knot spacing calculations to make tknot argument units clear
+    times_s = camera_images.gti_pcap_times / 1e9
+    t_start_s = np.min(times_s)
+    t_end_s = np.max(times_s)
+    if nknot is None:
+        nknot = np.maximum(2, int(np.ceil((t_end_s - t_start_s) / dtknot)))
+    tknot_s = np.linspace(t_start_s, t_end_s, nknot)
+
+    if loud:
+        import datetime
+        dtknot_actual = int(np.round((t_end_s - t_start_s) / max(1, nknot - 1)))
+
+        if camera_images.pcap_times is not None and len(camera_images.pcap_times) > 0:
+            display_t_start_s = np.min(camera_images.pcap_times) / 1e9
+        else:
+            display_t_start_s = t_start_s
+
+        start_time_str = datetime.datetime.fromtimestamp(display_t_start_s).strftime('%Y-%m-%d %H:%M:%S')
+        prefix = f"{start_time_str} {nknot:3d}*{dtknot_actual:3d}s : "
+
+    # Flatten for iteration
+    flat_images = camera_images.images.reshape(num_elements, -1)
+    n_time = flat_images.shape[1]
+
+    # Get initial locations and robust guesses for scale
+    mu0_all = np.median(flat_images, axis=-1)
+    s0_all = (np.quantile(flat_images, 0.75, axis=-1) - np.quantile(flat_images, 0.25, axis=-1)) / 1.349
+
+    # Build per-knot initial guesses by taking the median of samples within
+    # a time window around each knot (window = +/- dtknot/2 seconds).
+    mu0_knots = np.full((num_elements, nknot), np.nan)
+    window = float(dtknot) / 2
+    if window <= 0:
+        total_dur = max(1e-12, (t_end_s - t_start_s))
+        window = total_dur / max(2.0 * nknot, 1.0)
+
+    for k in range(nknot):
+        t_k = tknot_s[k]
+        mask_t = (times_s >= (t_k - window)) & (times_s <= (t_k + window))
+        if not np.any(mask_t):
+            continue
+        vals = flat_images[:, mask_t]
+        mu0_knots[:, k] = np.median(vals, axis=-1)
+
+    # Fill any knot windows that had no samples with the pixel's global median.
+    nan_mask = np.isnan(mu0_knots)
+    mu0_knots = np.where(nan_mask, mu0_all[:, None], mu0_knots)
+
+    # --- Precompute the spline basis matrix once ---
+    # CubicSpline(tknot_s, knots)(times_s) is linear in `knots` for fixed tknot_s/times_s,
+    # so mu_interp = B @ knots. Build B by evaluating the spline for each unit knot vector,
+    # once total, instead of reconstructing a CubicSpline per pixel per objective call.
+    B = np.empty((n_time, nknot))
+    for k in range(nknot):
+        e_k = np.zeros(nknot)
+        e_k[k] = 1.0
+        B[:, k] = CubicSpline(tknot_s, e_k)(times_s)
+
+    # Pairwise basis products, precomputed once. For a batch of pixels with IRLS weights
+    # W (shape P x T), the weighted normal-equation matrices for every pixel in the batch
+    # are obtained with a single GEMM: (W @ G).reshape(P, K, K) == B.T @ diag(w_p) @ B per row.
+    G = np.einsum('ti,tj->tij', B, B).reshape(n_time, nknot * nknot)
+
+    # IRLS weight functions w(z) = psi(z)/z (finite at z=0 for all four losses below).
+    weight_functions = {
+        'huber':   lambda z: np.divide(1.0, np.abs(z), out=np.ones_like(z, dtype=float), where=np.abs(z) > 1.0),
+        'soft_l1': lambda z: 1.0 / np.sqrt(1 + 0.5 * z ** 2),
+        'cauchy':  lambda z: 1.0 / (1 + 0.5 * z ** 2),
+        'linear':  lambda z: np.ones_like(z),
+    }
+    # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1); same values as the
+    # original implementation, since the scale stationarity condition is
+    # sum(psi(z)*z) = beta*qlen, i.e. sum(w(z)*z**2) = beta*qlen.
+    beta_map = {
+        'huber':   0.6826894921370859,
+        'soft_l1': 0.6808803445892556,
+        'cauchy':  0.4842562477382487,
+        'linear':  1.0,
+    }
+
+    if not loss:
+        loss = 'linear'
+    if loss not in weight_functions:
+        raise ValueError(f"Unknown loss function for joint estimation: {loss}. "
+                          f"Supported: {list(weight_functions.keys())}")
+
+    wfun = weight_functions[loss]
+    beta = beta_map[loss]
+    ridge_matrix = ridge * np.eye(nknot)
+    qlen = float(n_time)  # every pixel shares the same number of time samples
+
+    def solve_scale_batched(R, s_guess, n_bisect=32, xtol_rel=1e-6):
+        """
+        Vectorized version of the original per-pixel brentq root-find:
+            sum(w(r/s) * (r/s)**2) == beta * qlen  for s
+        solved simultaneously for every row of R via bracket expansion + bisection.
+        R: (P, T) residuals. s_guess: (P,) previous/initial scale estimate.
+        Returns s: (P,) new scale estimate.
+
+        This is the single most expensive call in the whole solve (it runs once, over the
+        full active batch, on the first IRLS iteration), since each iteration evaluates
+        wfun(z)*z**2 over the entire (P, T) residual array. The bracket spans 1e-3*s_guess
+        to 1e3*s_guess, so matching brentq's old xtol=1e-6*s_guess needs log2(1e6/1e-3) ~ 30
+        halvings -- not 60. An early-exit on bracket width additionally stops the loop as
+        soon as every row is converged, rather than always spending the full budget.
+        """
+        def g(s):
+            z = R / s[:, None]
+            return np.sum(wfun(z) * z ** 2, axis=1) - beta * qlen
+
+        lo = s_guess * 1e-3
+        hi = s_guess * 1e3
+        glo = g(lo)
+        ghi = g(hi)
+
+        for _ in range(12):
+            bad = glo * ghi > 0
+            if not np.any(bad):
+                break
+            lo = np.where(bad, lo * 0.1, lo)
+            hi = np.where(bad, hi * 10.0, hi)
+            glo = np.where(bad, g(lo), glo)
+            ghi = np.where(bad, g(hi), ghi)
+
+        # Pixels where a bracket still couldn't be found (shouldn't normally happen):
+        # keep the previous scale estimate, same fallback as the original implementation.
+        unbracketed = glo * ghi > 0
+
+        a, b = lo.copy(), hi.copy()
+        for _ in range(n_bisect):
+            if np.all((b - a) < xtol_rel * s_guess):
+                break
+            mid = 0.5 * (a + b)
+            gmid = g(mid)
+            same_sign = (np.sign(gmid) == np.sign(glo))
+            a = np.where(same_sign, mid, a)
+            glo = np.where(same_sign, gmid, glo)
+            b = np.where(same_sign, b, mid)
+
+        s = 0.5 * (a + b)
+        return np.where(unbracketed, s_guess, s)
+
+    def solve_all_pixels(Q, mu0, s0, profile=False):
+        """
+        Batched IRLS over all valid pixels at once.
+        Q: (P, T) data. mu0: (P, K) initial knot values. s0: (P,) initial scale.
+        Returns knots (P, K), s (P,), converged (P,) bool, niter (P,) int.
+        If profile=True, also returns a dict of cumulative wall-clock seconds spent in
+        each phase (gemm_solve, scale_solve_exact, scale_solve_approx), so you can see
+        which part actually dominates instead of guessing from FLOP counts.
+        """
+        P = Q.shape[0]
+        knots = mu0.astype(float).copy()
+        s = s0.astype(float).copy()
+        converged = np.zeros(P, dtype=bool)
+        niter = np.zeros(P, dtype=int)
+        active = np.ones(P, dtype=bool)
+
+        timings = {'gemm_solve': 0.0, 'scale_solve_exact': 0.0, 'scale_solve_approx': 0.0}
+
+        for it in range(max_iter):
+            idx = np.where(active)[0]
+            if idx.size == 0:
+                break
+
+            Qa = Q[idx]
+            Ka = knots[idx]
+            Sa = s[idx]
+
+            t0 = time.monotonic() if profile else None
+
+            R = Qa - Ka @ B.T
+            Z = R / Sa[:, None]
+            W = wfun(Z)
+
+            A = (W @ G).reshape(-1, nknot, nknot) + ridge_matrix
+            b_vec = (W * Qa) @ B
+            try:
+                # NumPy's batched solve requires b to be explicitly (..., M, 1) here --
+                # a plain (P, K) array is interpreted as one (P, K) matrix RHS, not a
+                # batch of P length-K vectors, and raises a core-dimension mismatch.
+                knots_new = np.linalg.solve(A, b_vec[..., None])[..., 0]
+            except np.linalg.LinAlgError:
+                # Rare: fall back to a per-row lstsq only for the rows that fail.
+                knots_new = np.empty_like(b_vec)
+                for j in range(A.shape[0]):
+                    try:
+                        knots_new[j] = np.linalg.solve(A[j], b_vec[j])
+                    except np.linalg.LinAlgError:
+                        knots_new[j], *_ = np.linalg.lstsq(A[j], b_vec[j], rcond=None)
+
+            if profile:
+                t1 = time.monotonic()
+                timings['gemm_solve'] += t1 - t0
+
+            R_new = Qa - knots_new @ B.T
+
+            if False: # it == 0:
+                s_new = solve_scale_batched(R_new, Sa)
+                if profile:
+                    t2 = time.monotonic()
+                    timings['scale_solve_exact'] += t2 - t1
+            else:
+                s_step = np.sqrt(np.sum(W * R_new ** 2, axis=1) / (beta * qlen))
+                s_new = np.clip(s_step, 0.5 * Sa, 2.0 * Sa)
+                if profile:
+                    t2 = time.monotonic()
+                    timings['scale_solve_approx'] += t2 - t1
+
+            d_knots = np.max(np.abs(knots_new - Ka), axis=1) / np.maximum(1.0, np.max(np.abs(Ka), axis=1))
+            d_s = np.abs(s_new - Sa) / Sa
+
+            knots[idx] = knots_new
+            s[idx] = s_new
+            niter[idx] += 1
+
+            newly_done = (d_knots < tol) & (d_s < tol)
+            done_idx = idx[newly_done]
+            converged[done_idx] = True
+            active[done_idx] = False
+
+            if loud:
+                n_active = int(np.sum(active))
+                hashes = '#' * min(32, int(32 * (P - n_active) / max(P, 1)))
+                print(f"\r{prefix}{hashes:<32} (iter {it+1:2d}/{max_iter}, active {n_active}/{P})",
+                      end='', flush=True)
+
+        if profile:
+            return knots, s, converged, niter, timings
+        return knots, s, converged, niter
+
+    results_mu = np.full((num_elements, nknot), np.nan)
+    results_s = np.full(num_elements, np.nan)
+
+    # Only pixels with a sane initial guess are worth solving; everything else stays NaN,
+    # matching the original per-pixel skip logic.
+    valid = (~np.isnan(s0_all)) & (s0_all > 0) & (~np.isnan(mu0_all))
+    valid_idx = np.where(valid)[0]
+
+    num_pix_converged = 0
+    num_iter = 0
+    start_time = time.monotonic()
+
+    if valid_idx.size > 0:
+        Q_valid = flat_images[valid_idx]
+        mu0_valid = mu0_knots[valid_idx]
+        s0_valid = s0_all[valid_idx]
+
+        try:
+            if profile:
+                knots_v, s_v, converged_v, niter_v, timings = solve_all_pixels(
+                    Q_valid, mu0_valid, s0_valid, profile=True)
+                total = sum(timings.values())
+                print("---- phase breakdown ----")
+                for k, v in timings.items():
+                    pct = 100 * v / total if total > 0 else 0.0
+                    print(f"  {k:20s} {v:8.3f}s  ({pct:5.1f}%)")
+                print(f"  {'sum':20s} {total:8.3f}s")
+                print("--------------------------")
+            else:
+                knots_v, s_v, converged_v, niter_v = solve_all_pixels(Q_valid, mu0_valid, s0_valid)
+            results_mu[valid_idx, :] = knots_v
+            results_s[valid_idx] = s_v
+            num_pix_converged = int(np.sum(converged_v))
+            num_iter = int(np.sum(niter_v))
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    if loud:
+        end_time = time.monotonic()
+        hashes = '#' * 32
+        print(f"\r{prefix}{hashes} (Converged: {num_pix_converged}, Time: {end_time - start_time:.2f}s)", flush=True)
+
+    res_mu = results_mu.reshape(np.append(grid_shape, nknot)) if grid_shape else results_mu[0]
+    res_s = results_s.reshape(grid_shape) if grid_shape else results_s[0]
+    tknot_ns = (tknot_s * 1e9)
+    return tknot_ns, res_mu, res_s
+
 def apply_precomputed_spline_pedestal_correction(camera_images, tknot_ns, knots):
     """
     Applies a precomputed spline pedestal correction to each pixel's image values.
