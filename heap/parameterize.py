@@ -80,8 +80,8 @@ def calc_params(
     d = float(s_yy - s_xx)
     z = float(np.sqrt(d*d + 4*s_xy*s_xy))
 
-    length = float(np.sqrt( (s_xx + s_yy + z) / 2))
-    width = float(np.sqrt( (s_xx + s_yy - z) / 2))
+    length = float(np.sqrt(max((s_xx + s_yy + z) / 2, 0.0)))
+    width = float(np.sqrt(max((s_xx + s_yy - z) / 2, 0.0)))
 
     # orientation (phi)
     ac = float((d+z)*(y_c-y) + 2.0*s_xy*(x_c-x))
