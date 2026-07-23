@@ -1736,7 +1736,7 @@ def calculate_spline_location_and_scale_batch(camera_images, dtknot=600, nknot=N
                 knots_v, s_v, converged_v, niter_v, timings = solve_all_pixels(
                     Q_valid, mu0_valid, s0_valid, profile=True)
                 total = sum(timings.values())
-                print("---- phase breakdown ----")
+                print("\n---- phase breakdown ----")
                 for k, v in timings.items():
                     pct = 100 * v / total if total > 0 else 0.0
                     print(f"  {k:20s} {v:8.3f}s  ({pct:5.1f}%)")
