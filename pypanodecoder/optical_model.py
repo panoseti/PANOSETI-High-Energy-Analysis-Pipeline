@@ -182,6 +182,81 @@ class RayBundle:
             
         return cls(pos, dirs, energy_eV=energy_val)
 
+    @classmethod
+    def create_grid_parallel_beam(cls, num_rays, direction, diameter, distance, energy_eV=None):
+        """
+        Create a bundle of parallel rays originating from a regular square grid on a circular disk.
+        
+        Args:
+            num_rays: Approximate number of rays to generate. The actual number may slightly differ due to grid mapping.
+            direction: The common direction vector for all rays (list or array of 3 elements).
+            diameter: The diameter of the circular disk where rays originate.
+            distance: Distance from the origin to the center of the disk along the direction vector.
+                      (Usually negative to have rays approach the origin).
+            energy_eV: Photon energy in eV (scalar, array of length actual_num_rays, or a callable/generator function).
+        """
+        direction = np.array(direction, dtype=float)
+        norm = np.linalg.norm(direction)
+        if norm == 0:
+            raise ValueError("Direction vector cannot be zero.")
+        d_hat = direction / norm
+        
+        # Center of the disk
+        center = distance * d_hat
+        
+        # Create an orthonormal basis (u, v) for the plane orthogonal to d_hat
+        if abs(d_hat[0]) < 0.9:
+            arbitrary = np.array([1.0, 0.0, 0.0])
+        else:
+            arbitrary = np.array([0.0, 1.0, 0.0])
+            
+        u = np.cross(d_hat, arbitrary)
+        u = u / np.linalg.norm(u)
+        v = np.cross(d_hat, u)
+        
+        # Calculate grid spacing
+        radius = diameter / 2.0
+        area = np.pi * radius**2
+        
+        if num_rays <= 0:
+            raise ValueError("num_rays must be greater than 0.")
+            
+        spacing = np.sqrt(area / num_rays)
+        
+        # Generate grid points (with one ray at 0,0)
+        max_idx = int(np.floor(radius / spacing))
+        indices = np.arange(-max_idx, max_idx + 1)
+        i_grid, j_grid = np.meshgrid(indices, indices)
+        
+        # Filter points within the circle
+        mask = (i_grid * spacing)**2 + (j_grid * spacing)**2 <= radius**2
+        i_valid = i_grid[mask]
+        j_valid = j_grid[mask]
+        
+        actual_num_rays = len(i_valid)
+        
+        # Calculate positions
+        pos = center + (i_valid * spacing)[:, np.newaxis] * u + (j_valid * spacing)[:, np.newaxis] * v
+        
+        # All rays have the same direction
+        dirs = np.tile(d_hat, (actual_num_rays, 1))
+        
+        # Handle generator function for energy
+        if callable(energy_eV):
+            try:
+                # Try passing the actual number of rays (common for numpy random generators)
+                energy_val = energy_eV(actual_num_rays)
+            except TypeError:
+                # Fallback to calling it without arguments N times
+                energy_val = np.array([energy_eV() for _ in range(actual_num_rays)])
+            except Exception:
+                # If there's an issue with arguments, still try 0-arg fallback
+                energy_val = np.array([energy_eV() for _ in range(actual_num_rays)])
+        else:
+            energy_val = energy_eV
+            
+        return cls(pos, dirs, energy_eV=energy_val)
+
     def propagate_to_plane_y(self, d, speed=1.0):
         """
         Propagate rays forward in time to a plane defined by y + d = 0 (y = -d).
@@ -782,7 +857,7 @@ def create_energy_generator(datapack, zn=0):
         
     return generator
 
-def trace_parallel_ray_bundle(direction, num_rays, datapack, thick_lens=False, zn=0, focal_offset=0.0, energy_eV=None):
+def trace_parallel_ray_bundle(direction, num_rays, datapack, thick_lens=False, zn=0, focal_offset=0.0, energy_eV=None, use_grid=False, fixed_n=None):
     """
     Generate a bundle of rays and trace them through the telescope.
     
@@ -793,6 +868,9 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, thick_lens=False, z
         thick_lens: If True, use the thick lens model; otherwise, use the thin lens model.
         zn: Zenith angle in radians for atmospheric absorption.
         focal_offset: Offset added to the nominal focal distance.
+        energy_eV: Photon energy in eV (default None, drawn from standard spectrum).
+        use_grid: If True, generate rays on a regular square grid instead of uniformly randomly.
+        fixed_n: Fixed refractive index to use for all rays, overriding the datapack interpolator.
         
     Returns:
         The RayBundle object after propagating to the focal plane.
@@ -813,15 +891,30 @@ def trace_parallel_ray_bundle(direction, num_rays, datapack, thick_lens=False, z
             return np.full(num_rays, energy_eV)
         energy_generator = generator
 
-    bundle = RayBundle.create_parallel_beam(
-        num_rays=num_rays,
-        direction=direction,
-        diameter=D * 1.01, # Slightly larger than aperture to fully illuminate
-        distance=distance,
-        energy_eV=energy_generator
-    )
+    if use_grid:
+        bundle = RayBundle.create_grid_parallel_beam(
+            num_rays=num_rays,
+            direction=direction,
+            diameter=D * 1.01, # Slightly larger than aperture to fully illuminate
+            distance=distance,
+            energy_eV=energy_generator
+        )
+    else:
+        bundle = RayBundle.create_parallel_beam(
+            num_rays=num_rays,
+            direction=direction,
+            diameter=D * 1.01, # Slightly larger than aperture to fully illuminate
+            distance=distance,
+            energy_eV=energy_generator
+        )
     
-    n_func = create_n_interpolator(datapack)
+    if fixed_n is None:
+        n_func = create_n_interpolator(datapack)
+    else:
+        def n_func(energy):
+            if np.isscalar(energy):
+                return fixed_n
+            return np.full_like(energy, fixed_n, dtype=float)
     
     # Focal plane is at y = -(F + focal_offset)
     if thick_lens:
