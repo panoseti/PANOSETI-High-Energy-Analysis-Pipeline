@@ -660,7 +660,7 @@ class ChargeHistogram:
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.sum(self.qhist * (centers_clipped - wm[..., np.newaxis])**2, axis=-1) / total
 
-    def huber_location(self, loss='huber', scale=None):
+    def huber_location(self, loss='huber', scale=None, loss_parameter=1.0):
         """
         Estimates the location (center) of the distribution using a robust loss function.
 
@@ -698,7 +698,7 @@ class ChargeHistogram:
 
         # Loss functions rho(z) where z = (x - mu) / scale
         loss_functions = {
-            'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
+            'huber':   lambda z: np.where(np.abs(z) <= loss_parameter, 0.5 * z**2, loss_parameter * np.abs(z) - 0.5 * loss_parameter**2),
             'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
             'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
             'arctan':  lambda z: np.arctan(0.5 * z**2),
@@ -743,7 +743,7 @@ class ChargeHistogram:
 
         return results.reshape(grid_shape) if grid_shape else results[0]
 
-    def huber_scale(self, loss='huber', location=None):
+    def huber_scale(self, loss='huber', location=None, loss_parameter=1.0):
         """
         Estimates the scale (standard deviation) of the distribution using a robust loss function.
         The result is calibrated to be consistent with the standard deviation for a Gaussian.
@@ -778,18 +778,18 @@ class ChargeHistogram:
         wvar_all = np.sqrt(np.atleast_1d(self.winsorized_var())).flatten()
         s0_all = np.where((iqr_all > 0) & (iqr_all < wvar_all), iqr_all, wvar_all)
 
-        # Loss functions rho(z) where z = (x - mu) / scale
         loss_functions = {
-            'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
+            'huber':   lambda z: np.where(np.abs(z) <= loss_parameter, 0.5 * z**2, loss_parameter * np.abs(z) - 0.5 * loss_parameter**2),
             'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
             'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
             'linear':  lambda z: 0.5 * z**2
         }
 
+        from scipy.special import erf
         # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1)
         # These constants ensure the estimator is consistent with Gaussian sigma.
         beta_map = {
-            'huber':   0.6826894921370859, # norm.cdf(1) - norm.cdf(-1)
+            'huber':   erf(loss_parameter / np.sqrt(2.0)), # norm.cdf(k) - norm.cdf(-k)
             'soft_l1': 0.6808803445892556,
             'cauchy':  0.4842562477382487,
             'linear':  1.0
@@ -839,7 +839,7 @@ class ChargeHistogram:
 
         return results.reshape(grid_shape) if grid_shape else results[0]
 
-    def huber_location_and_scale(self, loss='huber'):
+    def huber_location_and_scale(self, loss='huber', loss_parameter=1.0):
         """
         Estimates the location (center) and scale (standard deviation) of the distribution
         simultaneously using a robust loss function.
@@ -870,18 +870,18 @@ class ChargeHistogram:
         wvar_all = np.sqrt(np.atleast_1d(self.winsorized_var())).flatten()
         s0_all = np.where((iqr_all > 0) & (iqr_all < wvar_all), iqr_all, wvar_all)
 
-        # Loss functions rho(z) where z = (x - mu) / scale
         loss_functions = {
-            'huber':   lambda z: np.where(np.abs(z) <= 1.0, 0.5 * z**2, np.abs(z) - 0.5),
+            'huber':   lambda z: np.where(np.abs(z) <= loss_parameter, 0.5 * z**2, loss_parameter * np.abs(z) - 0.5 * loss_parameter**2),
             'soft_l1': lambda z: 2 * (np.sqrt(1 + 0.5 * z**2) - 1),
             'cauchy':  lambda z: np.log(1 + 0.5 * z**2),
             'linear':  lambda z: 0.5 * z**2
         }
 
+        from scipy.special import erf
         # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1)
         # These constants ensure the estimator is consistent with Gaussian sigma.
         beta_map = {
-            'huber':   0.6826894921370859, # norm.cdf(1) - norm.cdf(-1)
+            'huber':   erf(loss_parameter / np.sqrt(2.0)), # norm.cdf(k) - norm.cdf(-k)
             'soft_l1': 0.6808803445892556,
             'cauchy':  0.4842562477382487,
             'linear':  1.0
@@ -1193,7 +1193,7 @@ def apply_constant_pedestal_correction(images, pedestal_calculator=None, **kwarg
     return images.map_gtis(_correct_gti_images)
 
 def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, loss='huber',
-                                        max_iter=20, tol=1e-6, ridge=1e-8, loud=False, profile=False):
+                                        max_iter=20, tol=1e-6, ridge=1e-8, loud=False, profile=False, loss_parameter=1.0):
     """
     Estimates the time-dependent location (center) and scale (standard deviation) of the
     distribution simultaneously using a robust loss function assuming a spline for location.
@@ -1317,16 +1317,18 @@ def calculate_spline_location_and_scale(camera_images, dtknot=600, nknot=None, l
 
     # IRLS weight functions w(z) = psi(z)/z (finite at z=0 for all four losses below).
     weight_functions = {
-        'huber':   lambda z: np.divide(1.0, np.abs(z), out=np.ones_like(z, dtype=float), where=np.abs(z) > 1.0),
+        'huber':   lambda z: np.divide(loss_parameter, np.abs(z), out=np.ones_like(z, dtype=float), where=np.abs(z) > loss_parameter),
         'soft_l1': lambda z: 1.0 / np.sqrt(1 + 0.5 * z ** 2),
         'cauchy':  lambda z: 1.0 / (1 + 0.5 * z ** 2),
         'linear':  lambda z: np.ones_like(z),
     }
+    
+    from scipy.special import erf
     # Calibration constants beta = E[psi(Z)*Z] where Z ~ N(0, 1); same values as the
     # original implementation, since the scale stationarity condition is
     # sum(psi(z)*z) = beta*qlen, i.e. sum(w(z)*z**2) = beta*qlen.
     beta_map = {
-        'huber':   0.6826894921370859,
+        'huber':   erf(loss_parameter / np.sqrt(2.0)),
         'soft_l1': 0.6808803445892556,
         'cauchy':  0.4842562477382487,
         'linear':  1.0,
@@ -1566,7 +1568,7 @@ def apply_precomputed_spline_pedestal_correction(camera_images, tknot_ns, knots)
     )
 
 def apply_spline_pedestal_correction(camera_images, dtknot=600, nknot=None, loss='huber',
-                                     max_iter=20, tol=1e-6, ridge=1e-8, loud=False):
+                                     max_iter=20, tol=1e-6, ridge=1e-8, loud=False, loss_parameter=1.0):
     """
     Calculates a spline pedestal model for each pixel and subtracts it.
     The fit is performed independently for each GTI.
@@ -1587,7 +1589,7 @@ def apply_spline_pedestal_correction(camera_images, dtknot=600, nknot=None, loss
     def _correct_gti_images(gti_images):
         tknot_ns, locations, scales = calculate_spline_location_and_scale(
             gti_images, dtknot=dtknot, nknot=nknot, loss=loss,
-            max_iter=max_iter, tol=tol, ridge=ridge, loud=loud
+            max_iter=max_iter, tol=tol, ridge=ridge, loud=loud, loss_parameter=loss_parameter
         )
         return apply_precomputed_spline_pedestal_correction(gti_images, tknot_ns, locations)
 
