@@ -1350,12 +1350,15 @@ TH2D* telEvent(int telNumber, int eventNumber){
     ROOT::Math::RotationZ rz(telAz);
     ROOT::Math::RotationX rx(telZe);
     rotM = rx*rz;
-    
+
+    // unrotate cx,cy from CORSIKA/ARRANG frame to true frame, magnetic declination
+    double magDecRad = -fMag_Dec*TMath::DegToRad();
+
     // fill image
     TH2D* image = new TH2D(Form("T%d",telNumber), Form("T%d",telNumber), 32, -4.95, 4.95, 32, -4.95, 4.95);
     for(int i=0; i<NCp; i++){
-        double xcos_s = -1*cy[i]; // CORSIKA to GrOptics
-        double ycos_s = cx[i]; // CORSIKA to GrOptics
+        double xcos_s = -1*cy[i]*cos(magDecRad) + cx[i]*sin(magDecRad); // CORSIKA to GrOptics
+        double ycos_s = cx[i]*cos(magDecRad) + cy[i]*sin(magDecRad); // CORSIKA to GrOptics
         if (TMath::AreEqualAbs(xcos_s,0.0,epsilon)){xcos_s = 0.0;}
         if (TMath::AreEqualAbs(ycos_s,0.0,epsilon)){ycos_s = 0.0;}
         double zcos_s = sqrt(1-xcos_s*xcos_s-ycos_s*ycos_s);
@@ -1638,12 +1641,15 @@ void showClean(int telNumber, int eventNumber){
     ROOT::Math::RotationX rx(telZe);
     rotM = rx*rz;
 
+    // unrotate cx,cy from CORSIKA/ARRANG frame to true frame, magnetic declination
+    double magDecRad = -fMag_Dec*TMath::DegToRad();
+
     TH2D* image = new TH2D("Only Cherenkov Photons", "Only Cherenkov Photons", 32, -4.95, 4.95, 32, -4.95, 4.95);
-    
+
     // fill image
     for(int i=0; i<NCp; i++){
-        double xcos_s = -1*cy[i]; // CORSIKA to GrOptics
-        double ycos_s = cx[i]; // CORSIKA to GrOptics
+        double xcos_s = -1*cy[i]*cos(magDecRad) + cx[i]*sin(magDecRad); // CORSIKA to GrOptics
+        double ycos_s = cx[i]*cos(magDecRad) + cy[i]*sin(magDecRad); // CORSIKA to GrOptics
         if (TMath::AreEqualAbs(xcos_s,0.0,epsilon)){xcos_s = 0.0;}
         if (TMath::AreEqualAbs(ycos_s,0.0,epsilon)){ycos_s = 0.0;}
         double zcos_s = sqrt(1-xcos_s*xcos_s-ycos_s*ycos_s);
