@@ -218,7 +218,7 @@ def plot_star_field(source=None, ra=None, dec=None, label=None, radius_deg=8.0, 
 
     return ps
 
-def plot_north_west_guide(ps, ax=None, loc=1, color='r', **kwargs):
+def plot_north_west_guide(ps, ax=None, loc=1, color='r', zorder=None, **kwargs):
     """
     Draws a North/West L-guide in a specified corner of the plot.
 
@@ -228,6 +228,7 @@ def plot_north_west_guide(ps, ax=None, loc=1, color='r', **kwargs):
         loc (int): Corner to display guide: 1 (top right), 2 (top left),
                    3 (bottom left), 4 (bottom right).
         color (str): Color for the guide lines and labels (default: 'r').
+        zorder (float, optional): Layer ordering for the guide elements.
         **kwargs: Additional arguments passed to ax.text() for label styling (e.g., fontsize).
     """
     if loc not in [1, 2, 3, 4]:
@@ -278,8 +279,11 @@ def plot_north_west_guide(ps, ax=None, loc=1, color='r', **kwargs):
     y0 = yc - 0.5 * arm_len * (u_N[1] + u_W[1])
 
     # Draw L guide lines
-    ax.plot([x0, x0 + arm_len * u_N[0]], [y0, y0 + arm_len * u_N[1]], color=color, lw=1.5)
-    ax.plot([x0, x0 + arm_len * u_W[0]], [y0, y0 + arm_len * u_W[1]], color=color, lw=1.5)
+    plot_kwargs = {'color': color, 'lw': 1.5}
+    if zorder is not None:
+        plot_kwargs['zorder'] = zorder
+    ax.plot([x0, x0 + arm_len * u_N[0]], [y0, y0 + arm_len * u_N[1]], **plot_kwargs)
+    ax.plot([x0, x0 + arm_len * u_W[0]], [y0, y0 + arm_len * u_W[1]], **plot_kwargs)
 
     # Draw N and W labels
     theta_deg = math.degrees(theta_rad)
@@ -294,11 +298,13 @@ def plot_north_west_guide(ps, ax=None, loc=1, color='r', **kwargs):
 
     text_kwargs = {'ha': 'center', 'va': 'center', 'fontsize': 8}
     text_kwargs.update(kwargs)
+    if zorder is not None:
+        text_kwargs['zorder'] = zorder
 
     ax.text(x_N, y_N, 'N', color=color, rotation=text_rot, **text_kwargs)
     ax.text(x_W, y_W, 'W', color=color, rotation=text_rot, **text_kwargs)
 
-def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, auto_align=False, loc=0, **kwargs):
+def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index=False, clip_to_axes=False, color='r', plate_scale=None, ps=None, show_mags=False, show_cross=False, auto_align=False, loc=0, zorder=None, **kwargs):
     """
     Overlays stars on a field and optionally calculates the pointing solution.
 
@@ -352,14 +358,31 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
 
         # Use vmag for size
         size = max(5, (10 - star['vmag'])**2)
-        ax.scatter(x, y, s=size, edgecolors=color, facecolors='none', alpha=0.7)
+        scatter_kwargs = {'s': size, 'edgecolors': color, 'facecolors': 'none'}
+        if zorder is not None:
+            scatter_kwargs['zorder'] = zorder
+        ax.scatter(x, y, **scatter_kwargs)
+        if show_cross:
+            cross_kwargs = {'marker': 'x', 's': 75, 'facecolors': color, 'linewidth': 0.3}
+            if zorder is not None:
+                cross_kwargs['zorder'] = zorder
+            ax.scatter(x, y, **cross_kwargs)
 
         if use_index:
             label = str(i)
         else:
             name = star['name'] if star['name'] else f"HR{star['hr']}"
             # Merge multiple whitespaces
-            label = " ".join(name.split())
+            bits = name.split()
+            
+            # If the first part has leading digits followed by letters, remove the digits
+            if bits and bits[0]:
+                stripped = bits[0].lstrip('0123456789')
+                if stripped and stripped != bits[0]:
+                    # Only replace if there are leftover characters (not purely digits)
+                    bits[0] = stripped
+            
+            label = " ".join(bits)
 
         if show_mags:
             label = f"{label} ({star['vmag']:.1f})"
@@ -368,13 +391,20 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         current_text_kwargs = text_kwargs.copy()
         if auto_align:
             x_min, x_max = min(xlim), max(xlim)
-            if (x - x_min) / (x_max - x_min) > 0.8:
+            if (x - x_min) / (x_max - x_min) > 0.75:
                 current_text_kwargs['ha'] = 'right'
             else:
                 current_text_kwargs['ha'] = 'left'
+            y_min, y_max = min(ylim), max(ylim)
+            if (y - y_min) / (y_max - y_min) > 0.95:
+                current_text_kwargs['va'] = 'top'
+            else:
+                current_text_kwargs['va'] = 'bottom'
 
         radius = math.sqrt(size) / 2.0 * 1.2
         offset_x = radius if current_text_kwargs.get('ha') == 'left' else -radius
+        if zorder is not None:
+            current_text_kwargs['zorder'] = zorder
         ax.annotate(label, xy=(x, y), xytext=(offset_x, 0),
                     textcoords='offset points',
                     color=color, **current_text_kwargs)
@@ -385,6 +415,6 @@ def overlay_stars(stars, p1=None, p2=None, east_on_left=True, ax=None, use_index
         guide_kwargs = text_kwargs.copy()
         guide_kwargs['ha'] = 'center'
         guide_kwargs['va'] = 'center'
-        plot_north_west_guide(ps, ax=ax, loc=loc, color=color, **guide_kwargs)
+        plot_north_west_guide(ps, ax=ax, loc=loc, color=color, zorder=zorder, **guide_kwargs)
 
     return ps

@@ -9,11 +9,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import datetime
+import math
 from scipy.optimize import curve_fit
 
 from ..eventbuilder import CameraImages
 
-def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, **kwargs):
+def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(10, 6), uttime=False, clip=False, gti_labels=None, fig=None, axes=None, **kwargs):
     """
     Plots the event rate in Hz as a function of GTI event time.
 
@@ -46,17 +47,25 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
     bw_str = f"{bin_width_min:g}"
     ylabel = f"Rate (Hz) [{bw_str}-min bins]"
 
-    if subplots:
-        fig, axes = plt.subplots(num_gtis, 1, sharex=True,
-                                 figsize=figsize,
-                                 squeeze=False)
-        axes = axes.flatten()
-        fig.tight_layout(rect=[0.05, 0, 1, 1])
-        fig.subplots_adjust(hspace=0)
+    if fig is None and axes is None:
+        if subplots:
+            fig, axes = plt.subplots(num_gtis, 1, sharex=True,
+                                     figsize=figsize,
+                                     squeeze=False)
+            axes = axes.flatten()
+            fig.tight_layout(rect=[0.05, 0, 1, 1])
+            fig.subplots_adjust(hspace=0)
+        else:
+            fig, ax = plt.subplots(figsize=figsize)
+            axes = [ax] * num_gtis
+            fig.tight_layout()
     else:
-        fig, ax = plt.subplots(figsize=figsize)
-        axes = [ax] * num_gtis
-        fig.tight_layout()
+        if not isinstance(axes, (list, tuple, np.ndarray)):
+            axes = [axes] * num_gtis
+        elif len(axes) == 1 and num_gtis > 1:
+            axes = list(axes) * num_gtis
+        if fig is None and len(axes) > 0:
+            fig = axes[0].figure
 
     # Pre-calculate all rates if clipping is requested
     all_values_for_clipping = []
@@ -77,15 +86,24 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
             gti_data_list.append(None)
             continue
 
-        # Determine bins
+        # Determine bins aligned to bin_width_sec
         min_t = np.min(times)
         max_t = np.max(times)
-        bins = np.arange(min_t, max_t + bin_width_sec, bin_width_sec)
+        bin_start = np.floor(min_t / bin_width_sec) * bin_width_sec
+        bins = np.arange(bin_start, max_t + bin_width_sec, bin_width_sec)
 
         # Calculate histogram and rates
         counts, bin_edges = np.histogram(times, bins=bins)
-        rates = counts / bin_width_sec
-        errors = np.sqrt(counts) / bin_width_sec
+        
+        # Calculate exposure for each bin based on the first and last event time
+        exposures = np.clip(bin_edges[1:], None, max_t) - np.clip(bin_edges[:-1], min_t, None)
+        
+        # Avoid division by zero
+        valid = exposures > 0
+        rates = np.zeros_like(counts, dtype=float)
+        errors = np.zeros_like(counts, dtype=float)
+        rates[valid] = counts[valid] / exposures[valid]
+        errors[valid] = np.sqrt(counts[valid]) / exposures[valid]
 
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
@@ -150,6 +168,9 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
             except (AttributeError, IndexError, TypeError, ValueError):
                 pass
 
+        if gti_labels is not None and gti_idx in gti_labels:
+            label = gti_labels[gti_idx]
+
         if uttime:
             # Convert bin edges and centers to datetime objects (time of day)
             # We use UTC timestamps % 86400 which are seconds since midnight 1970-01-01
@@ -185,11 +206,15 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
                         bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
 
     if not subplots:
-        axes[0].legend()
+        if num_gtis > 1:
+            axes[0].legend()
         axes[0].set_ylabel(ylabel)
     else:
         # Single common Y-axis label for subplots
-        fig.supylabel(ylabel)
+        if fig is not None:
+            fig.supylabel(ylabel)
+        else:
+            axes[len(axes)//2].set_ylabel(ylabel)
 
     if uttime:
         axes[-1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
@@ -199,7 +224,7 @@ def plot_event_rate(camera_images, bin_width_min=1.0, subplots=False, figsize=(1
 
     return fig, axes
 
-def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), time_type='event', **kwargs):
+def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True, fit=False, num_bins=100, figsize=(10, 6), time_type='event', gti_labels=None,  **kwargs):
     """
     Plots the distribution of times between consecutive events (delta_t).
 
@@ -329,6 +354,9 @@ def plot_delta_t(camera_images, combine_gtis=False, semilog=False, density=True,
                     else:
                         label = f"{start} ({label})"
             except: pass
+
+        if gti_labels is not None and gti_idx in gti_labels:
+            label = gti_labels[gti_idx]
 
         if fit:
             # Fit exponential model. Ignore empty bins.
