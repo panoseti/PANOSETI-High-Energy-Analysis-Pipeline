@@ -4,6 +4,7 @@ sys.path.insert(0, project_root)
 from heap import pre_cleaning
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import pandas as pd
 from pathlib import Path
 import os
@@ -135,7 +136,8 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         ax[1].set_title("After Correction")
         ax[1].grid()
         ax[0].legend()
-        fig.suptitle(str(base_dir)+", "+plot_name)
+        for a in ax:
+            a.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
         fig.tight_layout()
         plt.show()
     return(timestamps1_corr)
@@ -272,10 +274,11 @@ def coinc_rate(coinc_timestamps,plot_name,base_dir,bin_width=240,plotting=False)
     rate=y/bin_width
     time_rate_pd=pd.to_datetime(time_rate, unit='s', utc=True).tz_convert('America/Los_Angeles')
     if plotting:
+        plt.figure()
         plt.step(time_rate_pd,rate)
         plt.grid()
         plt.xlabel("time")
         plt.ylabel("Coincidence Rate [Hz]")
-        plt.title(str(base_dir)+", Coincidences, "+plot_name)
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
         plt.show()
     return(time_rate,rate)

@@ -7,15 +7,33 @@ paths:
   # Directory where dated report subfolders (plots, manifest.json, index.html) are written.
   # Can be the same as raw_data_dir (writes in place) or a separate tree, e.g. one that
   # gets rsync'd to a web-facing server.
-  output_dir: test_data
+  output_dir: NextDay/test_output
 
 telescopes:
-  # module number -> telescope name, used to find files and label plots.
-  module_250: Heli
-  module_252: Fern
-  module_253: Winter
-  module_254: Gattini
-
+  # module number -> telescope name (used to find files and label plots) and rate_cut
+  # (spike_cut's trigger-rate threshold in Hz).
+  module_250:
+    name: Heli
+    rate_cut: 100
+  module_252:
+    name: Fern
+    rate_cut: 100
+  module_253:
+    name: Winter
+    rate_cut: 100
+  module_254:
+    name: Gattini
+    rate_cut: 100
+    
 pipeline:
   # Telescope other telescopes' timestamps get corrected against.
   reference: Winter
+  # threshold_clean()'s per-pixel cut, in units of pedvar (sigma above pedestal noise): a pixel
+  # survives at image_threshold on its own, or at border_threshold if it borders a pixel that
+  # cleared image_threshold (see heap.image_cleaning.threshold_clean, called from
+  # heap.process_dataset.process_image()).
+  image_threshold: 4.0
+  border_threshold: 2.0
+  # Event Preview cut: minimum surviving (post-cleaning) pixels for an event to be eligible for
+  # cross-telescope coincidence matching (see find_coincidences()/build_event_preview()).
+  event_preview_min_pixels: 3
