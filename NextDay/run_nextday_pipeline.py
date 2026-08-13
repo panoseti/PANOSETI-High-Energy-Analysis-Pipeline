@@ -51,7 +51,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from heap import coincidences as coinc
 from heap.make_pedestals import plot_pedestal_mean_over_interval, plot_pedestal_pedvar_intervals, plot_pedvar_histogram
-from heap.process_dataset import identify_source, load_fallback_map, process_dataset, slugify
+from heap.process_dataset import discover_runs, identify_source, load_fallback_map, process_dataset, slugify
 
 
 # A run directory can hold multiple data products per module (dp_ph1024, dp_ph256,
@@ -99,12 +99,6 @@ def parse_args():
     parser.add_argument("--out-dir", help="Overrides <output_dir>/<date> from the config.")
     parser.add_argument("--reference", help="Overrides the reference telescope from the config.")
     return parser.parse_args()
-
-
-def discover_runs(raw_dir):
-    """One subfolder per run under raw_dir, named after the run's start time (used as-is for
-    run_id). Returns them sorted chronologically."""
-    return sorted(p for p in raw_dir.iterdir() if p.is_dir())
 
 
 def telescope_color_map(telescope_map):
@@ -355,7 +349,7 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
     for module, info in telescope_map.items():
         name = info["name"]
         module_pattern = f"{DATA_PRODUCT}*{module}"
-        if not sorted(raw_dir.glob(f"*/*{module_pattern}*.pff")):
+        if not any(any(run_dir.glob(f"*{module_pattern}*.pff")) for run_dir in discover_runs(raw_dir)):
             print(f"Skipping {name} ({module}) dataset processing: no {DATA_PRODUCT} .pff files found in {raw_dir}")
             continue
 

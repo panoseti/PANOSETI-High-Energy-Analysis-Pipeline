@@ -352,15 +352,28 @@ def build_calibrations(
     return data, timestamps, pedestals, pedestal_variances, gain
 
 
+def unwrap_duplicate_dir(path):
+    """Unwraps a run folder that duplicates itself as a subfolder of the same name
+    (<run>/<run>/*.pff instead of <run>/*.pff); no-op otherwise."""
+    nested = path / path.name
+    while nested.is_dir():
+        path, nested = nested, nested / nested.name
+    return path
+
+
 def discover_runs(raw_dir):
     """
     List a night's run subfolders, sorted chronologically by start time.
 
     Run folder names encode their start time (e.g.
     obs_Palomar.start_2026-07-09T07:22:57Z.runtype_obs-test.pffd), so a lexicographic sort
-    is already a chronological sort.
+    is already a chronological sort. Runs live under raw_dir/pff/ if that exists (newer layouts
+    group them there alongside other per-night data like allsky/weather/obslogs), otherwise
+    directly under raw_dir.
     """
-    return sorted(p for p in Path(raw_dir).iterdir() if p.is_dir())
+    raw_dir = Path(raw_dir)
+    base = raw_dir / "pff" if (raw_dir / "pff").is_dir() else raw_dir
+    return sorted((unwrap_duplicate_dir(p) for p in base.iterdir() if p.is_dir()), key=lambda p: p.name)
 
 
 def _get_mount_hk(run_dir, telescope):
