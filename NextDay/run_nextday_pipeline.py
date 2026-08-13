@@ -1,40 +1,30 @@
 """
-Runs heap analysis tools for one night of data and packages the
-resulting plots into a browsable directory structure plus a manifest.json
-that a database ingestion step (or anything else) can read.
+Runs heap analysis tools for one night of data and packages the resulting plots into a
+browsable directory structure plus a manifest.json for downstream ingestion.
 
-A night's raw data is split into runs (separate acquisition sessions,
-e.g. either side of a meridian flip or a DAQ restart), each in its own
-subfolder named after the run's start time. Reads raw .pff files from
-<raw_data_dir>/<date>/<run_id>/ and writes plots + manifest.json +
-index.html to <out_data_dir>/<date>/, with each run's plots under
-<run_id>/ (raw_data_dir and output_dir come from a config file, see
-nextday_config.yaml, and can point at the same tree or different ones).
+A night's raw data is split into runs (separate acquisition sessions, e.g. either side of a
+meridian flip or a DAQ restart), each its own subfolder named after its start time. Reads
+raw .pff files from <raw_data_dir>/<date>/<run_id>/ and writes plots + manifest.json +
+index.html to <out_data_dir>/<date>/, with each run's plots under <run_id>/ (raw_data_dir and
+output_dir come from a config file, see nextday_config.yaml).
 
-For every run within the night this:
-  1. Loads + cleans every telescope's data (heap.Coincidences.load_telescope_tv),
-     which also writes each telescope's spike_cut.png into <run_id>/module_<n>/.
-  2. Corrects every other telescope's timestamps against a reference
-     telescope and computes pairwise coincidence rates, saving plots under
-     <run_id>/pairs/<ref>-<name>/.
-  3. Computes triple coincidence rates for every pair of non-reference
-     telescopes against the reference, saving plots under
-     <run_id>/triples/<ref>-<a>-<b>/.
+For every run: loads + cleans each telescope's data (spike_cut.png per telescope under
+<run_id>/module_<n>/), corrects other telescopes' timestamps against a reference telescope
+for pairwise coincidence rates (<run_id>/pairs/<ref>-<name>/), and computes triple
+coincidence rates for every pair of non-reference telescopes against the reference
+(<run_id>/triples/<ref>-<a>-<b>/).
 
 Once every run is loaded, process_telescope_datasets() builds each telescope's
 pedestal/pedvar/gain calibrations (grouped by source across the whole night, see
-heap.process_dataset.build_calibrations) and 30-min-interval pedestal/pedvar heatmap
-grids per flip side (see heap.make_pedestals.plot_pedestal_pedvar_intervals), and
-build_hillas_plots() collects every telescope's Hillas parameters (length/width/
-log10(size)/distance) into a per-telescope histogram plus one pooling every telescope
-together. add_calibration_plots() reuses those per-source/per-telescope files to add
-pedestal/pedvar/gain/Hillas plots for every telescope back into each run it belongs to
-(rather than recomputing them per run).
+heap.process_dataset.build_calibrations) and 30-min-interval pedestal/pedvar heatmap grids
+per source (see heap.make_pedestals.plot_pedestal_pedvar_intervals), and build_hillas_plots()
+collects every telescope's Hillas parameters into a per-telescope histogram plus one pooling
+every telescope together. add_calibration_plots() reuses those per-source/per-telescope files
+to add pedestal/pedvar/gain/Hillas plots back into each run they belong to, rather than
+recomputing them per run.
 
-Once every run is processed this writes manifest.json (per run: telescopes
-present and plot path/type/telescopes for each plot) and index.html (a
-static gallery of everything generated, grouped by run, then by source
-telescope(s)/plot type as a table).
+Writes manifest.json (per run: telescopes present and plot path/type/telescopes for each
+plot) and index.html (a static gallery grouped by run, then by source telescope(s)/plot type).
 
 Usage:
     python run_nextday_pipeline.py --date 20260116
@@ -112,20 +102,15 @@ def parse_args():
 
 
 def discover_runs(raw_dir):
-    """A night's raw_dir contains one subfolder per run, named after the run's start
-    time; that name is unique and used as-is for the run_id. Returns them sorted
-    chronologically (their names sort lexicographically since they're timestamps).
-    """
+    """One subfolder per run under raw_dir, named after the run's start time (used as-is for
+    run_id). Returns them sorted chronologically."""
     return sorted(p for p in raw_dir.iterdir() if p.is_dir())
 
 
 def telescope_color_map(telescope_map):
-    """Assigns each configured telescope a stable color from the tab10 colormap (by name,
-    alphabetically), so a given telescope is always the same color across the Hillas plots and
-    the combined event-rate plot, regardless of which telescopes are actually present in a given
-    run or dataset. Adding/removing telescopes from the config will shift these assignments
-    around, but a given config produces the same colors every run.
-    """
+    """Assigns each configured telescope a stable tab10 color (by name, alphabetically), so a
+    telescope keeps the same color across the Hillas and combined event-rate plots regardless of
+    which telescopes are present in a given run. Stable per config, not across config changes."""
     names = sorted(info["name"] for info in telescope_map.values())
     return {name: TAB10_COLORS[i % len(TAB10_COLORS)] for i, name in enumerate(names)}
 
@@ -145,8 +130,8 @@ def save_fig(fig, path):
 
 
 def save_pedvar_histogram(pedvar, path, color="tab:blue"):
-    """Saves a histogram of the 1024 per-pixel pedvar values (e.g. the mean-over-integral array)
-    to path, colored per color (default = "tab:blue"; see heap.make_pedestals.plot_pedvar_histogram)."""
+    """Saves a histogram of the 1024 per-pixel pedvar values to path, colored per color (see
+    heap.make_pedestals.plot_pedvar_histogram)."""
     save_fig(plot_pedvar_histogram(pedvar, color=color), path)
 
 
@@ -160,18 +145,17 @@ def save_calibration_heatmap(values, colorbar_label, path):
     save_plot(path)
 
 
-def save_pedestal_pedvar_interval_plots(data, timestamps, telescope_dir):
-    """Saves 30-min-interval pedestal/pedvar heatmap grids for a telescope's whole night (both
-    flip sides pooled together - the pointing changes but the interval grid is about calibration
-    drift over time, not flip side) to <telescope_dir>/pedestal_interval.png and
-    pedvar_interval.png (see heap.make_pedestals.plot_pedestal_pedvar_intervals). Does nothing if
-    data is empty."""
+def save_pedestal_pedvar_interval_plots(data, timestamps, source_dir):
+    """Saves 30-min-interval pedestal/pedvar heatmap grids for one source's whole night (both flip
+    sides pooled, since drift over time - not flip side - is what the grid tracks) to
+    <source_dir>/pedestal_interval.png and pedvar_interval.png (see
+    heap.make_pedestals.plot_pedestal_pedvar_intervals). Does nothing if data is empty."""
     pedestal_fig, pedvar_fig = plot_pedestal_pedvar_intervals(data, timestamps)
     if pedestal_fig is None:
         return
 
-    save_fig(pedestal_fig, telescope_dir / "pedestal_interval.png")
-    save_fig(pedvar_fig, telescope_dir / "pedvar_interval.png")
+    save_fig(pedestal_fig, source_dir / "pedestal_interval.png")
+    save_fig(pedvar_fig, source_dir / "pedvar_interval.png")
 
 
 def save_pedestal_mean_over_interval_plot(data, timestamps, path):
@@ -184,11 +168,9 @@ def save_pedestal_mean_over_interval_plot(data, timestamps, path):
 
 
 def add_plot(plots, path, plot_type, telescopes, date_out_dir, caption=None):
-    """Appends a manifest record for a plot file to plots, if it was actually written.
-    Path is stored relative to the night's out_dir (not the run's), so the gallery
-    can link to it as <run_id>/.... caption is optional extra text shown under the
-    plot in the gallery (e.g. to flag a gain map resolved via a fallback tier).
-    """
+    """Appends a manifest record for a plot file to plots, if it was actually written. Path is
+    stored relative to the night's out_dir (not the run's) so the gallery can link to it as
+    <run_id>/.... caption is optional text shown under the plot in the gallery."""
     if not path.exists():
         return
     entry = {
@@ -202,11 +184,9 @@ def add_plot(plots, path, plot_type, telescopes, date_out_dir, caption=None):
 
 
 def plot_combined_event_rate(telescopes, colors, bin_width=30):
-    """Overlays each telescope's post-spike-cut trigger rate (re-binned the same way as the
-    "After Cut" panel of heap.pre_cleaning.spike_cut) on one set of axes, so a run's telescopes
-    can be compared directly. colors: {telescope_name: color}, shared with the Hillas plots (see
-    telescope_color_map()).
-    """
+    """Overlays each telescope's post-spike-cut trigger rate (re-binned like the "After Cut" panel
+    of heap.pre_cleaning.spike_cut) on one set of axes for direct comparison. colors:
+    {telescope_name: color}, shared with the Hillas plots (see telescope_color_map())."""
     fig, ax = plt.subplots(figsize=(10, 4))
     for name, (_, timestamps) in telescopes.items():
         if len(timestamps) == 0:
@@ -228,9 +208,8 @@ def plot_combined_event_rate(telescopes, colors, bin_width=30):
 
 
 def load_all_telescopes(telescope_map, raw_dir, run_out_dir, date_out_dir, manifest):
-    """Loads + cleans data for every configured telescope found in raw_dir (one run).
-    spike_cut plots land in run_out_dir/<DATA_PRODUCT>*<module>/; raw data is read from raw_dir.
-    """
+    """Loads + cleans data for every configured telescope found in raw_dir (one run); spike_cut
+    plots land in run_out_dir/<DATA_PRODUCT>*<module>/."""
     telescopes = {}
     for module, info in telescope_map.items():
         name = info["name"]
@@ -329,10 +308,9 @@ def process_run(run_dir, telescope_map, reference, date_out_dir, run_manifest, c
 
 
 def _sorted_by_time(data_parts, timestamps_parts):
-    """Concatenates chunks of (data, timestamps) - one chunk per source - and sorts the result by
-    timestamp. results.items() (see process_telescope_datasets()) groups process_dataset()'s
-    output by source rather than by time, so pooling multiple sources' frames for one telescope
-    needs an explicit re-sort before any interval-based plot, which assumes chronological order."""
+    """Concatenates chunks of (data, timestamps) and sorts by timestamp. Needed because
+    results.items() (see process_telescope_datasets()) groups by source rather than by time, but
+    interval-based plots assume chronological order."""
     if not data_parts:
         return np.empty((0, 1024)), np.empty((0,))
     data = np.concatenate(data_parts, axis=0)
@@ -344,38 +322,29 @@ def _sorted_by_time(data_parts, timestamps_parts):
 def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, image_threshold, border_threshold, event_preview_min_pixels):
     """Runs process_dataset() once per configured telescope for the whole night: builds
     pedestal/pedvar/gain calibrations, cleans every event's image, and parameterizes it into
-    Hillas parameters (see heap.process_dataset.process_dataset()). It groups the night's runs
-    by source itself, unlike process_run() below which works one run at a time. Writes
-    <date_out_dir>/<name>/<source_slug>/<source_slug>.npz plus that same folder's
-    calibrations.npz (source_slug is source with spaces/other non-alphanumerics replaced by
-    underscores; see heap.process_dataset.slugify()).
+    Hillas parameters (see heap.process_dataset.process_dataset()), grouping by source rather
+    than by run. Writes <date_out_dir>/<name>/<source_slug>/<source_slug>.npz plus that folder's
+    calibrations.npz (source_slug via heap.process_dataset.slugify()).
 
-    Also renders each source's pedestal/pedvar/gain heatmaps and pedvar histogram here (once,
-    since calibrations.npz already covers the whole night) rather than leaving add_calibration_plots()
-    to redraw them from scratch for every run that shares the source. The pedestal/pedvar interval
-    grids and the pedestal-mean-over-interval plot aren't source- or flip-side-specific, so those
-    pool every source's and flip side's frames into one whole-night plot per telescope instead (at
-    <date_out_dir>/<name>/, not nested under a source_slug).
+    Also renders each source's pedestal/pedvar/gain heatmaps, pedvar histogram, and
+    30-min-interval pedestal/pedvar grids here, once, rather than leaving add_calibration_plots()
+    to redraw them per run. The pedestal-mean-over-interval plot isn't source-specific, so that
+    one pools every source's and flip side's frames into one whole-night plot per telescope
+    instead (at <date_out_dir>/<name>/, not nested under a source_slug).
 
-    colors: {telescope_name: color}, used to color each telescope's pedvar histogram (see
+    colors: {telescope_name: color}, used for each telescope's pedvar histogram (see
         telescope_color_map()).
-
-    image_threshold, border_threshold: threshold_clean()'s per-pixel cut, in units of pedvar (see
-        heap.image_cleaning.threshold_clean, called from heap.process_dataset.process_image());
-        from nextday_config.yaml's pipeline section.
-
-    event_preview_min_pixels: an event needs more than this many surviving (post-cleaning) pixels
-        to be included in the returned telescope_events.
+    image_threshold, border_threshold: threshold_clean()'s per-pixel cut in units of pedvar (see
+        heap.image_cleaning.threshold_clean), from nextday_config.yaml's pipeline section.
+    event_preview_min_pixels: minimum surviving (post-cleaning) pixels for an event to be
+        included in the returned telescope_events.
 
     Looks for <raw_dir>/source_run_map.json as a fallback map for identify_source()/
-    identify_flip_side(), used when hk.pff's mount tracking is missing or ambiguous (see
-    process_dataset.load_fallback_map()).
+    identify_flip_side() (see process_dataset.load_fallback_map()).
 
-    Returns {telescope_name: (timestamps, cleaned_images, raw_images)}, one entry per telescope
-    with usable data this night, each array concatenated across every source in chronological
-    order - build_event_preview() samples coincident events from these. Held in memory only
-    (process_dataset() doesn't write raw_images to disk); nothing extra is read from raw_dir or
-    saved for this.
+    Returns {telescope_name: (timestamps, cleaned_images, raw_images)}, concatenated across every
+    source in chronological order - build_event_preview() samples coincident events from these.
+    Held in memory only; nothing extra is read from or saved to raw_dir for this.
     """
     fallback_map_path = raw_dir / "source_run_map.json"
     if not fallback_map_path.exists():
@@ -413,6 +382,11 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
             save_pedvar_histogram(mean_pedvar, source_dir / "pedvar_hist.png", color=colors.get(name, "tab:blue"))
             save_calibration_heatmap(calib["gain"], "Relative gain", source_dir / "gain.png")
 
+            source_data, source_timestamps = _sorted_by_time(
+                [data_preflip, data_postflip], [timestamps_preflip, timestamps_postflip],
+            )
+            save_pedestal_pedvar_interval_plots(source_data, source_timestamps, source_dir)
+
             above_pixel_cut = params_df["N_pix"].values > event_preview_min_pixels
             timestamps_parts.append(params_df["Timestamp"].values[above_pixel_cut])
             cleaned_parts.append(cleaned_images[above_pixel_cut])
@@ -423,14 +397,11 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
 
         print(f"{name}: wrote {len(results)} source(s) to {date_out_dir / name}: {', '.join(sorted(results))}")
 
-        # Pedestal/pedvar interval grids and the mean-over-interval plot aren't source- or
-        # flip-side-specific (unlike pedestal.png/pedvar.png/gain.png above, which are one
-        # calibration per source) - pool every source's and flip side's frames for this telescope
-        # into one whole-night pair of plots, sorted back into chronological order since
-        # results.items() groups by source rather than by time.
+        # The mean-over-interval plot isn't source-specific - pool every source's and flip side's
+        # frames for this telescope into one whole-night plot, sorted back into chronological
+        # order since results.items() groups by source rather than by time.
         telescope_dir = date_out_dir / name
         data_all, timestamps_all = _sorted_by_time(combined_data_parts, combined_ts_parts)
-        save_pedestal_pedvar_interval_plots(data_all, timestamps_all, telescope_dir)
         save_pedestal_mean_over_interval_plot(data_all, timestamps_all, telescope_dir / "pedestal_mean_over_interval.png")
 
         if timestamps_parts:
@@ -445,14 +416,9 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
 
 def add_calibration_plots(run_dir, run_manifest, date_out_dir, fallback_map, hillas_telescopes=()):
     """Adds pedestal/pedvar/gain heatmaps for every telescope present in this run, plus each
-    telescope's own Hillas params histogram and, once, a column pooling every telescope in
-    hillas_telescopes together.
-
-    Reuses the per-source calibrations.npz, pedestal/pedvar/gain heatmaps, and
-    per-telescope hillas_params.png already written by
-    process_telescope_datasets()/build_hillas_plots() (built once across the whole night) instead
-    of recomputing them from this run's frames - must run after those so those files exist.
-    """
+    telescope's own Hillas params histogram and, once, a combined column for hillas_telescopes.
+    Reuses files already written by process_telescope_datasets()/build_hillas_plots() rather than
+    recomputing them - must run after those."""
     for name in run_manifest["telescopes"]:
         try:
             source = identify_source(run_dir, name, fallback_map=fallback_map)
@@ -480,8 +446,8 @@ def add_calibration_plots(run_dir, run_manifest, date_out_dir, fallback_map, hil
             run_manifest["plots"], date_out_dir / name / "pedestal_mean_over_interval.png",
             "pedestal_mean_over_interval", [name], date_out_dir,
         )
-        add_plot(run_manifest["plots"], date_out_dir / name / "pedestal_interval.png", "pedestal_interval", [name], date_out_dir)
-        add_plot(run_manifest["plots"], date_out_dir / name / "pedvar_interval.png", "pedvar_interval", [name], date_out_dir)
+        add_plot(run_manifest["plots"], source_dir / "pedestal_interval.png", "pedestal_interval", [name], date_out_dir, caption=source)
+        add_plot(run_manifest["plots"], source_dir / "pedvar_interval.png", "pedvar_interval", [name], date_out_dir, caption=source)
 
     if hillas_telescopes:
         add_plot(
@@ -491,17 +457,15 @@ def add_calibration_plots(run_dir, run_manifest, date_out_dir, fallback_map, hil
 
 
 def find_coincidences(telescope_events, window=0.001):
-    """Finds every 2-way coincidence between every pair of telescopes in telescope_events (on
-    raw, uncorrected timestamps - see heap.coincidences.match_coinc), then unions overlapping
-    matches into groups via union-find, so a group spans however many telescopes ended up linked
-    together (2 or more).
+    """Finds every 2-way coincidence between telescope pairs (on raw, uncorrected timestamps - see
+    heap.coincidences.match_coinc), then unions overlapping matches via union-find so a group
+    spans however many telescopes ended up linked (2+).
 
     telescope_events: {telescope_name: (timestamps, cleaned_images, raw_images)}, see
         process_telescope_datasets().
 
-    Returns a list of (telescope_names, event_indices, event_times) tuples, one per coincidence
-    group, with telescope_names/event_indices/event_times all ordered the same way (by
-    telescope_events' iteration order).
+    Returns a list of (telescope_names, event_indices, event_times) tuples, one per group, all
+    three ordered the same way (by telescope_events' iteration order).
     """
     names = list(telescope_events)
     parent = {}
@@ -551,9 +515,8 @@ def find_coincidences(telescope_events, window=0.001):
 def plot_preview_event(tel_names, event_idx, telescope_events, all_names):
     """One figure for a single coincident event: 2 rows (raw, cleaned) x len(all_names) columns
     (one per telescope with data this night), matching next_day_plots_pff.ipynb's plot_event().
-    Telescopes not part of this coincidence get a blank (but bordered) column, so events with
-    different numbers of participating telescopes stay directly comparable. Each image is scaled
-    to its own min/max (no shared color scale)."""
+    Telescopes not part of this coincidence get a blank bordered column, so events with different
+    participant counts stay comparable. Each image is scaled to its own min/max."""
     fig, axs = plt.subplots(2, len(all_names), figsize=(3.5 * len(all_names), 7), squeeze=False)
 
     for col, name in enumerate(all_names):
@@ -581,14 +544,13 @@ def plot_preview_event(tel_names, event_idx, telescope_events, all_names):
 
 def build_event_preview(telescope_events, out_dir, manifest, image_threshold, border_threshold, n_events=12, window=0.001):
     """Finds every cross-telescope coincidence across the whole night (see find_coincidences()),
-    randomly samples up to n_events of them, and saves one raw+cleaned image grid per sampled
-    event to <out_dir>/event_preview/event_<n>.png (see plot_preview_event()). Adds an
-    "event_preview" entry to manifest: a description string plus one {path, telescopes,
-    timestamp} record per sampled event, for write_gallery() to render as a bottom-of-page
-    section. Does nothing if fewer than 2 telescopes have data, or no coincidences are found.
+    randomly samples up to n_events, and saves one raw+cleaned image grid per sample to
+    <out_dir>/event_preview/event_<n>.png (see plot_preview_event()). Adds an "event_preview"
+    entry to manifest for write_gallery() to render as a bottom-of-page section. Does nothing if
+    fewer than 2 telescopes have data, or no coincidences are found.
 
-    image_threshold, border_threshold: only used to quote threshold_clean()'s actual cut in the
-        description text - the images themselves were already cleaned with these same values by
+    image_threshold, border_threshold: only used to quote threshold_clean()'s cut in the
+        description text - images were already cleaned with these values by
         process_telescope_datasets().
     """
     if len(telescope_events) < 2:
@@ -624,9 +586,8 @@ def build_event_preview(telescope_events, out_dir, manifest, image_threshold, bo
 
 
 def convert_units(df):
-    """Converts a params_df's pixel-unit columns (see heap.parameterize.calc_params()) to
-    degrees, using the camera's plate scale (0.31 deg/pixel), and re-centers x_c/y_c on the
-    camera's optical center. Returns a copy; df is left untouched."""
+    """Converts a params_df's pixel-unit columns (see heap.parameterize.calc_params()) to degrees
+    (0.31 deg/pixel plate scale) and re-centers x_c/y_c on the optical center. Returns a copy."""
     df = df.copy()
     columns = ["x_c", "y_c", "s_xx", "s_yy", "s_xy", "length", "width", "miss", "distance"]
     for c in columns:
@@ -647,21 +608,15 @@ def postprocess_df(df):
 
 
 def plot_hillas_histograms(dfs, title="Hillas Params", colors=None, pooled_df=None, pooled_label="All telescopes"):
-    """
-    Plots length/width/log10(size)/distance histograms (params_df must already be in degrees,
-    see convert_units()), one histtype="step" line per entry in dfs, overlaid on the same 4 axes.
-    If pooled_df is given, also overlays it as a black, alpha=0.4 filled histogram (e.g. every
-    telescope's events pooled together, alongside each telescope's own step histogram in dfs).
+    """Plots length/width/log10(size)/distance histograms (params_df already in degrees, see
+    convert_units()), one step-histogram line per entry in dfs overlaid on the same 4 axes. If
+    pooled_df is given, also overlays it as a black alpha=0.4 filled histogram.
 
-    Parameters:
-        dfs: {label: params_df}, e.g. one entry per telescope for a per-telescope comparison.
-        title: figure title (default = "Hillas Params")
-        colors: optional {label: color}, so a given telescope keeps the same color across calls
-            (e.g. the per-telescope plot and the combined plot). Falls back to the tab10
-            colormap, by position in dfs, for any label not present.
-        pooled_df: optional params_df of every telescope's events pooled together, drawn as a
-            filled black histogram alongside the per-entry step histograms in dfs.
-        pooled_label: legend label for pooled_df (default = "All telescopes")
+    dfs: {label: params_df}, e.g. one entry per telescope.
+    colors: optional {label: color} so a label keeps the same color across calls; falls back to
+        tab10 by position for any label not present.
+    pooled_df: optional params_df pooled across labels, drawn filled alongside dfs' step lines.
+    pooled_label: legend label for pooled_df (default = "All telescopes")
 
     Returns the Figure.
     """
@@ -716,11 +671,10 @@ def plot_hillas_histograms(dfs, title="Hillas Params", colors=None, pooled_df=No
 
 
 def load_telescope_params_df(telescope_dir):
-    """Loads and concatenates every source's params_df for one telescope (see
-    heap.process_dataset.process_dataset(), which writes one <source_slug>.npz per source under
-    telescope_dir), converted to degrees and postprocessed (see convert_units()/postprocess_df()).
-    Returns None if telescope_dir has no usable source data.
-    """
+    """Loads and concatenates every source's params_df for one telescope (one <source_slug>.npz
+    per source under telescope_dir, see heap.process_dataset.process_dataset()), converted to
+    degrees and postprocessed (see convert_units()/postprocess_df()). Returns None if no usable
+    data."""
     dfs = []
     for npz_path in sorted(telescope_dir.glob("*/*.npz")):
         if npz_path.name == "calibrations.npz":
@@ -736,18 +690,15 @@ def load_telescope_params_df(telescope_dir):
 
 
 def build_hillas_plots(telescope_map, out_dir, colors):
-    """Builds each telescope's own Hillas parameter histogram (length/width/log10(size)/distance,
-    over its whole night of data across every source) at <out_dir>/<name>/hillas_params.png, plus
-    one at <out_dir>/hillas_params_combined.png overlaying every telescope's own step histogram
-    (colored per colors) alongside every telescope's events pooled into one filled histogram (see
-    plot_hillas_histograms()). Reused across every run via add_calibration_plots(), the same way
-    pedestal/pedvar/gain are.
+    """Builds each telescope's own Hillas histogram (length/width/log10(size)/distance, whole
+    night across every source) at <out_dir>/<name>/hillas_params.png, plus one combined overlay
+    at <out_dir>/hillas_params_combined.png (see plot_hillas_histograms()). Reused across every
+    run via add_calibration_plots(), same as pedestal/pedvar/gain.
 
-    colors: {telescope_name: color}, shared with the combined event-rate plot so a given
-        telescope keeps the same color everywhere (see telescope_color_map()).
+    colors: {telescope_name: color}, shared with the combined event-rate plot (see
+        telescope_color_map()).
 
-    Returns the sorted list of telescopes with usable Hillas data (i.e. those making up the
-    combined plot), or [] if none had any.
+    Returns the sorted list of telescopes with usable Hillas data, or [] if none had any.
     """
     telescope_dfs = {}
     for info in telescope_map.values():
