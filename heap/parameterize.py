@@ -3,6 +3,7 @@
 Functions for calculating the Hillas parameters of an image
 """
 import numpy as np
+from matplotlib.patches import Ellipse
 
 def calc_params(
         image: np.ndarray, 
@@ -79,8 +80,8 @@ def calc_params(
     d = float(s_yy - s_xx)
     z = float(np.sqrt(d*d + 4*s_xy*s_xy))
 
-    length = float(np.sqrt( (s_xx + s_yy + z) / 2))
-    width = float(np.sqrt( (s_xx + s_yy - z) / 2))
+    length = float(np.sqrt(max((s_xx + s_yy + z) / 2, 0.0)))
+    width = float(np.sqrt(max((s_xx + s_yy - z) / 2, 0.0)))
 
     # orientation (phi)
     ac = float((d+z)*(y_c-y) + 2.0*s_xy*(x_c-x))
@@ -126,3 +127,31 @@ def calc_params(
         "alpha": float(np.rad2deg(alpha)),
         "phi": float(np.rad2deg(phi)),
     }
+
+
+def draw_params(fig, params: dict, color: str="w", lw: float=2):
+    """
+    Draw the Hillas ellipse for a set of parameters on top of an existing figure.
+
+    Parameters:
+        fig: matplotlib Figure containing the image (e.g. from plt.imshow)
+        params: dict as returned by calc_params
+        color: ellipse edge color
+        lw: ellipse line width
+    Returns the Axes the ellipse was drawn on.
+    """
+    ax = fig.gca()
+    if params["N_pix"] == 0:
+        return ax
+
+    ellipse = Ellipse(
+        (params["x_c"], params["y_c"]),
+        2 * params["length"],
+        2 * params["width"],
+        angle=params["phi"],
+        facecolor="none",
+        edgecolor=color,
+        lw=lw,
+    )
+    ax.add_patch(ellipse)
+    return ax

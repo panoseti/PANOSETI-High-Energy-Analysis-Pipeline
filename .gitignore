@@ -9,9 +9,13 @@ __pycache__
 *.ipynb_checkpoints
 build
 HEAP.egg-info
+uv.lock
 
 # compiled C code
 *.d
 *.so
 *.pcm
 eventbuilding/pcapreader
+
+test_data
+NextDay/test_output

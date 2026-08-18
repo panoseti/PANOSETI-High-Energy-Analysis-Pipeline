@@ -119,14 +119,26 @@ def cut_pkt_loss_old(data,metadata):
     print("Number of Events with package loss: ",len(data)-len(data_cut)," (",round((len(data)-len(data_cut))/len(data)*100,2),"%)")
     return(data_cut,timestamps_cut)
 
+def cut_pkt_loss_low_th(data,metadata):
+    #cut out frames with package loss and return data and timestamps
+    #get pkt number, if it is 0 the corresponding quabo will be missing in the data
+    pkt_num=metadata["pkt_num"]
+    #get timestamps for every quabo
+    timestamps=metadata["tv_sec"]+metadata["tv_usec"]*10**(-6)
+    #it is different for every quabo, I guess it is the time the paket arrived on the daq node, not the actual trigger time, taking min for now, but needs to be reviewed
+    #cut out all data and timestamps with package loss for at least one quabo
+    data_cut=data[(pkt_num!=0)]
+    timestamps_cut=timestamps[(pkt_num!=0)]
+    print("Number of Events with package loss: ",len(data)-len(data_cut)," (",round((len(data)-len(data_cut))/len(data)*100,2),"%)")
+    return(data_cut,timestamps_cut)
 
-def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
+
+def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False):
     '''
     Removes spikes in trigger rate caused e.g. by planes passing through the filed of view
     bin_width: time width in s to determine the trigger rate, a plane takes ~ 10s so should be higher than that
     rate_cut: threshold at which to cut off spikes, excepted trigger rate without mood ~ 0.5-1 Hz
     plotting: plots trigger rate over time before and after cut if True
-    path: path to save the plot to
     '''
     if np.issubdtype(timestamps.dtype, np.datetime64):
         timestamps = timestamps.astype('datetime64[ns]').astype('int64') * 1e-9
@@ -153,7 +165,6 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False,path=None):
         ax[1].set_ylabel("Trigger Rate [Hz]")
         ax[1].set_title("After Cut")
         fig.tight_layout()
-        plt.savefig(path+"spike_cut.png",dpi=300)
         plt.show()
     timestamps_pd=pd.to_datetime(timestamps, unit='s', utc=True).tz_convert('America/Los_Angeles')
     print("Rate spikes at: ",time[rate>2])
@@ -223,6 +234,6 @@ file="start_2025-10-20T06-50-55Z.dp_ph1024.bpp_2.module_254.seqno_0.pff"
 def main():
     data,metadata=read_pff(file)
     data, timestamps=cut_pkt_loss(data,metadata)
-    data_cut,timestamps_cut=spike_cut(data,timestamps,plotting=True,path="")
+    data_cut,timestamps_cut=spike_cut(data,timestamps,plotting=True)
     hk=read_pff_hk()
     data_cut_mer,timestamps_cut_mer,mflip_start,mflip_end=cut_meridian_flip(data_cut,timestamps_cut,hk,plotting=True,path="")
