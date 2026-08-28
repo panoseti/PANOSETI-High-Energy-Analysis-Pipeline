@@ -190,6 +190,16 @@ TH2D* clean(TH2D* image, TH2D* pedvars, TH2D* gains){
     
     // check for isolated pixels and small islands with border pixels
     removeMe.clear();
+
+    // SETI
+    int survivingPixels = 0;
+    for(int i=1; i<=binsX; i++){
+        for(int j=1; j<=binsY; j++){
+            if(newImage->GetBinContent(newImage->GetBin(i,j)) != 0) survivingPixels++;
+        }
+    }
+
+    // island removal
     for(int i=1; i<=binsX; i++){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
@@ -236,7 +246,7 @@ TH2D* clean(TH2D* image, TH2D* pedvars, TH2D* gains){
     }
 
     // SETI
-    if(removeMe.size()<=2){
+    if(survivingPixels<=2){
         removeMe.clear();
     }
 
