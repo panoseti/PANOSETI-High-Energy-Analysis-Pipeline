@@ -1,8 +1,17 @@
 *.vscode
 *.ipynb_checkpoints
+
 # compiled C code
 *.d
 *.so
 *.pcm
+
+# python cached files
+*.pyc
+
+# python package files
+*.egg-info
+
 eventbuilding/pcapreader
 __pycache__
+test_data/

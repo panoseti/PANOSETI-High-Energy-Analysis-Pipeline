@@ -48,9 +48,9 @@ float fTel_Azimuth = 0;
 
 // Magnetic Declination in Degrees (unrotate CORSIKA i.e. ARRANG)
 // float fMag_Dec = 12.77; // LICK
-//float fMag_Dec = 11.03;// PALOMAR
+float fMag_Dec = 11.03;// PALOMAR
 // float fMag_Dec = 10.4; // FLWO
-float fMag_Dec = 0;
+// float fMag_Dec = 0;
 
 // Reconstructed params
 float fShower_Xoffset = -99999.;
@@ -141,28 +141,9 @@ void testspread(double x, double y){
 */
 
 /*
-* Add night sky background roughly consistent with VERITAS, but scaled down
-* to a PANOSETI telescope
+* Add noise consistent with typical pedvar to each pixel
 */
-TH2D* addNSB(TH2D* image){
-
-    // get telescope size to scale NSB
-    t->Draw("telR","","goff");
-    //double telrad = t->GetV1()[0];
-
-    int Nbins = image->GetNcells();
-    TH2D *newImage = (TH2D*)image->Clone();
-    for(int i=1; i<= Nbins ;i++){
-		newImage->AddBinContent(i, (double)r->Poisson(1)); // NSB
-	}
-    image->Delete();
-    return newImage;
-}
-
-/*
-* Add electronic noise to each pixel
-*/
-TH2D* addElectronics(TH2D* image){
+TH2D* addNoise(TH2D* image){
 
     int Nbins = image->GetNcells();
     TH2D *newImage = (TH2D*)image->Clone();
@@ -174,101 +155,24 @@ TH2D* addElectronics(TH2D* image){
     return newImage;
 }
 
+
 /*
-* Compute the fractional area of a square contained within a circle
-* Assumes side of square has unit length
-* Args:
-*   R - radius of the circle
-*   cx - x coordinate of the circle's origin
-*   cy - y coordinate of the circle's origin
-*   sx - x coordinate of the square's origin
-*   sy - y coordinate of the square's origin    
+* Count the number of pixels with signal (non-zero content) in a TH2D image
 */
-double intersectionalArea(int R, int cx, int cy, int sx, int sy){
-    double xdiff = abs(sx-cx);
-    double ydiff = abs(sy-cy);
-    // check if square is fully contained in the circle
-    if( pow(xdiff+0.5,2) + pow(ydiff+0.5,2) < R*R ){
-        return 1.0;
-    // check if square if fully outside the circle
-    }else if( pow(xdiff-0.5,2) + pow(ydiff-0.5,2) > R*R ){
-        return 0.0;
-    // else integrate
-    }else{
-        //
-        // ---- MANUAL INTEGRATION ---- SLOW ----
-        //
-        //
-        /*
-
-        // exploit symmetry to look at top right quartercircle
-        if(sx < cx || sy < cy){
-            sx = cx + xdiff;
-            sy = cy + ydiff;
+int countSignalPixels(TH2D* image) {
+    int count = 0;
+    for(int i = 1; i <= image->GetNbinsX(); i++) {
+        for(int j = 1; j <= image->GetNbinsY(); j++) {
+            if(image->GetBinContent(i, j) > 0) {
+                count++;
+            }
         }
-
-        // if sx > sy, flip sx,sy so function is integrable
-        if(xdiff > ydiff){
-            sx = cx + ydiff;
-            sy = cy + xdiff;
-        }
-
-        // integration bounds of square
-        double xi = sx - 0.5;
-        double xf = sx + 0.5;
-        double yi = sy - 0.5;
-        double yf = sy + 0.5;
-
-        // integration bounds of circle
-        TF1 circle = TF1("circle", "pow([0]*[0]-(x-[1])*(x-[1]),0.5)+[2]", xi, xf);
-        circle.SetParameters(R,cx,cy);
-
-        // draw
-        circle.SetMinimum(yi);
-        circle.SetMaximum(yf);
-        circle.SetFillColor(kRed);
-        circle.SetFillStyle(3004);
-        //circle.Draw("FC");
-
-        
-        // integrate piecewise
-        if(circle.Eval(xi) > yf){
-            // find intersection point
-            double xcrit = circle.GetX(yf);
-            return yf*(xcrit-xi) + circle.Integral(xcrit, xf) - yi;
-        }else{
-            return circle.Integral(xi,xf) - yi;
-        }
-        */ 
-
-        //
-        // ---- LOOKUP INTEGRATION ---- FASTER ----
-        // ---- VALID FOR 32x32 CAMERA SUBDIVIDING EACH PIXEL TO 5x5 AND APERTURE RADIUS 2 ----
-        //
-    
-        // only five cases that are not 0,1
-        if(xdiff==0 && ydiff==2){
-            return 0.478967;
-        }else if(xdiff==2 && ydiff==0){
-            return 0.478967;
-        }else if(xdiff==1 && ydiff==2){
-            return 0.198797;
-        }else if(xdiff==2 && ydiff==1){
-            return 0.198797;
-        }else if(xdiff==1 && ydiff==1){
-            return 0.984969;
-        }else{
-            std::cout<<"WARNING: CANNOT FIND INTEGRATION"<<std::endl;
-            std::cout<<"xdiff: "<<xdiff<<" ydiff: "<<ydiff<<std::endl;
-            return 0;
-        }
-        
     }
-    
+    return count;
 }
 
 /*
-* Clean image according to ADU thresholds
+* Clean image according to image/border thresholds
 */
 TH2D* clean(TH2D* image){
     // threshold cleaning for image pixels
@@ -276,7 +180,7 @@ TH2D* clean(TH2D* image){
     double imageThreshold = 4;
     double borderThreshold = 2; 
 
-    double pedvar = 10.; // same as addElectronics
+    double pedvarSize = 10.; // same as addNoise
 
     int Nbins = image->GetNcells();
     TH2D *newImage = (TH2D*)image->Clone();
@@ -288,14 +192,15 @@ TH2D* clean(TH2D* image){
 	for(int i=1; i<=binsX; i++){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
-            double binSize = newImage->GetBinContent(checkBin);
+            double binSize = newImage->GetBinContent(checkBin); // (pixdata-pedestal)
+            double nsig = binSize/pedvarSize;
 
             bool remove = true;
             // check if pixel is above image threshold
-            if(binSize>=imageThreshold*pedvar){
+            if(nsig>=imageThreshold){
                 remove = false;
             // check if pixel is above border threshold
-            }else if(binSize>=borderThreshold*pedvar){
+            }else if(nsig>=borderThreshold){
                 // check if a neighbor is above image threshold
                 // get neighbors
                 for (int p=i-1; p<=i+1; p++){
@@ -305,8 +210,9 @@ TH2D* clean(TH2D* image){
                             // stay in bounds of image
                             if(p>=1 && p<=binsX && q>=1 && q<=binsY){
                                 double neighbor = newImage->GetBinContent(newImage->GetBin(p,q));
+                                double neighborSig = neighbor/pedvarSize;
                                 // check if pixel borders a pixel above image threshold)
-                                if (neighbor >= imageThreshold*pedvar){
+                                if (neighborSig >= imageThreshold){
                                     remove = false;
                                 } // else it gets removed
                             }
@@ -332,9 +238,11 @@ TH2D* clean(TH2D* image){
 		for(int j=1; j<=binsY; j++){
             int checkBin = newImage->GetBin(i,j);
             double binSize = newImage->GetBinContent(checkBin);
+            double nsig = binSize/pedvarSize;
             // make sure pixel has p.e. before checking to remove
             if(binSize!=0){
                 int neighborCount = 0;
+                int neighborBin = -1;
                 // count neighbors
                 for (int p=i-1; p<=i+1; p++){
                     for (int q=j-1; q<=j+1; q++){
@@ -345,6 +253,7 @@ TH2D* clean(TH2D* image){
                                 // find a neighbor with pixels in it
                                 if(newImage->GetBinContent(newImage->GetBin(p,q)) != 0){
                                     neighborCount++;
+                                    neighborBin = newImage->GetBin(p,q); // only removed if neighborCount == 1
                                 }
                             }
                         }
@@ -355,11 +264,13 @@ TH2D* clean(TH2D* image){
                 if(neighborCount == 0){
                     removeMe.push_back(checkBin);
                 }
-                // remove 2-pixel islands if this pixel or its neighbor is a border pixel
+                // remove 2-pixel islands if either pixel is below threshold
                 else if(neighborCount == 1){
-                    bool isBorderPixel = (binSize < imageThreshold*pedvar);
+
+                    bool isBorderPixel = (nsig < imageThreshold);
                     if(isBorderPixel){
                         removeMe.push_back(checkBin);
+                        removeMe.push_back(neighborBin);
                     }
                 }
             }
@@ -370,25 +281,9 @@ TH2D* clean(TH2D* image){
         newImage->SetBinContent(removeMe[i], 0);
     }
 
-    // discard image if there are fewer than 3 pixels
-    int Nimagepix=0;
-    for(int i = 1; i<=binsX; i++){
-        for(int j = 1; j<=binsY; j++){
-            double binSize = newImage->GetBinContent(i,j);
-            if(binSize!=0){
-                Nimagepix++;
-            }
-        }    
-    }
-    if(Nimagepix < 3){
-        newImage->Reset();
-    }
-
     image->Delete();
     return newImage;
 }
-
-
 /*
 * Attempt image parameterization
 * returns tuple which stores
@@ -397,7 +292,6 @@ TH2D* clean(TH2D* image){
 
 std::tuple<double, double, double, double, double, double, double, double, double, double, double, double> parameterize(TH2D* image){
 	//	Begin moment analysis
-
 	double sumsig = 0;
 	double sumxsig = 0;
 	double sumysig = 0;
@@ -636,6 +530,7 @@ TMultiGraph* eventMap(int eventNumber){
 
     return map;
 }
+
 double slaDranrm( double angle )
 /*
  **  - - - - - - - - - -
@@ -1455,12 +1350,15 @@ TH2D* telEvent(int telNumber, int eventNumber){
     ROOT::Math::RotationZ rz(telAz);
     ROOT::Math::RotationX rx(telZe);
     rotM = rx*rz;
-    
+
+    // unrotate cx,cy from CORSIKA/ARRANG frame to true frame, magnetic declination
+    double magDecRad = -fMag_Dec*TMath::DegToRad();
+
     // fill image
     TH2D* image = new TH2D(Form("T%d",telNumber), Form("T%d",telNumber), 32, -4.95, 4.95, 32, -4.95, 4.95);
     for(int i=0; i<NCp; i++){
-        double xcos_s = -1*cy[i]; // CORSIKA to GrOptics
-        double ycos_s = cx[i]; // CORSIKA to GrOptics
+        double xcos_s = -1*cy[i]*cos(magDecRad) + cx[i]*sin(magDecRad); // CORSIKA to GrOptics
+        double ycos_s = cx[i]*cos(magDecRad) + cy[i]*sin(magDecRad); // CORSIKA to GrOptics
         if (TMath::AreEqualAbs(xcos_s,0.0,epsilon)){xcos_s = 0.0;}
         if (TMath::AreEqualAbs(ycos_s,0.0,epsilon)){ycos_s = 0.0;}
         double zcos_s = sqrt(1-xcos_s*xcos_s-ycos_s*ycos_s);
@@ -1491,18 +1389,8 @@ TH2D* telEvent(int telNumber, int eventNumber){
         image->Fill(-1*x,y,petoadu); 
     }
 
-    image = addNSB(image);
-    image = addElectronics(image);
+    image = addNoise(image);
 
-    // trigger threshold
-    /*
-    if(image->GetMaximum()<6.5*petoadu){
-        image->Reset();
-    }else{
-        image = clean(image);
-        image->Draw("COLZ");
-    }
-    */
     // 2-pixel trigger in quadrants
     int npixtrigq1=0, npixtrigq2=0, npixtrigq3=0, npixtrigq4=0;
     for(int i=1; i<=16; i++){
@@ -1551,40 +1439,6 @@ TH2D* telEvent(int telNumber, int eventNumber){
 }
 
 /*
-* get total signal in a pixel over all events in a single telescope
-* check if cleaning is enabled and if pedestals are subtracted before running
-*/
-void paramPixel(){
-    // check a file is loaded before trying to read data
-    if(!f){
-        std::cout << "No file loaded" << std::endl;
-        return;
-    }
-
-    // openfile
-    std::ofstream datafile;
-    datafile.open("simpixel.csv", std::ios_base::app);
-
-    // make all images in one telescope
-    int N = t->GetEntries();
-
-    const int tel = 1;
-    for(int eventNumber=1; eventNumber<=N+1; eventNumber++){
-        TH2D* image = telEvent(tel, eventNumber);
-        int signal = image->GetBinContent(16,16); //central pixel
-        // make sure image isnt empty
-        if(image->GetSumOfWeights()!=0){
-            datafile << signal << std::endl;
-        }
-        image->Delete();
-        
-    }
-    datafile.close();
-    // std::cout << "Parameterization completed " << std::endl;
-}
-
-
-/*
 * Writes parameter distributions for each shower in a data file to CSV for making histograms like in Fegan 1997
 */
 void paramCSV(bool reconstruct=false){
@@ -1598,13 +1452,13 @@ void paramCSV(bool reconstruct=false){
     // openfile
     std::ofstream datafile;
     std::string output = f->GetName();
-    output = output.substr(0,output.size()-5)+".threshold_clean.csv";
+    output = output.substr(0,output.size()-5)+".csv";
     datafile.open(output);
 
     if(!reconstruct){
-        datafile << "Event,Telescope,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha,TrueAz,TrueZe,TrueXcore,TrueYcore,TrueEnergy" << std::endl;
+        datafile << "Event,Telescope,MeanX,StdX,MeanY,StdY,Phi,Size,Npix,Length,Width,Miss,Distance,Azwidth,Alpha,TrueAz,TrueZe,TrueXcore,TrueYcore,TrueEnergy" << std::endl;
     }else{
-        datafile << "Event,Telescope,MeanX,StdX,MeanY,StdY,Phi,Size,Length,Width,Miss,Distance,Azwidth,Alpha,Az,Ze,Xcore,Ycore,stdP,TrueAz,TrueZe,TrueXcore,TrueYcore,TrueEnergy" << std::endl;
+        datafile << "Event,Telescope,MeanX,StdX,MeanY,StdY,Phi,Size,Npix,Length,Width,Miss,Distance,Azwidth,Alpha,Az,Ze,Xcore,Ycore,stdP,TrueAz,TrueZe,TrueXcore,TrueYcore,TrueEnergy" << std::endl;
     }
 
     // make images and paramaterize every event in each telescope
@@ -1623,6 +1477,7 @@ void paramCSV(bool reconstruct=false){
         double* phi = new double[Ntel];
         double* phi_rad = new double[Ntel];
         double* size = new double[Ntel];
+        int* npix = new int[Ntel];
         double* length = new double[Ntel];
         double* width = new double[Ntel];
         double* miss = new double[Ntel];
@@ -1637,6 +1492,7 @@ void paramCSV(bool reconstruct=false){
         for(int i=0; i<Ntel; i++){
             TH2D* image = telEvent(i+1, eventNumber);
             auto params = parameterize(image);
+            npix[i] = countSignalPixels(image);
             image->Delete();
 
             meanx[i] = std::get<0>(params);
@@ -1691,9 +1547,9 @@ void paramCSV(bool reconstruct=false){
         if(!reconstruct){
             // write data to file
             for(int i = 0; i<Ntel; i++){
-                datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
-                    << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << az << "," << ze << "," << xCore 
-                    << "," << yCore << "," << energy << std::endl;   
+                datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << npix[i] << "," << length[i] << "," << width[i] << "," << miss[i]
+                    << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << az << "," << ze << "," << xCore
+                    << "," << yCore << "," << energy << std::endl;
             }
         }else{
             // reconstruction
@@ -1703,19 +1559,19 @@ void paramCSV(bool reconstruct=false){
 
                     // write data to file
                     for(int i = 0; i<Ntel; i++){
-                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
-                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << fShower_Az << "," 
-                            << fShower_Ze << "," << fShower_Xcore << "," << fShower_Ycore << "," << fShower_stdP << "," 
-                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;   
+                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << npix[i] << "," << length[i] << "," << width[i] << "," << miss[i]
+                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << fShower_Az << ","
+                            << fShower_Ze << "," << fShower_Xcore << "," << fShower_Ycore << "," << fShower_stdP << ","
+                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;
                     }
                 }
             }else{
                 // write data to file
                 for(int i = 0; i<Ntel; i++){
-                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << length[i] << "," << width[i] << "," << miss[i] 
-                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << "nan" << "," 
-                            << "nan" << "," << "nan" << "," << "nan" << "," << "nan" << "," 
-                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;   
+                        datafile << eventNumber << "," << i+1 << "," << meanx[i] << "," << stdx[i] << "," << meany[i] << "," << stdy[i] << "," << phi[i] <<","<< size[i] << "," << npix[i] << "," << length[i] << "," << width[i] << "," << miss[i]
+                            << "," << dist[i] << "," << azwidth[i] << "," << alpha[i] << "," << "nan" << ","
+                            << "nan" << "," << "nan" << "," << "nan" << "," << "nan" << ","
+                            << az << "," << ze << "," << xCore << "," << yCore << "," << energy << std::endl;
                     }
             }
         }
@@ -1785,12 +1641,15 @@ void showClean(int telNumber, int eventNumber){
     ROOT::Math::RotationX rx(telZe);
     rotM = rx*rz;
 
+    // unrotate cx,cy from CORSIKA/ARRANG frame to true frame, magnetic declination
+    double magDecRad = -fMag_Dec*TMath::DegToRad();
+
     TH2D* image = new TH2D("Only Cherenkov Photons", "Only Cherenkov Photons", 32, -4.95, 4.95, 32, -4.95, 4.95);
-    
+
     // fill image
     for(int i=0; i<NCp; i++){
-        double xcos_s = -1*cy[i]; // CORSIKA to GrOptics
-        double ycos_s = cx[i]; // CORSIKA to GrOptics
+        double xcos_s = -1*cy[i]*cos(magDecRad) + cx[i]*sin(magDecRad); // CORSIKA to GrOptics
+        double ycos_s = cx[i]*cos(magDecRad) + cy[i]*sin(magDecRad); // CORSIKA to GrOptics
         if (TMath::AreEqualAbs(xcos_s,0.0,epsilon)){xcos_s = 0.0;}
         if (TMath::AreEqualAbs(ycos_s,0.0,epsilon)){ycos_s = 0.0;}
         double zcos_s = sqrt(1-xcos_s*xcos_s-ycos_s*ycos_s);
@@ -1824,8 +1683,7 @@ void showClean(int telNumber, int eventNumber){
     // Add noise
     //
     c->cd(2);
-    image = addNSB(image);
-    image = addElectronics(image);
+    image = addNoise(image);
     image->SetTitle("NSB Added");
     image->DrawCopy("COLZ1","");    
 
@@ -1956,8 +1814,7 @@ void timegrad(int eventNumber){
         }
 
         // apply cleaning 
-        tmp = addNSB(tmp);
-        tmp = addElectronics(tmp);
+        tmp = addNoise(tmp);
 
         // trigger threshold
         if(tmp->GetMaximum()<6.5*petoadu){
@@ -2036,6 +1893,7 @@ void panodisplay(int eventNumber){
     double* miss = new double[Ntel];
     double* dist = new double[Ntel];
     double* alpha = new double[Ntel];
+    int* npix = new int[Ntel];
 
     double* TelX = new double[Ntel];
     double* TelY = new double[Ntel];
@@ -2052,6 +1910,7 @@ void panodisplay(int eventNumber){
         image->DrawCopy("COLZ1","");
         // parameterization
         auto params = parameterize(image);
+        npix[i] = countSignalPixels(image);
         image->Delete();
 
         TEllipse *e = new TEllipse(std::get<0>(params), std::get<2>(params), std::get<6>(params), std::get<7>(params), 0, 360, std::get<4>(params));
@@ -2082,12 +1941,13 @@ void panodisplay(int eventNumber){
         "SIGMA-Y:\t%f\n"
         "PHI:\t\t%f\n"
         "SIZE:\t\t%f\n"
+        "NPIX:\t\t%d\n"
         "LENGTH:\t\t%f\n"
         "WIDTH:\t\t%f\n"
         "MISS:\t\t%f\n"
         "DIST:\t\t%f\n"
         "ALPHA:\t\t%f\n",
-        i+1, meanx[i],stdx[i],meany[i],stdy[i],phi[i],size[i],length[i],width[i],miss[i],dist[i],alpha[i]);
+        i+1, meanx[i],stdx[i],meany[i],stdy[i],phi[i],size[i],npix[i],length[i],width[i],miss[i],dist[i],alpha[i]);
 
         std::cout<<parameterInfo<<std::endl;
 
