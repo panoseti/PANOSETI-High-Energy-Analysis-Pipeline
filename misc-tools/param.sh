@@ -4,9 +4,8 @@
 
 # Assumes file structure like:
 #   -data
-#       --202510**
-#           --pcap
-#               **.root.array
+#       --2026**
+#           **.root.array
 
 data_dir=$1
 
@@ -21,81 +20,106 @@ get_corrections() {
     # extract date from folder name
     local date_dir="$1"
     local date_str=$(basename "$date_dir")
-    
-    # Extract time from file name
+
+    # check flip
+    local file="$2"
     local filename=$(basename "$file")
-    local time_str=$(echo "$filename" | sed 's/.*_\([0-9]\{6\}\)\..*$/\1/')
-    local time_int=$((10#$hour_min))
+    local flip
+    if [[ "$filename" == *_preflip* ]]; then
+        flip="pre"
+    elif [[ "$filename" == *_postflip* ]]; then
+        flip="post"
+    else
+        echo ""
+        return
+    fi
 
     case "$date_str" in
-        20251017)
-            if [ $time_int -lt 115200 ]; then
-                echo "setCorrections(3,0,-3,-1.106,0,0,0);"
+        20260113)
+            if [ "$flip" = "pre" ]; then
+                echo "setCorrections(1,0,-0.85,2.63,0,0,0);"
+                echo "setCorrections(2,0,-2.26,-11.49,0,0,0);"
+                echo "setCorrections(3,0,-0.15,0.65,0,0,0);"
             else
-                echo "setCorrections(3,0,3,1.106,0,0,180);"
+                echo "setCorrections(1,0,0.62,-2.60,0,0,0);"
+                echo "setCorrections(2,0,2.44,7.81,0,0,0);"
+                echo "setCorrections(3,0,0.29,-1.15,0,0,0);"
             fi
             ;;
-        20251018)
-            if [ $time_int -lt 121034 ]; then
-                echo "setCorrections(3,0,-3,-1.106,0,0,0);"
+        20260114)
+            if [ "$flip" = "pre" ]; then
+                echo "setCorrections(1,0,-1.1,2.64,0,0,0);"
+                echo "setCorrections(2,0,-2.27,-5.73,0,0,0);"
+                echo "setCorrections(3,0,-0.19,0.57,0,0,0);"
             else
-                echo "setCorrections(3,0,3,1.106,0,0,180);"
+                echo "setCorrections(1,0,0.85,-2.54,0,0,0);"
+                echo "setCorrections(2,0,2.44,3.37,0,0,0);"
+                echo "setCorrections(3,0,0.07,-1.53,0,0,0);"
             fi
             ;;
-        20251019)
-            if [ $time_int -lt 113040 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
+        20260115)
+            if [ "$flip" = "pre" ]; then
+                echo "setCorrections(1,0,-0.98,2.84,0,0,0);"
+                echo "setCorrections(2,0,-2.31,-6.51,0,0,0);"
+                echo "setCorrections(3,0,-0.18,0.48,0,0,0);"
             else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
+                echo "setCorrections(1,0,0.90,-2.64,0,0,0);"
+                echo "setCorrections(2,0,2.51,3.43,0,0,0);"
+                echo "setCorrections(3,0,0.08,-1.31,0,0,0);"
             fi
             ;;
-        20251020)
-            if [ $time_int -lt 113040 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
-            else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
+        20260116)
+            if [ "$flip" = "post" ]; then
+                echo "setCorrections(1,0,0.53,-2.31,0,0,0);"
+                echo "setCorrections(2,0,2.23,1.16,0,0,0);"
+                echo "setCorrections(3,0,0.09,-1.23,0,0,0);"
             fi
             ;;
-        20251021)
-            if [ $time_int -lt 112631 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
-            else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
+        20260117)
+            if [ "$flip" = "post" ]; then
+                echo "setCorrections(1,0,0.82,-2.53,0,0,0);"
+                echo "setCorrections(2,0,2.53,-1.03,0,0,0);"
+                echo "setCorrections(3,0,0.44,1.08,0,0,0);"
             fi
             ;;
-        20251022)
-            if [ $time_int -lt 111929 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
-            else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
+        20260118)
+            if [ "$flip" = "post" ]; then
+                echo "setCorrections(1,0,0.91,-2.48,0,0,0);"
+                echo "setCorrections(2,0,2.53,-0.91,0,0,0);"
+                echo "setCorrections(3,0,0.03,-1.33,0,0,0);"
             fi
             ;;
-        20251023)
-            if [ $time_int -lt 110000 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
+        20260119)
+            if [ "$flip" = "pre" ]; then
+                echo "setCorrections(1,0,-1.15,2.84,0,0,0);"
+                echo "setCorrections(2,0,-2.27,0.77,0,0,0);"
+                echo "setCorrections(3,0,-0.32,0.65,0,0,0);"
             else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
+                echo "setCorrections(1,0,0.68,-2.58,0,0,0);"
+                echo "setCorrections(2,0,2.45,-1.17,0,0,0);"
+                echo "setCorrections(3,0,0.03,-1.31,0,0,0);"
             fi
             ;;
-        20251024)
-            if [ $time_int -lt 111407 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
+        20260120)
+            if [ "$flip" = "pre" ]; then
+                echo "setCorrections(1,0,-1.5,2.84,0,0,0);"
+                echo "setCorrections(2,0,-2.41,0.45,0,0,0);"
+                echo "setCorrections(3,0,-0.29,0.66,0,0,0);"
             else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
+                echo "setCorrections(1,0,0.69,-2.57,0,0,0);"
+                echo "setCorrections(2,0,2.48,-1.47,0,0,0);"
+                echo "setCorrections(3,0,0.12,-1.23,0,0,0);"
             fi
             ;;
-        20251028)
-            if [ $time_int -lt 105835 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
+        20260121)
+            if [ "$flip" = "pre" ]; then
+                echo "setCorrections(1,0,-1.14,2.70,0,0,0);"
+                echo "setCorrections(2,0,-2.42,0.34,0,0,0);"
+                echo "setCorrections(3,0,-0.29,0.60,0,0,0);"
             else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
-            fi
-            ;;
-        20251029)
-            if [ $time_int -lt 105435 ]; then
-                echo "setCorrections(3,0,-2,-0.106,0,0,0);"
-            else
-                echo "setCorrections(3,0,2,0.106,0,0,180);"
+                echo "setCorrections(1,0,0.88,-2.65,0,0,0);"
+                echo "setCorrections(2,0,2.56,-1.65,0,0,0);"
+                echo "setCorrections(3,0,0.28,-1.13,0,0,0);"
             fi
             ;;
     esac
@@ -106,8 +130,8 @@ get_corrections() {
 process_file() {
     local file="$1"
     local date_dir="$2"
-    local base="${file%.array}"
-    local corrections=$(get_corrections "$date_dir")
+    local base="${file%.corr.array}"
+    local corrections=$(get_corrections "$date_dir" "$file")
 
     # with corrections
     printf ".L panodisplay_REALDATA.C\nreadFile(\"%s\")\n%s\nparamCSV()\n" "$base" "$corrections" | root -l -b
@@ -121,8 +145,7 @@ export -f process_file
 export -f get_corrections
 
 # Loop over all date directories matching pattern
-for date_dir in "$data_dir"/202510*/; do
-    pcap_dir="${date_dir}pcap"
-    echo "Processing directory: $pcap_dir"
-    find "$pcap_dir" -type f -name "*.root.array" | parallel -j 8 process_file {} "$date_dir"
+for date_dir in "$data_dir"/*/; do
+    echo "Processing directory: $date_dir"
+    find "$date_dir" -maxdepth 1 -type f -name "*flip*.root.corr.array" | parallel -j 8 process_file {} "$date_dir"
 done
