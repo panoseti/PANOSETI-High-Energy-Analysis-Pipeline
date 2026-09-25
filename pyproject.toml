@@ -15,7 +15,8 @@ dependencies = [
   "numpy",
   "matplotlib",
   "pypff",
-  "uproot"
+  "uproot",
+  "pyyaml"
 ]
 
 [tool.setuptools]
