@@ -3,7 +3,15 @@
 Functions for calculating the Hillas parameters of an image
 """
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Ellipse
+
+TAB10_COLORS = plt.get_cmap("tab10").colors
+
+# viridis from blue up, ramping from black, so empty camera pixels (0, or NaN after cleaning) read as black
+CAMERA_CMAP = LinearSegmentedColormap.from_list("black_viridis", ["black", *plt.get_cmap("viridis")(np.linspace(0.3, 1, 8))])
+CAMERA_CMAP.set_bad("black")
 
 def calc_params(
         image: np.ndarray, 
@@ -155,3 +163,66 @@ def draw_params(fig, params: dict, color: str="w", lw: float=2):
     )
     ax.add_patch(ellipse)
     return ax
+
+
+def plot_hillas_histograms(dfs, title="Hillas Params", colors=None, pooled_df=None, pooled_label="All telescopes"):
+    """Plots length/width/log10(size)/distance histograms (params_df already in degrees), one
+    step-histogram line per entry in dfs overlaid on the same 4 axes. If pooled_df is given, also
+    overlays it as a black alpha=0.4 filled histogram.
+
+    dfs: {label: params_df}, e.g. one entry per telescope.
+    colors: optional {label: color} so a label keeps the same color across calls; falls back to
+        tab10 by position for any label not present.
+    pooled_df: optional params_df pooled across labels, drawn filled alongside dfs' step lines.
+    pooled_label: legend label for pooled_df (default = "All telescopes")
+
+    Returns the Figure.
+    """
+    fig, axs = plt.subplots(2, 2, figsize=(12, 12))
+    axs = axs.flatten()
+    fig.suptitle(title)
+
+    axs[0].set_title("length")
+    axs[0].set_xlabel("degrees")
+    axs[0].set_ylabel("normalized counts")
+
+    axs[1].set_title("width")
+    axs[1].set_xlabel("degrees")
+    axs[1].set_ylabel("normalized counts")
+
+    axs[2].set_title("log10(size)")
+    axs[2].set_yscale("log")
+    axs[2].set_xlabel("log10(ADC)")
+    axs[2].set_ylabel("normalized counts")
+
+    axs[3].set_title("distance")
+    axs[3].set_xlabel("degrees")
+    axs[3].set_ylabel("normalized counts")
+
+    colors = colors or {}
+
+    for i, (name, df) in enumerate(dfs.items()):
+        color = colors.get(name, TAB10_COLORS[i % len(TAB10_COLORS)])
+        label = f"{name} N={len(df)}"
+        width_mean = df.width.mean()
+        width_label = f"{label}, $\\mu$={width_mean:.3f}°"
+        axs[0].hist(df.length, bins=80, range=(0, 2), histtype="step", density=True, label=label, color=color)
+        axs[1].hist(df.width, bins=80, range=(0, 1), histtype="step", density=True, label=width_label, color=color)
+        axs[1].axvline(width_mean, color=color, linestyle="--", linewidth=1.5)
+        axs[2].hist(np.log10(df["size"]), bins=80, range=(0, 6), histtype="step", density=True, label=label, color=color)
+        axs[3].hist(df.distance, bins=80, range=(0, 6), histtype="step", density=True, label=label, color=color)
+
+    if pooled_df is not None:
+        label = f"{pooled_label} N={len(pooled_df)}"
+        width_mean = pooled_df.width.mean()
+        width_label = f"{label}, $\\mu$={width_mean:.3f}°"
+        axs[0].hist(pooled_df.length, bins=80, range=(0, 2), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
+        axs[1].hist(pooled_df.width, bins=80, range=(0, 1), histtype="stepfilled", density=True, label=width_label, color="black", alpha=0.4)
+        axs[2].hist(np.log10(pooled_df["size"]), bins=80, range=(0, 6), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
+        axs[3].hist(pooled_df.distance, bins=80, range=(0, 6), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
+
+    for ax in axs:
+        ax.legend(loc="upper right")
+
+    fig.tight_layout()
+    return fig

@@ -1,4 +1,4 @@
-# Config for run_nextday_pipeline.py.
+# Config for NextDay/run_nextday_pipeline.py.
 # Paths are resolved relative to the project root if not absolute.
 
 paths:
@@ -34,6 +34,7 @@ pipeline:
   # heap.process_dataset.process_image()).
   image_threshold: 4.0
   border_threshold: 2.0
-  # Event Preview cut: minimum surviving (post-cleaning) pixels for an event to be eligible for
-  # cross-telescope coincidence matching (see find_coincidences()/build_event_preview()).
+  # Minimum surviving (post-cleaning) pixels (N_pix >= this) for an event to be eligible for
+  # cross-telescope coincidence matching (see find_coincidences()/build_event_preview()) and to
+  # appear in the Hillas histograms.
   event_preview_min_pixels: 3

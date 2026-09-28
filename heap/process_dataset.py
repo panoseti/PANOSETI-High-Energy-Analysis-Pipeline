@@ -6,17 +6,21 @@ and collecting Hillas parameters into a table.
 import json
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
+import astropy.units as u
 import numpy as np
 import pandas as pd
 import pypff
+from astropy.coordinates import SkyCoord
 
 from heap.coincidences import load_telescope_tv
 from heap.image_cleaning import threshold_clean
 from heap.make_gain_map import gain_from_pedvars
 from heap.make_pedestals import calculate_pedestal_and_pedvar
 from heap.parameterize import calc_params
+from heap.sources import match_source
 
 
 def slugify(text, sep="-"):
@@ -34,6 +38,7 @@ def process_image(
         y: float = None,
         image_threshold: float = 4.0,
         border_threshold: float = 2.0,
+        keep_brightest_island: bool = False,
 ):
     """
     Pedestal-subtract, threshold-clean, gain-correct, and parameterize a single camera image.
@@ -59,6 +64,7 @@ def process_image(
             Default value is camera center.
         image_threshold: image pixel threshold, in units of pedvar
         border_threshold: border pixel threshold, in units of pedvar
+        keep_brightest_island: keep only the brightest island, see threshold_clean()
 
     Returns:
         cleaned: the cleaned, gain-corrected image, shape (32, 32)
@@ -77,6 +83,7 @@ def process_image(
         pedvar,
         image_threshold=image_threshold,
         border_threshold=border_threshold,
+        keep_brightest_island=keep_brightest_island,
     )
 
     cleaned = cleaned / gain
@@ -376,10 +383,31 @@ def discover_runs(raw_dir):
     return sorted((unwrap_duplicate_dir(p) for p in base.iterdir() if p.is_dir()), key=lambda p: p.name)
 
 
+HK_MOUNT_NAMES = {"HELI": "PTI"} # telescopes whose hk.pff mount table uses another name
+
+
+@lru_cache(maxsize=128)
+def _get_hk(run_dir):
+    """This run's parsed hk.pff tables, cached per run folder since parsing is slow and every
+    telescope's source/flip side/pointing lookups read the same run's hk. Treat as read-only."""
+    return pypff.PanosetiRun(run_dir).get_hk()
+
+
 def _get_mount_hk(run_dir, telescope):
     """Returns hk.pff's MOUNT_<TELESCOPE> table for this run, or None if it's not present
     (e.g. telescope has no tracked mount or it was never written)."""
-    return pypff.PanosetiRun(run_dir).get_hk().get(f"MOUNT_{telescope.upper()}")
+    name = telescope.upper()
+    return _get_hk(str(Path(run_dir).resolve())).get(f"MOUNT_{HK_MOUNT_NAMES.get(name, name)}")
+
+
+def _mount_pointing(mount):
+    """Median J2000 RA/Dec while tracking in one run's MOUNT table, or None if it never tracked."""
+    tracking = np.asarray(mount["tracking"]).astype(bool)
+    if not tracking.any():
+        return None
+    ra = np.median(np.asarray(mount["ra_hours_j2000"], dtype=float)[tracking]) * 15
+    dec = np.median(np.asarray(mount["dec_deg_j2000"], dtype=float)[tracking])
+    return SkyCoord(ra, dec, unit=u.deg)
 
 
 def identify_source(run_dir, telescope, fallback_map=None):
@@ -387,7 +415,8 @@ def identify_source(run_dir, telescope, fallback_map=None):
     Identify which astronomical source a run was tracking.
 
     Tries target_name from hk.pff's MOUNT_<TELESCOPE> table first. 
-    Falls back to fallback_map when it's missing or blank.
+    Falls back to fallback_map when it's missing or blank, then to the heap.sources catalog
+    source nearest the mount's tracked pointing (see heap.sources.match_source()).
 
     Parameters:
         run_dir: path to one run folder
@@ -407,7 +436,16 @@ def identify_source(run_dir, telescope, fallback_map=None):
     if fallback_map is not None and run_dir.name in fallback_map:
         return fallback_map[run_dir.name]["source"]
 
-    raise ValueError(f"Could not identify source for {run_dir}: no usable hk target_name and no fallback_map entry")
+    pointing = _mount_pointing(mount) if mount is not None else None
+    if pointing is not None:
+        source = match_source(pointing)
+        if source is not None:
+            return source
+
+    raise ValueError(
+        f"Could not identify source for {run_dir}: no usable hk target_name, no fallback_map entry, "
+        f"and no heap.sources catalog source near the pointing ({pointing.to_string('hmsdms') if pointing is not None else 'no tracked hk pointing'})"
+    )
 
 
 def identify_flip_side(run_dir, telescope, fallback_map=None):
@@ -506,6 +544,7 @@ def process_dataset(
         y: float = None,
         image_threshold: float = 4.0,
         border_threshold: float = 2.0,
+        keep_brightest_island: bool = False,
 ):
     """
     Run the full pipeline for one telescope's data in a night's raw_dir.
@@ -530,11 +569,11 @@ def process_dataset(
             used when hk.pff's mount data is missing
         rate_cut: spike_cut's trigger-rate threshold (Hz), see coincidences.load_telescope_tv
         time_window, max_gap, nsig, fit_gaussian: passed through to build_calibrations()
-        x, y, image_threshold, border_threshold: passed through to process_image()
+        x, y, image_threshold, border_threshold, keep_brightest_island: passed through to process_image()
 
     Returns:
         {source_name: (cleaned_images, params_df, raw_images, data_preflip, timestamps_preflip,
-        data_postflip, timestamps_postflip)}, one entry per source found in raw_dir - see
+        data_postflip, timestamps_postflip)}, one entry per source found in raw_dir with usable frames - see
         build_calibrations() and process_image() for what cleaned_images/params_df hold.
         raw_images is the pre-cleaning frame for each row of cleaned_images/params_df, aligned
         by position (it's build_calibrations()'s sorted/merged `data`, not a copy - nothing
@@ -558,6 +597,9 @@ def process_dataset(
 
         data_preflip, timestamps_preflip = _load_runs(runs_by_flip["preflip"], module_pattern, rate_cut)
         data_postflip, timestamps_postflip = _load_runs(runs_by_flip["postflip"], module_pattern, rate_cut)
+        if len(data_preflip) + len(data_postflip) == 0:
+            print(f"  Skipping {source}: no usable {telescope} frames (all cut for packet loss/spikes)")
+            continue
 
         gain_map, gain_source, gain_caption = resolve_gain_map(
             source, data_preflip, timestamps_preflip, data_postflip, timestamps_postflip,
@@ -582,6 +624,7 @@ def process_dataset(
                 x=x, y=y,
                 image_threshold=image_threshold,
                 border_threshold=border_threshold,
+                keep_brightest_island=keep_brightest_island,
             )
 
             cleaned_images.append(cleaned)

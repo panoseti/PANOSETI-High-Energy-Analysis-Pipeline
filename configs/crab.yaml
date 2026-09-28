@@ -1,0 +1,91 @@
+# Config for analysis_tools/pff_analysis.ipynb: one source over one or more nights of pff data.
+# Loaded by heap.config.load_analysis_config(). Paths are resolved relative to the project root if not absolute.
+
+paths:
+  # Holds one <YYYYMMDD>/ folder of runs per night.
+  raw_data_dir: /home/nkorzoun/research/PANOSETI/data
+  # Cleaned images, Hillas parameters, and calibrations, per night.
+  # Nights already here are not reprocessed (unless the notebook's REPROCESS), so give configs with
+  # different telescopes/pipeline settings their own output_dir.
+  output_dir: /home/nkorzoun/research/PANOSETI/data/processed
+
+source:
+  # hk target_name, else heap.sources catalog name; its catalog position is the on region center.
+  name: Crab
+  # Nights to analyze, e.g. [20260917, 20260918]; null = every night in raw_data_dir.
+  dates: null
+  # Each run's pointing (camera center) comes from the reference telescope's hk mount table. Only for
+  # runs whose hk mount data is missing or wrong, give the pointing here, by run folder name, as
+  # "hh mm ss +dd mm ss" or [RA, Dec] in degrees, e.g.
+  #   pointing_overrides:
+  #     obs_Palomar.start_2026-09-17T09:50:18Z.runtype_eng-dual.pffd: "05 34 31.78 +22 31 02.6"
+  #     obs_Palomar.start_2026-09-18T10:53:14Z.runtype_ph.pffd: [83.6324, 21.5174]
+  pointing_overrides: {}
+
+telescopes:
+  # module number -> telescope name and rate_cut (spike_cut's trigger-rate threshold in Hz).
+  module_250:
+    name: Heli
+    rate_cut: 10
+  module_252:
+    name: Fern
+    rate_cut: 10
+  module_253:
+    name: Winter
+    rate_cut: 10
+  module_254:
+    name: Gattini
+    rate_cut: 10
+
+pipeline:
+  # Data product tag in .pff filenames.
+  data_product: dp_ph1024
+  # threshold_clean()'s per-pixel cuts, in units of pedvar (see heap.image_cleaning.threshold_clean).
+  image_threshold: 4.0
+  border_threshold: 2.0
+  # Keep only each image's brightest island (8-connected group of surviving pixels), so separate
+  # islands don't distort the Hillas parameters (see heap.image_cleaning.threshold_clean).
+  keep_brightest_island: true
+
+events:
+  # Telescope other telescopes' timestamps get corrected against; its mount gives each run's pointing.
+  reference: Winter
+  # Coincidence window (s), after correcting each telescope's timestamps against reference.
+  coinc_window: 0.001
+  # Rotate postflip images by 180 deg into the preflip camera frame.
+  rotate_postflip: true
+  # {telescope: efficiency}, divides Size; panodisplay_REALDATA.C used Heli (PTI) 0.46, Fern 1.49,
+  # Winter 1.0 for Jan 2026.
+  rel_tel_efficiency: {}
+  # Offsets (deg) between each camera and the reference mount's pointing, subtracted from MeanX/MeanY
+  # (postflip offsets in the rotated, preflip frame), e.g.
+  #   20260917:
+  #     Fern:
+  #       preflip: [0.05, -0.02]
+  pointing_corrections: {}
+
+cuts:
+  # Minimum number of pixels in an image.
+  min_npix: 3
+  # Minimum number of telescopes in an event.
+  min_tel: 2
+  # Restrict the analysis to these telescopes; null = every telescope above.
+  telescopes: null
+  # On/off region radius and theta square cut (deg).
+  theta: 0.2
+  # Max distance cut (deg) on each event's farthest image from the test position; null for no cut.
+  max_distance: 2
+  # "reflected" (around each run's pointing) or "ring" (around the test position).
+  off_regions: reflected
+  # {column: [mode, threshold]}, applied in order; comment a line out to turn that cut off.
+  #   nsigma - per-telescope (mean + threshold*std)
+  #   value  - fixed threshold, same for all telescopes (deg)
+  # Image cuts are applied before reconstruction.
+  image_cuts:
+    Width: [nsigma, 0.5]
+    # Length: [value, 1.2]
+  # Position cuts (Distance, Alpha, Miss) are recomputed against each test position (on/off region center).
+  position_cuts:
+    # Distance: [value, 1.5]
+    # Alpha: [value, 20]
+    # Miss: [value, 1]

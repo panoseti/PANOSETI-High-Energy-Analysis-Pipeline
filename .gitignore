@@ -10,6 +10,7 @@ __pycache__
 build
 HEAP.egg-info
 uv.lock
+heap/__version__.py
 
 # compiled C code
 *.d
