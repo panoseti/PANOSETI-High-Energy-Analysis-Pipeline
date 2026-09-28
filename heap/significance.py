@@ -1,7 +1,7 @@
 """significance
 
 On/off region counting, Li & Ma significance, and sky maps for reconstructed arrival directions
-(see heap.reconstruction), as in 3tel-Analysis/analysis.ipynb.
+(see heap.reconstruction).
 
 Each run is counted in its own camera frame (degrees from that run's pointing, see make_wcs() and
 heap.events.run_pointings()), so runs with different wobble offsets combine correctly: a sky
