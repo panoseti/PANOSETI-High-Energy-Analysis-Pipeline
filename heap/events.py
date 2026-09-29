@@ -288,33 +288,28 @@ def build_events(telescopes: dict, reference: str, window: float = 0.001, plotti
     return pd.concat(parts).sort_values(["Event", "Telescope"], ignore_index=True)
 
 
-def build_array_events(
+def load_camera_frames(
         output_dir,
         raw_dir,
         date: str,
         source: str,
         telescopes: list,
-        reference: str,
-        window: float = 0.001,
         rotate_postflip: bool = True,
         rel_tel_efficiency: dict = None,
         pointing_corrections: dict = None,
-        plotting: bool = False,
 ):
     """
-    load_camera_frame() for every telescope with processed data for source on date, then
-    build_events(). Adds a Date column holding date and a Run column holding each event's run
-    folder name (see run_of(), with reference's runs).
+    load_camera_frame() for every telescope with processed data for source on date.
 
     Parameters:
         output_dir: processed data dir (holding <date>/), see process_night()
         raw_dir: this night's raw data dir, for flip sides (see source_runs())
         rel_tel_efficiency: optional {telescope: efficiency}, see load_camera_frame()
         pointing_corrections: optional {(date, telescope, flip_side): (dx, dy)} in deg
-        window, reference, rotate_postflip, plotting: see build_events()/load_camera_frame()
+        rotate_postflip: see load_camera_frame()
 
     Returns:
-        see build_events()
+        {telescope: DataFrame from load_camera_frame()}, {telescope: runs from source_runs()}
     """
     frames = {}
     runs = {}
@@ -333,7 +328,37 @@ def build_array_events(
             rel_efficiency=(rel_tel_efficiency or {}).get(name, 1.0),
             pointing_corrections=corrections,
         )
+    return frames, runs
 
+
+def build_array_events(
+        output_dir,
+        raw_dir,
+        date: str,
+        source: str,
+        telescopes: list,
+        reference: str,
+        window: float = 0.001,
+        rotate_postflip: bool = True,
+        rel_tel_efficiency: dict = None,
+        pointing_corrections: dict = None,
+        plotting: bool = False,
+):
+    """
+    load_camera_frames() then build_events(). Adds a Date column holding date and a Run column
+    holding each event's run folder name (see run_of(), with reference's runs).
+
+    Parameters:
+        output_dir, raw_dir, rotate_postflip, rel_tel_efficiency, pointing_corrections: see load_camera_frames()
+        window, reference, plotting: see build_events()
+
+    Returns:
+        see build_events()
+    """
+    frames, runs = load_camera_frames(
+        output_dir, raw_dir, date, source, telescopes, rotate_postflip=rotate_postflip,
+        rel_tel_efficiency=rel_tel_efficiency, pointing_corrections=pointing_corrections,
+    )
     events = build_events(frames, reference, window=window, plotting=plotting)
     if events is not None:
         events.insert(1, "Date", date)
