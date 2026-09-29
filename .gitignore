@@ -18,5 +18,4 @@ heap/__version__.py
 *.pcm
 eventbuilding/pcapreader
 
-test_data
 NextDay/test_output

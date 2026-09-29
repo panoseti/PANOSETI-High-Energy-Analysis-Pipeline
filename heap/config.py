@@ -20,7 +20,7 @@ SECTIONS = {
     "cuts": {"min_npix", "min_tel", "telescopes", "theta", "max_distance", "off_regions", "image_cuts", "position_cuts"},
 }
 CUT_MODES = {"nsigma", "value"}
-POSITION_CUT_COLUMNS = {"Distance", "Alpha", "Miss"}
+POSITION_CUT_COLUMNS = {"distance", "alpha", "miss"}
 FLIP_SIDES = {"preflip", "postflip"}
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -73,7 +73,7 @@ def load_analysis_config(path):
             source.dates: list of "YYYYMMDD" strings, or None
             source.pointing_overrides: {run folder name: SkyCoord}
             events.pointing_corrections: {(date, telescope, flip_side): (dx, dy)}, see
-                heap.events.build_night_events()
+                heap.events.build_array_events()
             cuts.telescopes: list of telescope names (default = every telescope in telescopes)
             cuts.image_cuts, cuts.position_cuts: {column: (mode, threshold)}, see
                 heap.events.apply_cuts() and heap.significance.OnOffCounter

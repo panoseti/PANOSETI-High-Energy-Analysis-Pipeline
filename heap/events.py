@@ -4,10 +4,10 @@ Builds array events (images from 2+ telescopes of the same shower) out of per-te
 parameters (<output_dir>/<date>/<telescope>/<source_slug>/<source_slug>.npz, see process_night()
 and heap.process_dataset.process_dataset()), applies the analysis cuts, and plots single events.
 
-Hillas parameters are converted to degrees on the panodisplay_REALDATA.C camera (32 pixels over
-+-4.95 deg, origin at camera center). x_c is the column index and y_c the row index of the (32, 32)
-image, so MeanX/MeanY here are the transpose of the ROOT CSVs' MeanX/MeanY (ROOT fills bin
-(i+1, j+1) from pixel [i][j]).
+Hillas parameters are in degrees on the panodisplay_REALDATA.C camera (32 pixels over +-4.95 deg,
+origin at camera center, see heap.parameterize.calc_params()). x_c runs along the columns and y_c
+along the rows of the (32, 32) image, so x_c/y_c here are the transpose of the ROOT CSVs'
+MeanX/MeanY (ROOT fills bin (i+1, j+1) from pixel [i][j]).
 """
 import json
 from functools import cache
@@ -22,13 +22,10 @@ from matplotlib.colors import to_rgba
 from matplotlib.patches import Ellipse
 
 from heap import coincidences as coinc
-from heap.parameterize import CAMERA_CMAP, TAB10_COLORS, plot_hillas_histograms
+from heap.parameterize import CAMERA_CMAP, CAMERA_HALF_WIDTH, TAB10_COLORS, plot_hillas_histograms
 from heap.significance import make_wcs
 from heap.process_dataset import _get_mount_hk, _mount_pointing, _run_start_epoch, discover_runs, group_runs_by_source, load_fallback_map, process_dataset, slugify
 
-PLATE_SCALE = 9.9 / 32 # deg/pixel
-CAMERA_CENTER = 15.5 # pixel, calc_params()' default test position
-CAMERA_HALF_WIDTH = 4.95 # deg
 
 
 def params_path(output_dir, date, telescope, source):
@@ -190,20 +187,20 @@ def load_camera_frame(
         pointing_corrections: dict = None,
 ):
     """
-    Load one telescope's Hillas parameters for one night and convert them to the camera frame in
-    degrees, sorted by time.
+    Load one telescope's Hillas parameters for one night into the camera frame (degrees), sorted by
+    time.
 
     Parameters:
         npz_path: <source_slug>.npz written by heap.process_dataset.process_dataset()
         telescope: telescope name, stored in the Telescope column
         runs_by_flip: this night's runs of the source, see source_runs()
         rotate_postflip: rotate postflip images by 180 deg into the preflip camera frame
-        rel_efficiency: relative telescope efficiency; Size is divided by it
-        pointing_corrections: optional {flip_side: (dx, dy)} in deg, subtracted from MeanX/MeanY
+        rel_efficiency: relative telescope efficiency; size is divided by it
+        pointing_corrections: optional {flip_side: (dx, dy)} in deg, subtracted from x_c/y_c
 
     Returns:
         DataFrame with ImageIndex (row in the npz's cleaned_images, which holds every run of the source that night), Telescope, Timestamp,
-        FlipSide, MeanX, MeanY, Phi, Size, Npix, Length, Width, Miss, Distance, Alpha
+        FlipSide, and the npz's Hillas parameters (x_c, y_c, phi, size, N_pix, length, width, miss, distance, alpha)
     """
     npz = np.load(npz_path)
     p = pd.DataFrame({col: npz[col] for col in npz.files if col != "cleaned_images"})
@@ -214,26 +211,26 @@ def load_camera_frame(
         "Telescope": telescope,
         "Timestamp": p.Timestamp,
         "FlipSide": flip_side_of(p.Timestamp.to_numpy(), runs_by_flip),
-        "MeanX": (p.x_c - CAMERA_CENTER) * PLATE_SCALE,
-        "MeanY": (p.y_c - CAMERA_CENTER) * PLATE_SCALE,
-        "Phi": p.phi,
-        "Size": p["size"] / rel_efficiency,
-        "Npix": p.N_pix,
-        "Length": p.length * PLATE_SCALE,
-        "Width": p.width * PLATE_SCALE,
-        "Miss": p.miss * PLATE_SCALE,
-        "Distance": p.distance * PLATE_SCALE,
-        "Alpha": p.alpha,
+        "x_c": p.x_c,
+        "y_c": p.y_c,
+        "phi": p.phi,
+        "size": p["size"] / rel_efficiency,
+        "N_pix": p.N_pix,
+        "length": p.length,
+        "width": p.width,
+        "miss": p.miss,
+        "distance": p.distance,
+        "alpha": p.alpha,
     })
 
     postflip = df.FlipSide == "postflip"
     if rotate_postflip:
-        df.loc[postflip, ["MeanX", "MeanY"]] *= -1
-        df.loc[postflip, "Phi"] = (df.loc[postflip, "Phi"] + 180) % 360
+        df.loc[postflip, ["x_c", "y_c"]] *= -1
+        df.loc[postflip, "phi"] = (df.loc[postflip, "phi"] + 180) % 360
 
     for side, (dx, dy) in (pointing_corrections or {}).items():
-        df.loc[df.FlipSide == side, "MeanX"] -= dx
-        df.loc[df.FlipSide == side, "MeanY"] -= dy
+        df.loc[df.FlipSide == side, "x_c"] -= dx
+        df.loc[df.FlipSide == side, "y_c"] -= dy
 
     return df
 
@@ -291,7 +288,7 @@ def build_events(telescopes: dict, reference: str, window: float = 0.001, plotti
     return pd.concat(parts).sort_values(["Event", "Telescope"], ignore_index=True)
 
 
-def build_night_events(
+def build_array_events(
         output_dir,
         raw_dir,
         date: str,
@@ -374,29 +371,29 @@ def apply_cuts(
         cuts: dict = None,
 ):
     """
-    Analysis cuts, in the same order as 3tel-Analysis/analysis_BDT.ipynb.
+    Analysis cuts, applied in the order listed below.
 
     Parameters:
-        df: events from build_events()/build_night_events()
-        min_tel: minimum number of telescopes in an event (applied before the Npix cut)
+        df: events from build_events()/build_array_events()
+        min_tel: minimum number of telescopes in an event (applied before the N_pix cut)
         min_npix: minimum number of pixels in an image
         telescopes: restrict to these telescopes (default = all)
         cuts: optional {column: (mode, threshold)} image cuts, applied in order, see apply_cut(),
-            e.g. {"Width": ("nsigma", 0.5), "Length": ("value", 1.2)}
+            e.g. {"width": ("nsigma", 0.5), "length": ("value", 1.2)}
 
     Returns:
         the images passing the cuts
     """
     # remove nans and duplicates
-    array = df.dropna(subset=["Length", "Width", "Miss", "Distance", "Alpha"])
+    array = df.dropna(subset=["length", "width", "miss", "distance", "alpha"])
     array = array.drop_duplicates(subset=array.drop(["Telescope", "Event", "ImageIndex"], axis=1))
-    array = array[array["Width"] > 0]
+    array = array[array["width"] > 0]
 
     # cut by number of telescopes
     array = array.groupby('Event', group_keys=False).filter(lambda x: len(x) > (min_tel-1))
 
     # cut by minimum number of pixels in image
-    array = array[array.Npix >= min_npix]
+    array = array[array.N_pix >= min_npix]
 
     # cut by telescope
     if telescopes is not None:
@@ -416,8 +413,8 @@ def plot_hillas(images, title, colors=None):
     Returns:
         the Figure
     """
-    tel_dfs = {name: g.rename(columns=str.lower) for name, g in images.groupby("Telescope")}
-    return plot_hillas_histograms(tel_dfs, title=title, colors=colors, pooled_df=images.rename(columns=str.lower))
+    tel_dfs = {name: g for name, g in images.groupby("Telescope")}
+    return plot_hillas_histograms(tel_dfs, title=title, colors=colors, pooled_df=images)
 
 
 @cache
@@ -428,11 +425,11 @@ def _cleaned_images(npz_path):
 def draw_hillas(ax, tel, color, fill_alpha=0.0):
     """Draw one image's Hillas ellipse (1 sigma length/width) and image axis, in camera degrees."""
     half = CAMERA_HALF_WIDTH
-    ax.add_patch(Ellipse((tel.MeanX, tel.MeanY), 2*tel.Length, 2*tel.Width, angle=tel.Phi,
+    ax.add_patch(Ellipse((tel.x_c, tel.y_c), 2*tel.length, 2*tel.width, angle=tel.phi,
                          facecolor=to_rgba(color, fill_alpha), edgecolor=color, lw=1.5, label=tel.Telescope))
     t = np.array([-2*half, 2*half])
-    phi_rad = np.deg2rad(tel.Phi)
-    ax.plot(tel.MeanX + t*np.cos(phi_rad), tel.MeanY + t*np.sin(phi_rad), color=color, lw=0.8, ls="--")
+    phi_rad = np.deg2rad(tel.phi)
+    ax.plot(tel.x_c + t*np.cos(phi_rad), tel.y_c + t*np.sin(phi_rad), color=color, lw=0.8, ls="--")
 
 
 def draw_positions(ax, direction, color, source_xy=None, source=None):
@@ -465,7 +462,7 @@ def plot_event(
         source_position: optional SkyCoord of the source; needs pointings to be drawn
         pointings: optional {Run: SkyCoord} each run's pointing, see run_pointings()
         colors: optional {telescope: color} for the combined Hillas panel
-        rotate_postflip, pointing_corrections: as passed to build_night_events()
+        rotate_postflip, pointing_corrections: as passed to build_array_events()
 
     Returns:
         the Figure

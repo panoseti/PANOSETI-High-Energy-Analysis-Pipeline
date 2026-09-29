@@ -9,6 +9,11 @@ from matplotlib.patches import Ellipse
 
 TAB10_COLORS = plt.get_cmap("tab10").colors
 
+# 32 pixels over +-4.95 deg
+CAMERA_HALF_WIDTH = 4.95 # deg
+PLATE_SCALE = 2 * CAMERA_HALF_WIDTH / 32 # deg/pixel
+CAMERA_EXTENT = [-CAMERA_HALF_WIDTH, CAMERA_HALF_WIDTH, -CAMERA_HALF_WIDTH, CAMERA_HALF_WIDTH] # imshow(image, origin="lower", extent=CAMERA_EXTENT) plots in degrees
+
 # viridis from blue up, ramping from black, so empty camera pixels (0, or NaN after cleaning) read as black
 CAMERA_CMAP = LinearSegmentedColormap.from_list("black_viridis", ["black", *plt.get_cmap("viridis")(np.linspace(0.3, 1, 8))])
 CAMERA_CMAP.set_bad("black")
@@ -22,16 +27,16 @@ def calc_params(
     Calculate the Hillas parameters
 
     Parameters:
-        image: 2D camera image. numpy array with shape (32, 32)
-        x, y: test position (pixels) from which to calculate e.g. distance. Default value is camera center.
+        image: 2D camera image. numpy array with shape (32, 32), indexed [row, col]
+        x, y: test position (degrees from camera center) from which to calculate e.g. distance. Default value is camera center.
     Returns dict with:
         - N_pix: the total number of pixels in the shower image
         - size: total intensity
-        - x_c, y_c: centroid coordinates (pixels)
-        - s_xx, s_yy, s_xy: second central moments 
-        - length, width: rms major/minor axis (pixels)
-        - miss: perpendicular distance to major axis (pixels)
-        - distance: distance to test position x,y (pixels)
+        - x_c, y_c: centroid coordinates (degrees from camera center; x along columns, y along rows)
+        - s_xx, s_yy, s_xy: second central moments (degrees^2)
+        - length, width: rms major/minor axis (degrees)
+        - miss: perpendicular distance to major axis (degrees)
+        - distance: distance to test position x,y (degrees)
         - alpha: angle between image axis and distance (degrees)
         - phi: orientation angle (degrees), CCW from +x
     """
@@ -60,15 +65,16 @@ def calc_params(
     H, W = image.shape
     # Set default x, y to image center if not provided
     if x is None:
-        x = (W - 1) / 2.0
+        x = 0.0
     if y is None:
-        y = (H - 1) / 2.0
-    cols = np.arange(W)
-    rows = np.arange(H)
+        y = 0.0
+    # pixel centers in degrees from the camera center
+    cols = (np.arange(W) - (W - 1) / 2.0) * PLATE_SCALE
+    rows = (np.arange(H) - (H - 1) / 2.0) * PLATE_SCALE
     col_sums = np.nansum(image, axis=0)
     row_sums = np.nansum(image, axis=1)
 
-    # centroid (pixel coordinates, origin at camera center)
+    # centroid (degrees, origin at camera center)
     x_c = float(np.sum(col_sums * cols) / size)
     y_c = float(np.sum(row_sums * rows) / size)
 
@@ -142,7 +148,7 @@ def draw_params(fig, params: dict, color: str="w", lw: float=2):
     Draw the Hillas ellipse for a set of parameters on top of an existing figure.
 
     Parameters:
-        fig: matplotlib Figure containing the image (e.g. from plt.imshow)
+        fig: matplotlib Figure containing the image in degrees (e.g. from plt.imshow(image, origin="lower", extent=CAMERA_EXTENT))
         params: dict as returned by calc_params
         color: ellipse edge color
         lw: ellipse line width

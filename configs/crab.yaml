@@ -54,10 +54,10 @@ events:
   coinc_window: 0.001
   # Rotate postflip images by 180 deg into the preflip camera frame.
   rotate_postflip: true
-  # {telescope: efficiency}, divides Size; panodisplay_REALDATA.C used Heli (PTI) 0.46, Fern 1.49,
+  # {telescope: efficiency}, divides size; panodisplay_REALDATA.C used Heli (PTI) 0.46, Fern 1.49,
   # Winter 1.0 for Jan 2026.
   rel_tel_efficiency: {}
-  # Offsets (deg) between each camera and the reference mount's pointing, subtracted from MeanX/MeanY
+  # Offsets (deg) between each camera and the reference mount's pointing, subtracted from x_c/y_c
   # (postflip offsets in the rotated, preflip frame), e.g.
   #   20260917:
   #     Fern:
@@ -82,10 +82,10 @@ cuts:
   #   value  - fixed threshold, same for all telescopes (deg)
   # Image cuts are applied before reconstruction.
   image_cuts:
-    Width: [nsigma, 0.5]
-    # Length: [value, 1.2]
-  # Position cuts (Distance, Alpha, Miss) are recomputed against each test position (on/off region center).
+    width: [nsigma, 0.5]
+    # length: [value, 1.2]
+  # Position cuts (distance, alpha, miss) are recomputed against each test position (on/off region center).
   position_cuts:
-    # Distance: [value, 1.5]
-    # Alpha: [value, 20]
-    # Miss: [value, 1]
+    # distance: [value, 1.5]
+    # alpha: [value, 20]
+    # miss: [value, 1]

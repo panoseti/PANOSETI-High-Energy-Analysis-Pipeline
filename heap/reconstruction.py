@@ -12,7 +12,7 @@ def reconstruct_direction(event):
     Reconstruct one event's arrival direction in camera coordinates.
 
     Parameters:
-        event: one event's images (rows with MeanX, MeanY, Phi, Size, Length, Width), see
+        event: one event's images (rows with x_c, y_c, phi, size, length, width), see
             heap.events.apply_cuts()
 
     Returns:
@@ -30,13 +30,13 @@ def reconstruct_direction(event):
     for t in range(NTel):
         tel=event.iloc[t]
 
-        s.append(tel.Size)
-        x.append(tel.MeanX)
-        y.append(tel.MeanY)
-        phi_rad = tel.Phi * np.pi/180
+        s.append(tel["size"]) # not tel.size: that is the Series length
+        x.append(tel.x_c)
+        y.append(tel.y_c)
+        phi_rad = tel.phi * np.pi/180
         m.append(np.tan(phi_rad))
-        if(tel.Length > 0):
-            l.append(tel.Width/tel.Length)
+        if(tel.length > 0):
+            l.append(tel.width/tel.length)
         else:
             l.append(1)
 

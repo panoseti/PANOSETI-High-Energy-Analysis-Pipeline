@@ -49,7 +49,6 @@ DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "nextday.yaml"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from heap import coincidences as coinc
-from heap.events import CAMERA_CENTER, PLATE_SCALE
 from heap.parameterize import plot_hillas_histograms
 from heap.make_pedestals import plot_pedestal_mean_over_interval, plot_pedestal_pedvar_intervals, plot_pedvar_histogram
 from heap.process_dataset import discover_runs, identify_source, load_fallback_map, process_dataset, slugify
@@ -524,19 +523,6 @@ def build_event_preview(telescope_events, out_dir, manifest, image_threshold, bo
     }
 
 
-def convert_units(df):
-    """Converts a params_df's pixel-unit columns (see heap.parameterize.calc_params()) to degrees
-    (heap.events.PLATE_SCALE) and re-centers x_c/y_c on the camera center (heap.events.CAMERA_CENTER),
-    as heap.events.load_camera_frame() does. Returns a copy."""
-    df = df.copy()
-    columns = ["x_c", "y_c", "s_xx", "s_yy", "s_xy", "length", "width", "miss", "distance"]
-    for c in columns:
-        df[c] = df[c] * PLATE_SCALE
-        if c in ["x_c", "y_c"]:
-            df[c] = df[c] - CAMERA_CENTER * PLATE_SCALE
-    return df
-
-
 def postprocess_df(df, min_pixels):
     """Drops events with no well-defined Hillas ellipse (missing length/width/miss/distance/alpha,
     zero width, or fewer than min_pixels surviving pixels) and duplicate rows, ahead of plotting."""
@@ -549,9 +535,8 @@ def postprocess_df(df, min_pixels):
 
 def load_telescope_params_df(telescope_dir, min_pixels):
     """Loads and concatenates every source's params_df for one telescope (one <source_slug>.npz
-    per source under telescope_dir, see heap.process_dataset.process_dataset()), converted to
-    degrees and postprocessed (see convert_units()/postprocess_df()). Returns None if no usable
-    data."""
+    per source under telescope_dir, see heap.process_dataset.process_dataset(); already in
+    degrees) and postprocessed (see postprocess_df()). Returns None if no usable data."""
     dfs = []
     for npz_path in sorted(telescope_dir.glob("*/*.npz")):
         if npz_path.name == "calibrations.npz":
@@ -562,7 +547,7 @@ def load_telescope_params_df(telescope_dir, min_pixels):
     if not dfs:
         return None
 
-    df = postprocess_df(convert_units(pd.concat(dfs, ignore_index=True)), min_pixels)
+    df = postprocess_df(pd.concat(dfs, ignore_index=True), min_pixels)
     return df if len(df) else None
 
 

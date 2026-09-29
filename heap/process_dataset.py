@@ -60,8 +60,8 @@ def process_image(
         pedestal: per-pixel pedestal, shape (32, 32) or (1024,)
         pedvar: per-pixel pedestal variance used for the significance test, shape (32, 32) or (1024,)
         gain: per-pixel relative gain map, shape (32, 32) or (1024,)
-        x, y: test position (pixels) passed through to calc_params(), e.g. for distance/alpha.
-            Default value is camera center.
+        x, y: test position (degrees from camera center) passed through to calc_params(), e.g.
+            for distance/alpha. Default value is camera center.
         image_threshold: image pixel threshold, in units of pedvar
         border_threshold: border pixel threshold, in units of pedvar
         keep_brightest_island: keep only the brightest island, see threshold_clean()

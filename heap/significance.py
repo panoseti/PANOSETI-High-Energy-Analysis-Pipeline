@@ -18,13 +18,17 @@ def make_wcs(center):
     Tangent-plane WCS centered on the pointing, with 1 deg "pixels" so camera coordinates in
     degrees convert directly: w.wcs_pix2world(Xoffset, Yoffset, 1).
 
+    The camera frame is the preflip frame (heap.events.load_camera_frame() rotates postflip images
+    180 deg into it), where +x (columns) points east and +y (rows) points south. Verified against
+    catalog star positions in pedvar maps on the Sept 2026 nights, all four telescopes.
+
     Parameters:
         center: SkyCoord of the pointing
     """
     w = wcs.WCS(naxis=2)
     w.wcs.crpix = [0, 0]
     w.wcs.crval = [center.ra.deg, center.dec.deg]
-    w.wcs.cdelt = [-1, 1]
+    w.wcs.cdelt = [1, -1] # +x east, +y south
     w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
     return w
 
@@ -52,7 +56,7 @@ class RegionCounter:
     Counts one pointing's events in circular regions of its camera frame. An event counts in a
     region if its reconstructed direction is within theta of the region center, at least one of its
     images passes position_cuts, and every such image's centroid is within max_distance of the
-    center (calc_Non()/calc_Noff() in 3tel-Analysis/analysis_BDT.ipynb).
+    center.
 
     Parameters:
         directions: this pointing's reconstructed events, see heap.reconstruction.reconstruct_directions()
@@ -60,7 +64,7 @@ class RegionCounter:
         w: this pointing's WCS from make_wcs()
         theta: region radius (deg)
         max_distance: max distance cut (deg); None for no cut
-        position_cuts: optional {column: (mode, threshold)} cuts on Distance, Alpha, and/or Miss
+        position_cuts: optional {column: (mode, threshold)} cuts on distance, alpha, and/or miss
             recomputed against the region center, applied in order (see heap.events.apply_cut());
             "nsigma" statistics are over this pointing's images of the events within theta
     """
@@ -84,9 +88,9 @@ class RegionCounter:
         self.img_y = np.full(shape, np.nan)
         self.img_phi = np.full(shape, np.nan)
         self.img_tel = np.full(shape, -1)
-        self.img_x[row, col] = img.MeanX
-        self.img_y[row, col] = img.MeanY
-        self.img_phi[row, col] = img.Phi
+        self.img_x[row, col] = img.x_c
+        self.img_y[row, col] = img.y_c
+        self.img_phi[row, col] = img.phi
         self.img_tel[row, col] = pd.factorize(img.Telescope)[0]
         self.img_index = np.full(shape, -1)
         self.img_index[row, col] = np.arange(len(img))
@@ -97,7 +101,7 @@ class RegionCounter:
         return self.w.wcs_world2pix(ra, dec, 1)
 
     def shower_params(self, center_x, center_y, idx=slice(None)):
-        """Distance, Alpha, Miss of events idx's images relative to (center_x, center_y)."""
+        """distance, alpha, miss of events idx's images relative to (center_x, center_y)."""
         dx = self.img_x[idx] - center_x
         dy = self.img_y[idx] - center_y
 
@@ -107,7 +111,7 @@ class RegionCounter:
         alpha = np.where(diff <= 90, diff, 180 - diff)
         miss = distance * np.sin(np.radians(alpha))
 
-        return {"Distance": distance, "Alpha": alpha, "Miss": miss}
+        return {"distance": distance, "alpha": alpha, "miss": miss}
 
     def passing_images(self, center_x, center_y, idx=slice(None)):
         """Mask of events idx's images passing position_cuts relative to (center_x, center_y), and
@@ -134,7 +138,7 @@ class RegionCounter:
         """Per-event distance of the farthest image centroid passing position_cuts from
         (center_x, center_y); nan for events with no such image."""
         keep, params = self.passing_images(center_x, center_y, idx)
-        distance = np.where(keep, params["Distance"], -np.inf).max(axis=1)
+        distance = np.where(keep, params["distance"], -np.inf).max(axis=1)
         return np.where(keep.any(axis=1), distance, np.nan)
 
     def passing_events(self, center_x, center_y, idx=slice(None)):
@@ -246,7 +250,7 @@ class OnOffCounter:
         max_distance: max distance cut (deg); None for no cut
         off_method: "reflected" (around each pointing, default) or "ring" (around the on region),
             see make_reflected_regions()/make_off_regions()
-        position_cuts: optional {column: (mode, threshold)} cuts on Distance, Alpha, and/or Miss
+        position_cuts: optional {column: (mode, threshold)} cuts on distance, alpha, and/or miss
             relative to each region center, see RegionCounter
     """
 
@@ -315,7 +319,7 @@ class OnOffCounter:
 
     def images(self, ra, dec):
         """Images passing position_cuts relative to (ra, dec), of events also passing the max
-        distance cut, with Distance, Alpha, Miss recomputed relative to (ra, dec) in each image's
+        distance cut, with distance, alpha, miss recomputed relative to (ra, dec) in each image's
         camera frame. No theta cut."""
         parts = []
         for counter in self.counters.values():
