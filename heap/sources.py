@@ -14,8 +14,10 @@ SOURCES = {
     "NGC 1275": SkyCoord("03 19 48.16 +41 30 42.1", unit=(u.hourangle, u.deg)),
     "Mrk 421": SkyCoord("11 04 27.31 +38 12 31.8", unit=(u.hourangle, u.deg)),
     "Mrk 501": SkyCoord("16 53 52.22 +39 45 36.6", unit=(u.hourangle, u.deg)),
-    "HAWC J0543+233": SkyCoord("05 43 07.20 +23 24 00.0", unit=(u.hourangle, u.deg)),
     "Boomerang": SkyCoord("22 28 44 +61 10 00", unit=(u.hourangle, u.deg)),
+    "1ES 1959+650": SkyCoord("19 59 59.85 +65 08 54.7", unit=(u.hourangle, u.deg)),
+    "LSI +61 303": SkyCoord("02 40 31.66 +61 13 45.6", unit=(u.hourangle, u.deg)),
+    "Geminga": SkyCoord("06 33 54.15 +17 46 12.9", unit=(u.hourangle, u.deg)),
 }
 
 MAX_OFFSET = 1.0 # deg; farthest a pointing can be from a source and still match it (wobbles are ~0.5 deg)
