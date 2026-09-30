@@ -77,10 +77,10 @@ cuts:
   max_distance: 2
   # "reflected" (around each run's pointing) or "ring" (around the test position).
   off_regions: reflected
+  # Image cuts are applied before reconstruction.
   # {column: [mode, threshold]}, applied in order; comment a line out to turn that cut off.
   #   nsigma - per-telescope (mean + threshold*std)
   #   value  - fixed threshold, same for all telescopes (deg)
-  # Image cuts are applied before reconstruction.
   image_cuts:
     width: [nsigma, 0.5]
     # length: [value, 1.2]

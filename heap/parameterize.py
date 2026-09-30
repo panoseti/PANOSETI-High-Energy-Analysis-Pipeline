@@ -216,7 +216,7 @@ def plot_hillas_histograms(dfs, title="Hillas Params", colors=None, pooled_df=No
         axs[1].hist(df.width, bins=80, range=(0, 1), histtype="step", density=True, label=width_label, color=color)
         axs[1].axvline(width_mean, color=color, linestyle="--", linewidth=1.5)
         axs[2].hist(np.log10(df["size"]), bins=80, range=(0, 6), histtype="step", density=True, label=label, color=color)
-        axs[3].hist(df.distance, bins=80, range=(0, 6), histtype="step", density=True, label=label, color=color)
+        axs[3].hist(df.distance, bins=80, range=(0, 7), histtype="step", density=True, label=label, color=color)
 
     if pooled_df is not None:
         label = f"{pooled_label} N={len(pooled_df)}"
@@ -225,7 +225,7 @@ def plot_hillas_histograms(dfs, title="Hillas Params", colors=None, pooled_df=No
         axs[0].hist(pooled_df.length, bins=80, range=(0, 2), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
         axs[1].hist(pooled_df.width, bins=80, range=(0, 1), histtype="stepfilled", density=True, label=width_label, color="black", alpha=0.4)
         axs[2].hist(np.log10(pooled_df["size"]), bins=80, range=(0, 6), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
-        axs[3].hist(pooled_df.distance, bins=80, range=(0, 6), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
+        axs[3].hist(pooled_df.distance, bins=80, range=(0, 7), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
 
     for ax in axs:
         ax.legend(loc="upper right")
