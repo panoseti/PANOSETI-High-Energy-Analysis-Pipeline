@@ -83,6 +83,254 @@ HillasParams calculateHillas(double image[32][32], double threshold) {
     return p;
 }
 
+void calcSkygains_old(const char *infile,int ii=0,int jj=0)
+{
+  camdata=loadcamdata(infile);
+  camdata->GetEntry(0);
+  cout << "Acquisition mode " << (int)cam_acq_mode << endl;
+  TH2D *skygains_2D_hist=new TH2D("h","h",32,0,32,32,0,32);
+  skygains_2D_hist->SetName("skygains_2D_hist");
+  skygains_2D_hist->SetTitle("Sky Gains");
+  
+  TH2D *gaincorrected_pedvars=new TH2D("h","h",32,0,32,32,0,32);
+  gaincorrected_pedvars->SetName("gaincorrected_pedvars");
+  gaincorrected_pedvars->SetTitle("Gain-corrected pedvars");
+
+  double hmin,hmax,hbins;
+  hmin=-100;
+  hmax=1000;
+  hbins=1100;
+  TH1D *phd=new TH1D("phd","Pulse Height Distribution",hbins,hmin,hmax);
+  TH1D *iphd=new TH1D("iphd","Integral Pulse Height Distribution",hbins,hmin,hmax);
+
+  TCanvas *mycanv=new TCanvas();
+  mycanv->SetLogx();
+  mycanv->SetLogy();
+  mycanv->Divide(1,2);
+  mycanv->Draw();
+  mycanv->cd(1);
+  double sumgain=0;
+  int ngain=0;
+  for (int i=0;i<32;i++)
+    {
+      for (int j=0;j<32;j++)
+	{
+	  //int i=ii;
+	  //int j=jj;
+	  phd->Reset();
+	  iphd->Reset();
+	  char variable[200];
+	  char cut[200];
+	  snprintf(variable,200,"cam_pix_data[%d][%d]>>phd",i,j);
+	  snprintf(cut,200,"cam_pix_data[%d][%d]<%f",i,j,hmax);
+	  camdata->Draw(variable,cut);
+	  int nevents=phd->GetEntries();
+	  double int_ph=0;
+	  double thresh1=0;
+	  double thresh2=0;
+	  bool thresh1flag=0;
+	  bool thresh2flag=0;
+	  for (int k=0;k<phd->GetNbinsX();k++)
+	    {
+	      int this_bin=phd->GetNbinsX()-k;
+	      
+	      int_ph+=phd->GetBinContent(this_bin);
+	      iphd->SetBinContent(this_bin,int_ph);
+	      //cout << this_bin << "\t" << int_ph << endl;
+	      
+	      if (int_ph>0.03*nevents && !thresh1flag)
+		{
+		  //cout << thresh1 << "\t" << thresh1flag << "\t" << this_bin << "\t" << int_ph << endl;
+		  thresh1=this_bin;
+		  thresh1flag=1;
+		 
+		}
+	      if (int_ph>0.3*nevents && !thresh2flag)
+		{
+		  //cout << thresh2 << "\t" << thresh2flag << "\t" << this_bin << "\t" << int_ph << endl;
+		  thresh2=this_bin;
+		  thresh2flag=1;
+		}
+	      
+	    }
+	  
+	  cout << i << "\t" << j << "\t" << (thresh1 - thresh2) << endl;
+	  
+	  iphd->GetXaxis()->SetRangeUser(10,150);
+	  iphd->SetXTitle("pulse height (digital counts)");
+	  phd->SetXTitle("pulse height (digital counts)");
+	  phd->GetXaxis()->SetRangeUser(10,150);
+	  iphd->SetStats(0);
+	  iphd->SetMaximum(nevents);
+	  iphd->Draw();
+	  TLine *l1=new TLine(thresh1+hmin,0,thresh1+hmin,nevents);
+	  TLine *l2=new TLine(thresh2+hmin,0,thresh2+hmin,nevents);
+	  l2->SetLineColor(2);
+	  l1->Draw("SAME");
+	  l2->Draw("SAME");
+	  skygains_2D_hist->SetBinContent(i+1,j+1,thresh1 - thresh2);
+	  sumgain+=thresh1 - thresh2;
+	  ngain+=1;
+	  mycanv->cd(2);
+	  phd->Draw();
+	  //std::cin.get();
+	}
+    }
+  double meangain=sumgain/ngain;
+  //normalize gains to 1;
+  for (int i=0;i<32;i++)
+    {
+      for (int j=0;j<32;j++)
+	{
+	  double this_gain=skygains_2D_hist->GetBinContent(i+1,j+1)/meangain;
+	  skygains_2D_hist->SetBinContent(i+1,j+1,this_gain);
+	  if (this_gain>0)
+	    {
+	      gain[i][j]=this_gain;
+	    }
+	  else
+	    {
+	      gain[i][j]=1;
+	    }
+	  gaincorrected_pedvars->SetBinContent(i+1,j+1,pedvar[i][j]/gain[i][j]);
+	}
+    }
+
+  skygains_2D_hist->Draw("COLZ");
+}
+
+void calcSkygains(const char *infile)
+{
+  // Assume loadcamdata returns a pointer containing the TTree
+  TTree* camdata = loadcamdata(infile);
+  if (!camdata) return;
+
+  // 1. Turn off all branches, then turn on only the pixel data branch to save I/O time
+  camdata->SetBranchStatus("*", 0);
+  camdata->SetBranchStatus("cam_pix_data", 1);
+
+  // 2. Bind the tree branch directly to a local array buffer
+  // Adjust the data type (e.g., float, int, double) to match your tree definition exactly
+  float cam_pix_data[32][32]; 
+  camdata->SetBranchAddress("cam_pix_data", &cam_pix_data);
+
+  // 3. Instantiate the histograms
+  TH2D *skygains_2D_hist = new TH2D("skygains_2D_hist","Sky Gains",32,0,32,32,0,32);
+  TH2D *gaincorrected_pedvars = new TH2D("gaincorrected_pedvars","Gain-corrected pedvars",32,0,32,32,0,32);
+
+  double hmin = -100;
+  double hmax = 1000;
+  int hbins = 1100;
+
+  // Create an array of histograms so we can fill them in a single file-pass
+  TH1D* phd[32][32];
+  TH1D* iphd[32][32];
+  
+  for (int i=0; i<32; i++) {
+    for (int j=0; j<32; j++) {
+      TString hname = Form("phd_%d_%d", i, j);
+      phd[i][j] = new TH1D(hname, "Pulse Height Distribution", hbins, hmin, hmax);
+      
+      TString iphd_name = Form("iphd_%d_%d", i, j);
+      iphd[i][j] = new TH1D(iphd_name, "Integral Pulse Height Distribution", hbins, hmin, hmax);
+    }
+  }
+
+  // 4. CRITICAL: Single loop over data entries
+  Long64_t nentries = camdata->GetEntries();
+  for (Long64_t entry = 0; entry < nentries; ++entry) {
+    camdata->GetEntry(entry); // Reads only the cam_pix_data branch for this entry
+    
+    for (int i=0; i<32; i++) {
+      for (int j=0; j<32; j++) {
+        float val = cam_pix_data[i][j];
+        if (val < hmax) { // Applies your original cut string rule
+          phd[i][j]->Fill(val);
+        }
+      }
+    }
+  }
+
+  // 5. Calculate thresholds and gains sequentially in memory
+  TCanvas *mycanv = new TCanvas("mycanv", "Canvas", 800, 800);
+  mycanv->SetLogx();
+  mycanv->SetLogy();
+  mycanv->Divide(1,2);
+
+  double sumgain = 0;
+  int ngain = 0;
+
+  for (int i=0; i<32; i++) {
+    for (int j=0; j<32; j++) {
+      int nevents = phd[i][j]->GetEntries();
+      if (nevents == 0) continue;
+
+      double int_ph = 0;
+      double thresh1 = 0;
+      double thresh2 = 0;
+      bool thresh1flag = false;
+      bool thresh2flag = false;
+      int nbinsX = phd[i][j]->GetNbinsX();
+
+      for (int k=0; k<nbinsX; k++) {
+        int this_bin = nbinsX - k;
+        int_ph += phd[i][j]->GetBinContent(this_bin);
+        iphd[i][j]->SetBinContent(this_bin, int_ph);
+        
+        if (int_ph > 0.005 * nevents && !thresh1flag) {
+          thresh1 = this_bin;
+          thresh1flag = true;
+        }
+        if (int_ph > 0.01 * nevents && !thresh2flag) {
+          thresh2 = this_bin;
+          thresh2flag = true;
+        }
+      }
+      
+      double delta_thresh = thresh1 - thresh2;
+      skygains_2D_hist->SetBinContent(i+1, j+1, delta_thresh);
+      sumgain += delta_thresh;
+      ngain += 1;
+
+      // Optional: Draw only the very last pixel's metrics on screen to avoid Canvas freezing
+      if (i == 31 && j == 31) {
+        mycanv->cd(1);
+        iphd[i][j]->GetXaxis()->SetRangeUser(10,150);
+        iphd[i][j]->SetXTitle("pulse height (digital counts)");
+        iphd[i][j]->SetStats(0);
+        iphd[i][j]->SetMaximum(nevents);
+        iphd[i][j]->Draw();
+
+        TLine *l1 = new TLine(thresh1+hmin, 0, thresh1+hmin, nevents);
+        TLine *l2 = new TLine(thresh2+hmin, 0, thresh2+hmin, nevents);
+        l2->SetLineColor(2);
+        l1->Draw("SAME");
+        l2->Draw("SAME");
+
+        mycanv->cd(2);
+        phd[i][j]->GetXaxis()->SetRangeUser(10,150);
+        phd[i][j]->SetXTitle("pulse height (digital counts)");
+        phd[i][j]->Draw();
+      }
+    }
+  }
+  
+  // 6. Normalization pass
+  double meangain = (ngain > 0) ? (sumgain / ngain) : 1.0;
+  for (int i=0; i<32; i++) {
+    for (int j=0; j<32; j++) {
+      double this_gain = skygains_2D_hist->GetBinContent(i+1, j+1) / meangain;
+      skygains_2D_hist->SetBinContent(i+1, j+1, this_gain);
+      
+      gain[i][j] = (this_gain > 0) ? this_gain : 1.0;
+      gaincorrected_pedvars->SetBinContent(i+1, j+1, pedvar[i][j] / gain[i][j]);
+    }
+  }
+
+  // Draw final 2D summary mapping
+  TCanvas *c2 = new TCanvas("c2","Final Gains Mapping", 600, 600);
+  skygains_2D_hist->Draw("COLZ");
+}
 
 
 void calcPedestals(const char *infile, bool do_fit = true) {

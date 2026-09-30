@@ -1,6 +1,7 @@
+void makeprettyrateplots(const char *infile,int ymax=-1)
 {
   static const int ntel=3;
-  TFile *_file0 = TFile::Open("all.root.corr.array");
+  TFile *_file0 = TFile::Open(infile);
   TTree *arraydata=(TTree*)_file0->Get("arraydata");
   double array_pcap_time[ntel];
   arraydata->SetBranchAddress("array_pcap_time",array_pcap_time);
@@ -34,8 +35,7 @@
   scope_id[1]=1008; // Fern
   scope_id[2]=1012; // Winter
 
-  int ymax=100;
-
+  
   TCanvas *singles=new TCanvas("singles","singles",1350,350);
   singles->Divide(ntel,1);
   
@@ -60,7 +60,7 @@ for (int i=0;i<ntel;i++)
       char cut[200];
       snprintf(cut,200,"array_pcap_time[%d]>0",i);
       arraydata->Draw(var,cut);
-      hrate[i]->SetMaximum(ymax);
+      if (ymax>0) hrate[i]->SetMaximum(ymax);
       hrate[i]->Draw();
     }
 
@@ -88,7 +88,7 @@ for (int i=0;i<ntel;i++)
       char cut[200];
       snprintf(cut,200,"array_pcap_time[%d]>0 && array_nteltrig==1",i);
       arraydata->Draw(var,cut);
-      ehrate[i]->SetMaximum(ymax);
+      if (ymax>0) ehrate[i]->SetMaximum(ymax);
       ehrate[i]->Draw();
     }
 
@@ -127,24 +127,23 @@ for (int i=0;i<ntel;i++)
   hrate012->SetXTitle("Time(s)");
   hrate012->SetYTitle("Events/400s");
 
-  ymax=60;
   doubles->cd(1);
   arraydata->Draw("array_pcap_time[0]>>dhrate01","array_pcap_time[0]>0 && array_pcap_time[1]>0 && array_nteltrig==2");
-  dhrate01->SetMaximum(ymax);
+  if (ymax>0) dhrate01->SetMaximum(ymax);
   dhrate01->Rebin(4);
   doubles->cd(2);
   arraydata->Draw("array_pcap_time[0]>>dhrate02","array_pcap_time[0]>0 && array_pcap_time[2]>0 && array_nteltrig==2");
-  dhrate02->SetMaximum(ymax);
+  if (ymax>0) dhrate02->SetMaximum(ymax);
   dhrate02->Rebin(4);
   doubles->cd(3);
   arraydata->Draw("array_pcap_time[1]>>dhrate12","array_pcap_time[1]>0 && array_pcap_time[2]>0 && array_nteltrig==2");
-  dhrate12->SetMaximum(ymax);
+  if (ymax>0) dhrate12->SetMaximum(ymax);
   dhrate12->Rebin(4);
   
   TCanvas *triples=new TCanvas("triples","triples",450,350);
   triples->cd();
   arraydata->Draw("array_pcap_time[1]>>hrate012","array_pcap_time[0]>0 && array_pcap_time[1]>0 && array_pcap_time[2]>0 && array_nteltrig==3");
-  hrate012->SetMaximum(ymax);
+  if (ymax>0) hrate012->SetMaximum(ymax);
   hrate012->Rebin(4);
   
  
