@@ -13,6 +13,7 @@ from . import reconstruction
 from . import significance
 from . import config
 from . import diagnostics
+from . import toy_events
 
 __all__ = [
     "read_pcap",
@@ -28,5 +29,6 @@ __all__ = [
     "reconstruction",
     "significance",
     "config",
-    "diagnostics"
+    "diagnostics",
+    "toy_events"
 ]

@@ -6,11 +6,14 @@ On/off region counting, Li & Ma significance, and sky maps for reconstructed arr
 Each run is counted in its own camera frame (degrees from that run's pointing, see make_wcs() and
 heap.events.run_pointings()), so runs with different wobble offsets combine correctly: a sky
 position is projected into every run's camera frame, and off regions are placed around it there.
+Only regions entirely inside the camera are counted (in_camera()).
 """
 import numpy as np
 import pandas as pd
 from astropy import wcs
 from scipy.spatial import cKDTree
+
+from heap.parameterize import CAMERA_HALF_WIDTH
 
 
 def make_wcs(center):
@@ -207,6 +210,11 @@ def make_off_regions(testPosX, testPosY, theta):
 OFF_REGION_METHODS = {"reflected": make_reflected_regions, "ring": make_off_regions}
 
 
+def in_camera(x, y, theta):
+    """True if the region of radius theta centered at camera (x, y) (deg) lies entirely inside the camera."""
+    return max(abs(x), abs(y)) + theta <= CAMERA_HALF_WIDTH
+
+
 def calc_alpha(off_regions, theta):
     """Ratio of on region area to total off region area; 0 if there are no off regions."""
     if len(off_regions) == 0:
@@ -249,7 +257,8 @@ class OnOffCounter:
         theta: region radius (deg)
         max_distance: max distance cut (deg); None for no cut
         off_method: "reflected" (around each pointing, default) or "ring" (around the on region),
-            see make_reflected_regions()/make_off_regions()
+            see make_reflected_regions()/make_off_regions(); only off regions entirely inside the
+            camera are counted and make up alpha, see off_regions()
         position_cuts: optional {column: (mode, threshold)} cuts on distance, alpha, and/or miss
             relative to each region center, see RegionCounter
     """
@@ -262,8 +271,16 @@ class OnOffCounter:
             for run, events in directions.groupby("Run")
         }
 
+    def off_regions(self, x_on, y_on):
+        """Camera (x, y) centers of off_method's off regions for the on region at camera (x_on, y_on)
+        that lie entirely inside the camera (in_camera()); none if the on region doesn't, so that Run
+        is left out (alpha 0)."""
+        if not in_camera(x_on, y_on, self.theta):
+            return []
+        return [region for region in self.make_off_regions(x_on, y_on, self.theta) if in_camera(*region, self.theta)]
+
     def _on_off(self, counter, x_on, y_on):
-        off_regions = self.make_off_regions(x_on, y_on, self.theta)
+        off_regions = self.off_regions(x_on, y_on)
         on = counter.in_region(x_on, y_on)
         off = [counter.in_region(*region) for region in off_regions]
         return on, off, calc_alpha(off_regions, self.theta)
@@ -298,7 +315,7 @@ class OnOffCounter:
         """Sky (RA, DEC) centers of every Run's off regions for the on region at (ra, dec)."""
         centers = []
         for counter in self.counters.values():
-            regions = self.make_off_regions(*counter.to_camera(ra, dec), self.theta)
+            regions = self.off_regions(*counter.to_camera(ra, dec))
             if regions:
                 centers += [tuple(c) for c in counter.w.wcs_pix2world(np.array(regions), 1)]
         return centers
