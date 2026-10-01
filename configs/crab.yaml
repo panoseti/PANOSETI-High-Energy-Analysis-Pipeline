@@ -13,7 +13,7 @@ source:
   # hk target_name, else heap.sources catalog name; its catalog position is the on region center.
   name: Crab
   # Nights to analyze, e.g. [20260917, 20260918]; null = every night in raw_data_dir.
-  dates: null
+  dates: [20260917, 20260918, 20260922]
   # Each run's pointing (camera center) comes from the reference telescope's hk mount table. Only for
   # runs whose hk mount data is missing or wrong, give the pointing here, by run folder name, as
   # "hh mm ss +dd mm ss" or [RA, Dec] in degrees, e.g.
