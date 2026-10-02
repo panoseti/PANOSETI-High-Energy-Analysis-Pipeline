@@ -3,6 +3,7 @@ project_root = os.path.abspath("..")
 sys.path.insert(0, project_root)
 from heap import pre_cleaning
 import numpy as np
+from itertools import combinations
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import pandas as pd
@@ -14,9 +15,8 @@ def load_telescope_tv(module_str, base_dir, rate_cut, plotting=False):
     Reads in all files for one telescope, applies
     read_pff -> cut_pkt_loss_old (tv-timestamps) -> spike_cut
     base_dir is where the raw .pff files are read from.
-    rate_cut is spike_cut's trigger-rate threshold (Hz) and must be passed explicitly: telescopes
-    with a higher steady-state rate need a higher rate_cut or spike_cut will discard real data as
-    "spikes" (e.g. PTI/Fern vs. Winter).
+    rate_cut is spike_cut's trigger-rate threshold, as a multiple of each file's median trigger rate,
+    and must be passed explicitly.
     plotting: shows each file's spike-cut plot if True
     Returns combined timestamps and data
     """
@@ -31,12 +31,16 @@ def load_telescope_tv(module_str, base_dir, rate_cut, plotting=False):
         data, metadata = pre_cleaning.read_pff(str(f))
         data, timestamps = pre_cleaning.cut_pkt_loss_old(data, metadata)
 
-        data_clean, timestamps_clean = pre_cleaning.spike_cut(
-            data,
-            timestamps,
-            plotting=plotting,
-            rate_cut=rate_cut
-        )
+        if len(timestamps) == 0: # spike_cut can't bin an empty file
+            print("     no frames left after the packet-loss cut, skipping this file")
+            data_clean, timestamps_clean = data, timestamps
+        else:
+            data_clean, timestamps_clean = pre_cleaning.spike_cut(
+                data,
+                timestamps,
+                plotting=plotting,
+                rate_cut=rate_cut
+            )
 
         all_timestamps.append(timestamps_clean)
         all_data.append(data_clean)
@@ -70,8 +74,8 @@ def time_offset(timestamps1, timestamps2, window=0.02, plotting=False):
             idx1.extend([i] * (r - l))
             idx2.extend(range(l, r))
 
-    idx1 = np.asarray(idx1)
-    idx2 = np.asarray(idx2)
+    idx1 = np.asarray(idx1, dtype=int) # int even when empty, so no coincidences indexes cleanly
+    idx2 = np.asarray(idx2, dtype=int)
 
     time_coinc1 = t1[idx1]
     time_coinc2 = t2[idx2]
@@ -91,11 +95,14 @@ def time_offset(timestamps1, timestamps2, window=0.02, plotting=False):
 
     return time_coinc1, time_coinc2, dt
 
-def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bin_width=120, plotting=False):
+def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bin_width=120, plotting=False, coinc_window=0.001):
     """
     Determines time dependant timing offset between two telescopes my matching events within a large window
     Corrects timestamp1 with the determined offset function and returns corrected timestamp 1
+    (nan where there's no offset: in bins with no coincidences, or outside the coincidences' time range)
     plotting: shows the before/after plot if True
+    coinc_window: coincidence window (s) used afterwards; both panels' offset axes span the median
+        offset and 0, plus a few of these, with the window marked on the after panel
     """
     #get timing differences and coincident timestamps of t1
     time_coinc1,_,dt=time_offset(timestamps1,timestamps2,window=window)
@@ -106,10 +113,12 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         dt_median[i]=np.median(dt[(time_coinc1>=x[i]) & (time_coinc1<x[i+1])])
     rms=np.sqrt(np.mean(np.square(dt_median[~np.isnan(dt_median)])))
     sigma=np.std(dt_median[~np.isnan(dt_median)])
-    print("Offset: RMS= ",round(rms,5),"s, std=",round(sigma, 5),"s")
-    #Correcting timestamps1 with determined offset function
+    print(f"{plot_name} timing offset: RMS= ",round(rms,5),"s, std=",round(sigma, 5),"s")
+    #Correcting timestamps1 with determined offset function; nan outside the offset bins
     t_corr=np.digitize(timestamps1,x)-1
-    timestamps1_corr=timestamps1-dt_median[t_corr]
+    in_bins=(t_corr>=0)&(t_corr<len(dt_median))
+    timestamps1_corr=np.full(len(timestamps1),np.nan)
+    timestamps1_corr[in_bins]=np.asarray(timestamps1)[in_bins]-dt_median[t_corr[in_bins]]
     #calculate corrected timing differences
     time_coinc1_corr,_,dt_corr=time_offset(timestamps1_corr,timestamps2,window=window)
     #check that time offset is 0 now
@@ -119,11 +128,12 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         dt_median_corr[i]=np.median(dt_corr[(time_coinc1_corr>=x_corr[i]) & (time_coinc1_corr<x_corr[i+1])])
     rms_corr=np.sqrt(np.mean(np.square(dt_median_corr[~np.isnan(dt_median_corr)])))
     sigma_corr=np.std(dt_median_corr[~np.isnan(dt_median_corr)])
-    print("Corrected Offset: RMS= ",round(rms_corr,5),"s, std=",round(sigma_corr, 5),"s")
+    print(f"{plot_name} corrected offset: RMS= ",round(rms_corr,5),"s, std=",round(sigma_corr, 5),"s")
     if plotting:
         time_coinc_pd1 = pd.to_datetime(time_coinc1, unit='s', utc=True).tz_convert('America/Los_Angeles')
         time_coinc_pd1_corr = pd.to_datetime(time_coinc1_corr, unit='s', utc=True).tz_convert('America/Los_Angeles')
         x_pd=pd.to_datetime(x[:-1], unit='s', utc=True).tz_convert('America/Los_Angeles')
+        x_pd_corr=pd.to_datetime(x_corr[:-1], unit='s', utc=True).tz_convert('America/Los_Angeles')
         fig,ax=plt.subplots(2,1,sharex=True)
         ax[0].scatter(time_coinc_pd1,dt,marker=".")
         ax[0].step(x_pd,dt_median,label="dt median, RMS="+str(round(rms,5))+"s",color="red")
@@ -131,24 +141,33 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         ax[0].grid()
         ax[0].set_title("Before Correction")
         ax[1].scatter(time_coinc_pd1_corr,dt_corr,marker=".")
-        ax[1].set_xlabel("Time")
+        ax[1].step(x_pd_corr,dt_median_corr,label="dt median, RMS="+str(round(rms_corr,5))+"s",color="red")
+        ax[1].set_xlabel("Time (America/Los_Angeles)")
         ax[1].set_ylabel("time offset [s]")
         ax[1].set_title("After Correction")
         ax[1].grid()
         ax[0].legend()
+        if coinc_window:
+            dt_median_ok = dt_median[~np.isnan(dt_median)]
+            ylim = (min(dt_median_ok.min(), 0) - 3*coinc_window, max(dt_median_ok.max(), 0) + 3*coinc_window)
+            for a in ax:
+                a.set_ylim(ylim)
+            ax[1].axhline(coinc_window, color="red", ls="--", lw=1, label=f"coinc window (±{coinc_window}s)")
+            ax[1].axhline(-coinc_window, color="red", ls="--", lw=1)
+        ax[1].legend()
         for a in ax:
             a.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        fig.suptitle(plot_name)
         fig.tight_layout()
         plt.show()
     return(timestamps1_corr)
 
-def match_coinc(timestamps1, data1, timestamps2, data2, window=0.001, tz='America/Los_Angeles'):
+def match_coinc(timestamps1, data1, timestamps2, data2, window=0.001, tz='America/Los_Angeles', names=("telescope 1", "telescope 2")):
     """
     Assuming corrected timestamps, looks for coincident events between 2 telescopes within smaller set window
     Returns timestamps (local time) and data of both telescopes and timing difference for coincident events
+    names: the two telescopes' names, for the printout
     """
-    print("Number of events for telescope 1:", len(timestamps1))
-    print("Number of events for telescope 2:", len(timestamps2))
 
     # Candidate ranges in t2 for each t1
     left  = np.searchsorted(timestamps2, timestamps1 - window, side="left")
@@ -175,11 +194,13 @@ def match_coinc(timestamps1, data1, timestamps2, data2, window=0.001, tz='Americ
     time_coinc_pd1 = pd.to_datetime(time_coinc1, unit='s', utc=True).tz_convert(tz)
     time_coinc_pd2 = pd.to_datetime(time_coinc2, unit='s', utc=True).tz_convert(tz)
 
-    ncoinc = len(time_coinc1)
-    p1 = (ncoinc * 100 / len(timestamps1)) if len(timestamps1) else 0.0
-    p2 = (ncoinc * 100 / len(timestamps2)) if len(timestamps2) else 0.0
-    print(f"Number of coincident events within {window}s: {ncoinc} "
-          f"( ~{p1:.1f}% of all telescope 1 events and ~{p2:.1f}% of all telescope 2 events.)")
+    # an event can match several in the other telescope (e.g. bursts of frames < window apart), so
+    # count distinct events per telescope rather than pairs
+    n1, n2 = len(np.unique(idx1)), len(np.unique(idx2))
+    p1 = (n1 * 100 / len(timestamps1)) if len(timestamps1) else 0.0
+    p2 = (n2 * 100 / len(timestamps2)) if len(timestamps2) else 0.0
+    print(f"{names[0]}-{names[1]} within {window}s: {n1}/{len(timestamps1)} {names[0]} events ({p1:.1f}%) "
+          f"and {n2}/{len(timestamps2)} {names[1]} events ({p2:.1f}%) coincident, {len(idx1)} pairs")
 
     return time_coinc1, data_coinc1, time_coinc2, data_coinc2
 
@@ -282,3 +303,56 @@ def coinc_rate(coinc_timestamps,plot_name,base_dir,bin_width=240,plotting=False)
         plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
         plt.show()
     return(time_rate,rate)
+
+def find_coincidences(telescope_events, window=0.001):
+    """Finds every 2-way coincidence between telescope pairs (see match_coinc), then unions
+    overlapping matches via union-find so a group spans however many telescopes ended up linked (2+).
+
+    telescope_events: {telescope_name: (timestamps, ...)}; only timestamps are used.
+
+    Returns a list of (telescope_names, event_indices, event_times) tuples, one per group, all
+    three ordered the same way (by telescope_events' iteration order).
+    """
+    names = list(telescope_events)
+    parent = {}
+
+    def find(node):
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for name, (timestamps, _, _) in telescope_events.items():
+        for idx in range(len(timestamps)):
+            parent[(name, idx)] = (name, idx)
+
+    node_time = {}
+    for a, b in combinations(names, 2):
+        timestamps_a = telescope_events[a][0]
+        timestamps_b = telescope_events[b][0]
+        t1, i1, t2, i2 = match_coinc(
+            timestamps_a, np.arange(len(timestamps_a)), timestamps_b, np.arange(len(timestamps_b)), window=window, names=(a, b),
+        )
+        for ta, ia, tb, ib in zip(t1, i1, t2, i2):
+            node_a, node_b = (a, ia), (b, ib)
+            node_time[node_a] = ta
+            node_time[node_b] = tb
+            union(node_a, node_b)
+
+    groups = {}
+    for node in node_time:
+        groups.setdefault(find(node), []).append(node)
+
+    coincidences = []
+    for nodes in groups.values():
+        if len({n[0] for n in nodes}) < 2:
+            continue
+        nodes = sorted(nodes, key=lambda n: names.index(n[0]))
+        coincidences.append(([n[0] for n in nodes], [n[1] for n in nodes], [node_time[n] for n in nodes]))
+
+    return coincidences
