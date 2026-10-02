@@ -3,9 +3,9 @@
 On/off region counting, Li & Ma significance, and sky maps for reconstructed arrival directions
 (see heap.reconstruction).
 
-Each run is counted in its own camera frame (degrees from that run's pointing, see make_wcs() and
-heap.events.run_pointings()), so runs with different wobble offsets combine correctly: a sky
-position is projected into every run's camera frame, and off regions are placed around it there.
+Each run is counted in its own camera coordinates (degrees from that run's pointing, see make_wcs()
+and heap.events.mean_pointings()), so runs with different wobble offsets combine correctly: a sky
+position is converted to every run's camera coordinates, and off regions are placed around it there.
 Only regions entirely inside the camera are counted (in_camera()).
 """
 import numpy as np
@@ -21,8 +21,8 @@ def make_wcs(center):
     Tangent-plane WCS centered on the pointing, with 1 deg "pixels" so camera coordinates in
     degrees convert directly: w.wcs_pix2world(Xoffset, Yoffset, 1).
 
-    The camera frame is the preflip frame (heap.events.load_camera_frame() rotates postflip images
-    180 deg into it), where +x (columns) points east and +y (rows) points south. Verified against
+    Camera coordinates are in the preflip orientation (heap.events.load_camera_frame() rotates
+    postflip images 180 deg to it), where +x (columns) points east and +y (rows) points south. Verified against
     catalog star positions in pedvar maps on the Sept 2026 nights, all four telescopes.
 
     Parameters:
@@ -42,7 +42,7 @@ def camera_to_sky(df, pointings, x="Xoffset", y="Yoffset"):
 
     Parameters:
         df: rows with Run and camera coordinates x, y (deg)
-        pointings: {Run: SkyCoord} each run's pointing, see heap.events.run_pointings()
+        pointings: {Run: SkyCoord} each run's array pointing, see heap.events.mean_pointings()
 
     Returns:
         (ra, dec) arrays aligned with df
@@ -56,7 +56,7 @@ def camera_to_sky(df, pointings, x="Xoffset", y="Yoffset"):
 
 class RegionCounter:
     """
-    Counts one pointing's events in circular regions of its camera frame. An event counts in a
+    Counts one pointing's events in circular regions, in its camera coordinates. An event counts in a
     region if its reconstructed direction is within theta of the region center, at least one of its
     images passes position_cuts, and every such image's centroid is within max_distance of the
     center.
@@ -100,7 +100,7 @@ class RegionCounter:
         self.img = img
 
     def to_camera(self, ra, dec):
-        """Sky position(s) (deg) in this pointing's camera frame (deg)."""
+        """Sky position(s) (deg) in this pointing's camera coordinates (deg)."""
         return self.w.wcs_world2pix(ra, dec, 1)
 
     def shower_params(self, center_x, center_y, idx=slice(None)):
@@ -227,7 +227,7 @@ def calc_alpha(off_regions, theta):
 
 def combine_on_off(counts):
     """
-    Totals over pointings with different alphas (Eventdisplay's anasum): N_on and N_off summed,
+    Totals over pointings with different alphas (as gammapy's MapDatasetOnOff.stack()): N_on and N_off summed,
     alpha = sum(alpha_i*N_off_i)/sum(N_off_i). Pointings without off regions (alpha 0) are left out.
 
     Parameters:
@@ -248,12 +248,12 @@ def combine_on_off(counts):
 class OnOffCounter:
     """
     On/off counts at a sky position over several pointings: each Run's events are counted in its
-    own camera frame (RegionCounter), with off regions placed around the on region there.
+    own camera coordinates (RegionCounter), with off regions placed around the on region there.
 
     Parameters:
         directions: reconstructed events with Date and Run, see heap.reconstruction.reconstruct_directions()
         array: images passing cuts, see heap.events.apply_cuts()
-        pointings: {Run: SkyCoord} each run's pointing, see heap.events.run_pointings()
+        pointings: {Run: SkyCoord} each run's array pointing, see heap.events.mean_pointings()
         theta: region radius (deg)
         max_distance: max distance cut (deg); None for no cut
         off_method: "reflected" (around each pointing, default) or "ring" (around the on region),
@@ -311,18 +311,20 @@ class OnOffCounter:
             off_parts += [counter.directions.iloc[o] for o in off]
         return pd.concat(on_parts), pd.concat(off_parts)
 
-    def off_region_centers(self, ra, dec):
-        """Sky (RA, DEC) centers of every Run's off regions for the on region at (ra, dec)."""
+    def off_region_centers(self, ra, dec, pointings=None):
+        """Sky (RA, DEC) centers of every Run's off regions for the on region at (ra, dec); with pointings
+        (SkyCoords, e.g. the nominal wobble pointings), the off regions seen from each of those instead, for display."""
+        wcss = [counter.w for counter in self.counters.values()] if pointings is None else [make_wcs(p) for p in pointings]
         centers = []
-        for counter in self.counters.values():
-            regions = self.off_regions(*counter.to_camera(ra, dec))
+        for w in wcss:
+            regions = self.off_regions(*w.wcs_world2pix(ra, dec, 1))
             if regions:
-                centers += [tuple(c) for c in counter.w.wcs_pix2world(np.array(regions), 1)]
+                centers += [tuple(c) for c in w.wcs_pix2world(np.array(regions), 1)]
         return centers
 
     def theta_square(self, ra, dec):
         """Each event's squared angular distance from (ra, dec) and max image distance (among
-        images passing position_cuts, nan if none do), in its own camera frame: DataFrame with
+        images passing position_cuts, nan if none do), in its own camera coordinates: DataFrame with
         Event, ThetaSquare, Distance. Does not apply the max distance cut."""
         parts = []
         for counter in self.counters.values():
@@ -337,7 +339,7 @@ class OnOffCounter:
     def images(self, ra, dec):
         """Images passing position_cuts relative to (ra, dec), of events also passing the max
         distance cut, with distance, alpha, miss recomputed relative to (ra, dec) in each image's
-        camera frame. No theta cut."""
+        camera coordinates. No theta cut."""
         parts = []
         for counter in self.counters.values():
             x_on, y_on = counter.to_camera(ra, dec)

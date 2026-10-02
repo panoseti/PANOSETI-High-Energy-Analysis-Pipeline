@@ -4,7 +4,7 @@ Synthetic reconstructed events, shaped like heap.reconstruction.reconstruct_dire
 directions and heap.events.apply_cuts()'s array, for checking on/off counting (heap.significance)
 with known pointings, source and background, e.g. wobble vs. on-source runs.
 
-Events are drawn directly in each run's camera frame: a background spread over the camera with a
+Events are drawn directly in each run's camera coordinates: a background spread over the camera with a
 Gaussian radial acceptance, plus a point source smeared by a Gaussian PSF. Each event gets one
 placeholder image with its centroid at the event's direction, so position cuts (distance, alpha,
 miss) and the max distance cut are not meaningful for toy events.
@@ -36,7 +36,7 @@ def wobble_pointings(source, offset, directions=("N", "S")):
 
 def simulate_run(run, pointing, source, n_background, n_signal, psf, acceptance_width, rng, date="toy", first_event=0):
     """
-    One run's toy events, in its camera frame (deg from the pointing, see heap.significance.make_wcs()).
+    One run's toy events, in its camera coordinates (deg from the pointing, see heap.significance.make_wcs()).
 
     Parameters:
         run: Run name

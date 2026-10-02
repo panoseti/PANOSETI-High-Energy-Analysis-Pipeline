@@ -155,7 +155,7 @@ PRODUCT_KEYS = {
     "pedestals": "(n, 1024) [frame, row*32 + col]: pedestal (ADC), constant within each 600 s window, 0 if never set",
     "pedestal_variances": "(n, 1024) [frame, row*32 + col]: pedvar (ADC), the cleaning threshold unit, 0 if never set",
     "gain": "(32, 32) [row, col]: relative gain for the whole night, mean 1",
-    "gain_source": "0-d string: which fallback made the gain map (own, alt, prior_night:<date>, flat)",
+    "gain_source": "0-d string: which fallback made the gain map (own, alt, other_night:<date>, flat)",
     "gain_caption": "0-d string: the star fields the gain map came from",
 }
 
@@ -362,7 +362,7 @@ def plot_image_grid(params, images, indices, n_cols: int = 4):
 
 def plot_centroids(images, title="", telescopes: list = None, bins: int = 32):
     """
-    2D histogram of image centroids (x_c, y_c) in the camera frame (degrees), one panel per
+    2D histogram of image centroids (x_c, y_c) in camera coordinates (degrees), one panel per
     telescope, binned by camera pixel by default.
 
     Parameters:

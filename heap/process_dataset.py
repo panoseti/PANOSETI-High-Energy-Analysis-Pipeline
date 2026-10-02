@@ -125,14 +125,16 @@ def _closest_alt_run(source, reference_epoch, groups):
     return best
 
 
-def _find_prior_night_gain(telescope_out_dir):
-    """Looks for the most recent earlier night's already-computed gain map for this telescope
-    (any source), to reuse when this night has no usable pair of star fields at all.
+def _find_other_night_gain(telescope_out_dir):
+    """Looks for the closest other night's (earlier or later) already-computed gain map for this
+    telescope (any source), to reuse when this night has no usable pair of star fields at all.
+    Of two equally close nights, the earlier one is used.
 
     telescope_out_dir is <output_root>/<date>/<telescope>/ (what process_dataset() calls
     out_dir); sibling nights are <output_root>/<other_date>/<telescope>/*/calibrations.npz.
-    A candidate night is skipped if its own gain map was itself a "flat" fallback, so flatness
-    doesn't propagate forward night after night.
+    Only gain maps made from that night's own data ("own" or "alt") are used: "flat" ones and
+    ones reused from yet another night are skipped, so the date returned is where the map was made.
+    Later nights are only found if they were processed first.
 
     Returns (gain_map (32, 32) float32, date string), or (None, None) if nothing usable is found.
     """
@@ -143,16 +145,20 @@ def _find_prior_night_gain(telescope_out_dir):
     if not output_root.is_dir():
         return None, None
 
+    def days_from_current(date):
+        return abs((datetime.strptime(date, "%Y%m%d") - datetime.strptime(current_date, "%Y%m%d")).days)
+
     candidate_dates = sorted(
-        p.name for p in output_root.iterdir()
-        if p.is_dir() and p.name < current_date and (p / telescope_name).is_dir()
+        (p.name for p in output_root.iterdir()
+         if p.is_dir() and re.fullmatch(r"\d{8}", p.name) and p.name != current_date and (p / telescope_name).is_dir()),
+        key=lambda date: (days_from_current(date), date),
     )
 
-    for date in reversed(candidate_dates):
+    for date in candidate_dates:
         for calib_path in sorted((output_root / date / telescope_name).glob("*/calibrations.npz")):
             calib = np.load(calib_path)
             gain_source = calib["gain_source"].item() if "gain_source" in calib else "own"
-            if gain_source == "flat":
+            if gain_source not in ("own", "alt"):
                 continue
             return calib["gain"].astype(np.float32), date
 
@@ -183,15 +189,15 @@ def resolve_gain_map(
          (either flip side) as a stand-in second star field - the pre/post-flip labeling
          doesn't matter to gain_from_pedvars, it just needs two different pointings to compare.
       3. another night: if this source is the only one in the whole night (no other source to
-         pair with), reuse the most recent earlier night's already-computed gain map for this
-         telescope (see _find_prior_night_gain()).
+         pair with), reuse the closest other night's (earlier or later) already-computed gain map
+         for this telescope (see _find_other_night_gain()).
       4. flat ones: if none of the above apply (e.g. the first night this telescope is processed).
 
     Returns:
         gain_map: (32, 32) float32
         gain_source: a short machine-checkable tag for which tier was used - "own", "alt",
-            "prior_night:<date>", or "flat" (the exact string "flat" is checked elsewhere to keep
-            flatness from propagating forward night after night; see _find_prior_night_gain()).
+            "other_night:<date>", or "flat" (only "own" and "alt" maps are reused by other nights;
+            see _find_other_night_gain()).
         gain_caption: a human-readable sentence naming the actual preflip/postflip frames (or
             explaining why there weren't two comparable ones), saved into calibrations.npz
             alongside gain_source so the gallery can show it as a caption.
@@ -222,11 +228,11 @@ def resolve_gain_map(
                 )
                 return gain_map, "alt", caption
 
-    prior_gain, prior_date = _find_prior_night_gain(telescope_out_dir)
-    if prior_gain is not None:
-        return prior_gain, f"prior_night:{prior_date}", f"Reused from prior night {prior_date} (no usable frame pair this night)"
+    other_gain, other_date = _find_other_night_gain(telescope_out_dir)
+    if other_gain is not None:
+        return other_gain, f"other_night:{other_date}", f"Reused from night {other_date} (no usable frame pair this night)"
 
-    return np.ones((32, 32), dtype=np.float32), "flat", "Flat gain (1.0) — no usable frame pair this night or a prior night"
+    return np.ones((32, 32), dtype=np.float32), "flat", "Flat gain (1.0) — no usable frame pair this night or another processed night"
 
 
 def build_calibrations(

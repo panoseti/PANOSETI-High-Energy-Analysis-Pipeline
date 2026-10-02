@@ -8,6 +8,15 @@ Hillas parameters are in degrees on the panodisplay_REALDATA.C camera (32 pixels
 origin at camera center, see heap.parameterize.calc_params()). x_c runs along the columns and y_c
 along the rows of the (32, 32) image, so x_c/y_c here are the transpose of the ROOT CSVs'
 MeanX/MeanY (ROOT fills bin (i+1, j+1) from pixel [i][j]).
+
+Before images from different telescopes are combined (load_camera_frame()):
+1. pointing_corrections correct each telescope's own misalignment: its camera's offset from its own
+   mount pointing.
+2. change_origin() puts every telescope's images in common camera coordinates: measured from the
+   run's array pointing, the mean of the telescopes' mount pointings (mean_pointings()), instead of
+   from each telescope's own mount pointing. So every image of an event is measured from the same
+   point, whichever telescopes saw it.
+Only timing uses a reference telescope (build_events()).
 """
 import json
 from functools import cache
@@ -48,7 +57,7 @@ def process_night(
     """
     Run heap.process_dataset.process_dataset() for every telescope with data in one night, writing
     <output_dir>/<date>/<telescope>/<source_slug>/ for every source that night. Keeping every night
-    under the same output_dir lets process_dataset() fall back to a prior night's gain map.
+    under the same output_dir lets process_dataset() fall back to another night's gain map.
 
     Each telescope's settings (data_product, rate_cut, and the cleaning settings) are recorded in
     <output_dir>/<date>/<telescope>/processing.json; existing output made with other (or
@@ -162,8 +171,13 @@ def run_of(timestamps, runs_by_flip):
 
 def run_pointings(runs_by_flip, telescope):
     """
-    Each run's median RA/Dec while tracking, from hk.pff's MOUNT_<TELESCOPE> table (see
-    heap.process_dataset._mount_pointing()).
+    One telescope's mount pointing in each of the given runs: the median RA/Dec while tracking
+    from its MOUNT_<TELESCOPE> table in each run's hk.pff (see heap.process_dataset._mount_pointing()).
+    mount_pointings() calls this for every telescope.
+
+    Parameters:
+        runs_by_flip: this telescope's runs, see source_runs()
+        telescope: telescope name
 
     Returns:
         {run folder name: SkyCoord}, leaving out runs with no MOUNT_<TELESCOPE> table or no tracking
@@ -178,6 +192,79 @@ def run_pointings(runs_by_flip, telescope):
     return pointings
 
 
+def mount_pointings(raw_dir, source, telescopes: list, pointing_overrides: dict = None):
+    """
+    Every telescope's mount pointing in each of its runs of source on one night: finds each
+    telescope's runs (source_runs()), gets their pointings from hk.pff with run_pointings(), then
+    replaces them with pointing_overrides where given. Runs with neither are left out for that
+    telescope.
+
+    Parameters:
+        raw_dir: this night's raw data dir, see source_runs()
+        source: source name
+        telescopes: telescope names
+        pointing_overrides: optional {run folder name: SkyCoord}, replacing every telescope's pointing
+            in that run, for runs whose hk mount data is missing or wrong
+
+    Returns:
+        {telescope: {run folder name: SkyCoord}}
+    """
+    pointings = {}
+    for name in telescopes:
+        runs_by_flip = source_runs(raw_dir, name, source)
+        runs = {Path(run_dir).name for run_dirs in runs_by_flip.values() for run_dir in run_dirs}
+        overrides = {run: p for run, p in (pointing_overrides or {}).items() if run in runs}
+        pointings[name] = run_pointings(runs_by_flip, name) | overrides
+    return pointings
+
+
+def mean_pointings(pointings: dict):
+    """
+    Each run's array pointing: the mean of the telescopes' mount pointings in that run. Events are
+    reconstructed relative to it (see load_camera_frame()), so it doesn't depend on which
+    telescopes saw an event.
+
+    Parameters:
+        pointings: {telescope: {run folder name: SkyCoord}}, see mount_pointings()
+
+    Returns:
+        {run folder name: SkyCoord}
+    """
+    by_run = {}
+    for runs in pointings.values():
+        for run, pointing in runs.items():
+            by_run.setdefault(run, []).append(pointing)
+    means = {}
+    for run, run_list in by_run.items():
+        mean = SkyCoord(SkyCoord(run_list).cartesian.mean(), frame="icrs")
+        means[run] = SkyCoord(mean.ra, mean.dec)
+    return means
+
+
+def change_origin(x, y, phi, origin, new_origin):
+    """
+    Puts images in common camera coordinates: re-expresses image positions and axis angles
+    measured from one pointing (origin, e.g. a telescope's mount pointing) as measured from another
+    (new_origin, e.g. the run's array pointing, shared by every telescope); nothing on the sky moves. Each (x, y) is converted to RA/Dec with
+    origin's camera coordinates, then back with new_origin's (see heap.significance.make_wcs()).
+
+    Parameters:
+        x, y: positions (deg) from origin, e.g. image centroids x_c, y_c
+        phi: image axis angles (deg, counterclockwise from +x)
+        origin: SkyCoord that x, y, phi are measured from, e.g. a telescope's mount pointing
+        new_origin: SkyCoord to measure them from instead, e.g. the run's array pointing
+
+    Returns:
+        (x, y, phi) arrays, measured from new_origin
+    """
+    old, new = make_wcs(origin), make_wcs(new_origin)
+    x_new, y_new = new.wcs_world2pix(*old.wcs_pix2world(x, y, 1), 1)
+    # phi from a point a little way along each image axis
+    phi_rad = np.deg2rad(phi)
+    x_axis, y_axis = new.wcs_world2pix(*old.wcs_pix2world(x + 0.01*np.cos(phi_rad), y + 0.01*np.sin(phi_rad), 1), 1)
+    return x_new, y_new, np.rad2deg(np.arctan2(y_axis - y_new, x_axis - x_new)) % 360
+
+
 def load_camera_frame(
         npz_path,
         telescope: str,
@@ -185,22 +272,36 @@ def load_camera_frame(
         rotate_postflip: bool = True,
         rel_efficiency: float = 1.0,
         pointing_corrections: dict = None,
+        pointings: dict = None,
+        array_pointings: dict = None,
 ):
     """
-    Load one telescope's Hillas parameters for one night into the camera frame (degrees), sorted by
-    time.
+    Load one telescope's Hillas parameters for one night, in camera coordinates (degrees), sorted by
+    time, then optionally change their origin to each run's array pointing (see mean_pointings()).
 
     Parameters:
         npz_path: <source_slug>.npz written by heap.process_dataset.process_dataset()
         telescope: telescope name, stored in the Telescope column
         runs_by_flip: this night's runs of the source, see source_runs()
-        rotate_postflip: rotate postflip images by 180 deg into the preflip camera frame
+        rotate_postflip: rotate postflip images by 180 deg to the preflip orientation
         rel_efficiency: relative telescope efficiency; size is divided by it
-        pointing_corrections: optional {flip_side: (dx, dy)} in deg, subtracted from x_c/y_c
+        pointing_corrections: optional {flip_side: (dx, dy)} in deg, corrects this telescope's own
+            misalignment, subtracted from x_c/y_c: where a sky position appears in this camera minus
+            where it should appear given this telescope's mount pointing (+x east, +y south). E.g. the
+            mount points at the Crab but it appears at (1, 1): (dx, dy) = (1, 1). Postflip offsets
+            are subtracted after the 180 deg rotation and are NOT rotated themselves, so they must
+            already be in rotated coordinates: measured on rotated images, or measured on raw
+            postflip images and negated by the caller. Not checked.
+        pointings: optional {Run: SkyCoord} this telescope's mount pointing in each run, see mount_pointings()
+        array_pointings: optional {Run: SkyCoord} each run's array pointing, see mean_pointings().
+            With pointings, x_c/y_c/phi are put in common camera coordinates: their origin is changed
+            from this telescope's mount pointing to its run's array pointing (change_origin()), as
+            for every other telescope; images in runs missing from either are dropped.
 
     Returns:
         DataFrame with ImageIndex (row in the npz's cleaned_images, which holds every run of the source that night), Telescope, Timestamp,
-        FlipSide, and the npz's Hillas parameters (x_c, y_c, phi, size, N_pix, length, width, miss, distance, alpha)
+        FlipSide, Run, the npz's Hillas parameters (x_c, y_c, phi, size, N_pix, length, width, miss, distance, alpha),
+        and x_shift/y_shift, how far the centroid moved from its position in the (rotated) camera image
     """
     npz = np.load(npz_path)
     p = pd.DataFrame({col: npz[col] for col in npz.files if col != "cleaned_images"})
@@ -211,6 +312,7 @@ def load_camera_frame(
         "Telescope": telescope,
         "Timestamp": p.Timestamp,
         "FlipSide": flip_side_of(p.Timestamp.to_numpy(), runs_by_flip),
+        "Run": run_of(p.Timestamp.to_numpy(), runs_by_flip),
         "x_c": p.x_c,
         "y_c": p.y_c,
         "phi": p.phi,
@@ -228,46 +330,77 @@ def load_camera_frame(
         df.loc[postflip, ["x_c", "y_c"]] *= -1
         df.loc[postflip, "phi"] = (df.loc[postflip, "phi"] + 180) % 360
 
+    x_camera, y_camera = df.x_c.to_numpy().copy(), df.y_c.to_numpy().copy()
+    # correct this telescope's misalignment (camera vs its own mount pointing); postflip offsets are
+    # assumed to already be in rotated coordinates, see pointing_corrections above
     for side, (dx, dy) in (pointing_corrections or {}).items():
         df.loc[df.FlipSide == side, "x_c"] -= dx
         df.loc[df.FlipSide == side, "y_c"] -= dy
 
+    # common camera coordinates: measured from the run's array pointing, as for every telescope
+    if pointings is not None and array_pointings is not None:
+        keep = df.Run.isin(set(pointings) & set(array_pointings)).to_numpy()
+        if not keep.all():
+            print(f"{telescope}: no pointing from its own hk mount table or pointing_overrides in runs {sorted(set(df.Run[~keep]))}, dropping its {(~keep).sum()} images there")
+        df, x_camera, y_camera = df[keep].reset_index(drop=True), x_camera[keep], y_camera[keep]
+        for run, idx in df.groupby("Run").indices.items():
+            x, y, phi = change_origin(df.x_c.to_numpy()[idx], df.y_c.to_numpy()[idx], df.phi.to_numpy()[idx], pointings[run], array_pointings[run])
+            df.loc[idx, "x_c"], df.loc[idx, "y_c"], df.loc[idx, "phi"] = x, y, phi
+
+    df["x_shift"] = df.x_c - x_camera
+    df["y_shift"] = df.y_c - y_camera
     return df
 
 
-def build_events(telescopes: dict, reference: str, window: float = 0.001, plotting: bool = False):
+TIMING_BIN_WIDTH = 120 # s, coincidences.correct_time()'s default bin_width
+
+
+def _timing_segments(images: dict, order: list, bin_width: float = TIMING_BIN_WIDTH):
     """
-    Match one night's images across telescopes into events.
-
-    Each telescope's timestamps are corrected against reference (see coincidences.correct_time),
-    then matched pairwise and merged (see coincidences.find_coincidences). Events where a
-    telescope matched more than one image are dropped as ambiguous.
-
-    Parameters:
-        telescopes: {telescope_name: DataFrame from load_camera_frame()}
-        reference: telescope other telescopes' timestamps get corrected against
-        window: coincidence window (s)
-        plotting: show correct_time's before/after plots
+    Split one run's images into stretches of time with the same timing reference: in each
+    bin_width (s) bin, the first telescope in order with images in it. A bin with no images joins
+    the stretch before it.
 
     Returns:
-        DataFrame of every image in an event (telescopes' columns plus Event, numbered from 0),
-        sorted by Event then Telescope, or None if reference has no data
+        [(reference, start, end, {telescope: images}), ...], start/end Unix times (s)
     """
-    telescopes = {name: df for name, df in telescopes.items() if df is not None and len(df)}
-    if reference not in telescopes:
-        return None
+    start = min(df.Timestamp.min() for df in images.values())
+    bins = {name: ((df.Timestamp.to_numpy() - start) // bin_width).astype(int) for name, df in images.items()}
+    n_bins = max(b.max() for b in bins.values()) + 1
+    has_images = {name: np.bincount(b, minlength=n_bins) > 0 for name, b in bins.items()}
+    references = []
+    for i in range(n_bins):
+        reference = next((name for name in order if name in has_images and has_images[name][i]), None)
+        references.append(reference or references[-1]) # bin 0 always has images
 
+    segments = []
+    first = 0
+    for i in range(1, n_bins + 1):
+        if i == n_bins or references[i] != references[first]:
+            segment = {name: df[(bins[name] >= first) & (bins[name] < i)].reset_index(drop=True) for name, df in images.items()}
+            segments.append((references[first], start + first*bin_width, start + i*bin_width, {name: df for name, df in segment.items() if len(df)}))
+            first = i
+    return segments
+
+
+def _match_segment(telescopes: dict, reference: str, window: float, plotting: bool, label: str = ""):
+    """build_events() for one stretch of time, with reference as its timing reference; label is
+    appended to correct_time's plot_name, e.g. the run and time range."""
     ref_timestamps = telescopes[reference].Timestamp.to_numpy()
-    for name, df in telescopes.items():
+    for name, df in list(telescopes.items()):
         if name == reference:
             continue
         df = df.copy()
         try:
-            df["Timestamp"] = coinc.correct_time(df.Timestamp.to_numpy(), ref_timestamps, plot_name=f"{reference}-{name}", base_dir=None, plotting=plotting, coinc_window=window)
+            df["Timestamp"] = coinc.correct_time(df.Timestamp.to_numpy(), ref_timestamps, plot_name=f"{reference}-{name}{label}", base_dir=None, plotting=plotting, coinc_window=window)
         except ValueError:
-            print(f"No {reference}-{name} coincidences to correct timing with, leaving uncorrected")
-        # timestamps in a correction bin with no coincidences come back nan
+            print(f"{name}: no coincidences with {reference} in this stretch, not matched into events here")
+            del telescopes[name]
+            continue
+        # timestamps with no timing correction (no coincidences in their bin) come back nan
         telescopes[name] = df.dropna(subset=["Timestamp"]).sort_values("Timestamp", ignore_index=True)
+    if len(telescopes) < 2:
+        return None
 
     groups = coinc.find_coincidences({name: (df.Timestamp.to_numpy(), None, None) for name, df in telescopes.items()}, window=window)
     n_groups = len(groups)
@@ -288,6 +421,57 @@ def build_events(telescopes: dict, reference: str, window: float = 0.001, plotti
     return pd.concat(parts).sort_values(["Event", "Telescope"], ignore_index=True)
 
 
+def build_events(telescopes: dict, reference: list, window: float = 0.001, plotting: bool = False):
+    """
+    Match one night's images across telescopes into events, run by run.
+
+    Each run is split into TIMING_BIN_WIDTH bins, and each bin's timing reference is the first
+    telescope in reference with images in that bin, else the first other telescope that has some
+    (in the order of telescopes). So a run keeps its events when the preferred timing reference
+    has data for only part of it. In each stretch of bins with the same timing reference, the other
+    telescopes' timestamps are corrected against it (see coincidences.correct_time), leaving out a
+    telescope with no coincidences with it, then matched pairwise and merged (see
+    coincidences.find_coincidences). Events where a telescope matched more than one image are
+    dropped as ambiguous.
+
+    Parameters:
+        telescopes: {telescope_name: DataFrame from load_camera_frame()}
+        reference: list of timing reference telescopes, in order of preference
+        window: coincidence window (s)
+        plotting: show correct_time's before/after plots
+
+    Returns:
+        DataFrame of every image in an event (telescopes' columns plus Event, numbered from 0),
+        sorted by Event then Telescope, or None if no run has images from 2+ telescopes
+    """
+    telescopes = {name: df for name, df in telescopes.items() if df is not None and len(df)}
+    order = list(reference)
+    order += [name for name in telescopes if name not in order]
+
+    parts = []
+    for run in sorted(set().union(*(df.Run for df in telescopes.values()))):
+        run_images = {name: df[df.Run == run].reset_index(drop=True) for name, df in telescopes.items() if (df.Run == run).any()}
+        if len(run_images) < 2:
+            continue
+        for segment_reference, start, end, images in _timing_segments(run_images, order):
+            if len(images) < 2:
+                continue
+            span = f"{pd.to_datetime(start, unit='s'):%H:%M:%S}-{pd.to_datetime(end, unit='s'):%H:%M:%S} UTC"
+            skipped = order[:order.index(segment_reference)] # no images in this stretch
+            why = f" (no {', '.join(skipped)} images)" if skipped else ""
+            counts = ", ".join(f"{name} {len(df)}" for name, df in images.items())
+            print(f"{run}, {span}: timing reference {segment_reference}{why}; {counts} images")
+            label = f", run {pd.to_datetime(_run_start_epoch(Path(run)), unit='s'):%H:%M:%S}, {span}"
+            events = _match_segment(images, segment_reference, window, plotting, label)
+            print() # blank line between stretches
+            if events is None or not len(events):
+                continue
+            events["Event"] += parts[-1].Event.max() + 1 if parts else 0
+            parts.append(events)
+
+    return pd.concat(parts, ignore_index=True) if parts else None
+
+
 def load_camera_frames(
         output_dir,
         raw_dir,
@@ -297,22 +481,28 @@ def load_camera_frames(
         rotate_postflip: bool = True,
         rel_tel_efficiency: dict = None,
         pointing_corrections: dict = None,
+        pointing_overrides: dict = None,
 ):
     """
-    load_camera_frame() for every telescope with processed data for source on date.
+    load_camera_frame() for every telescope with processed data for source on date, with the origin
+    changed to each run's array pointing: the mean of the telescopes' mount pointings in that run (see
+    mount_pointings() and mean_pointings()).
 
     Parameters:
         output_dir: processed data dir (holding <date>/), see process_night()
-        raw_dir: this night's raw data dir, for flip sides (see source_runs())
+        raw_dir: this night's raw data dir, for flip sides and mount pointings (see source_runs())
         rel_tel_efficiency: optional {telescope: efficiency}, see load_camera_frame()
-        pointing_corrections: optional {(date, telescope, flip_side): (dx, dy)} in deg
+        pointing_corrections: optional {(date, telescope, flip_side): (dx, dy)} in deg, each camera's
+            offset from its own mount's pointing
+        pointing_overrides: optional {run folder name: SkyCoord}, see mount_pointings()
         rotate_postflip: see load_camera_frame()
 
     Returns:
-        {telescope: DataFrame from load_camera_frame()}, {telescope: runs from source_runs()}
+        {telescope: DataFrame from load_camera_frame()}, {run folder name: SkyCoord} each run's array pointing
     """
+    pointings = mount_pointings(raw_dir, source, telescopes, pointing_overrides)
+    array_pointings = mean_pointings(pointings)
     frames = {}
-    runs = {}
     for name in telescopes:
         path = params_path(output_dir, date, name, source)
         if not path.exists():
@@ -321,14 +511,14 @@ def load_camera_frames(
             side: offset for (d, tel, side), offset in (pointing_corrections or {}).items()
             if d == date and tel == name
         }
-        runs[name] = source_runs(raw_dir, name, source)
         frames[name] = load_camera_frame(
-            path, name, runs[name],
+            path, name, source_runs(raw_dir, name, source),
             rotate_postflip=rotate_postflip,
             rel_efficiency=(rel_tel_efficiency or {}).get(name, 1.0),
             pointing_corrections=corrections,
+            pointings=pointings[name], array_pointings=array_pointings,
         )
-    return frames, runs
+    return frames, array_pointings
 
 
 def build_array_events(
@@ -337,34 +527,35 @@ def build_array_events(
         date: str,
         source: str,
         telescopes: list,
-        reference: str,
+        reference: list,
         window: float = 0.001,
         rotate_postflip: bool = True,
         rel_tel_efficiency: dict = None,
         pointing_corrections: dict = None,
+        pointing_overrides: dict = None,
         plotting: bool = False,
 ):
     """
-    load_camera_frames() then build_events(). Adds a Date column holding date and a Run column
-    holding each event's run folder name (see run_of(), with reference's runs).
+    load_camera_frames() then build_events(). Adds a Date column holding date; x_c/y_c/phi are
+    relative to each event's run's array pointing (see mean_pointings()).
 
     Parameters:
-        output_dir, raw_dir, rotate_postflip, rel_tel_efficiency, pointing_corrections: see load_camera_frames()
+        output_dir, raw_dir, rotate_postflip, rel_tel_efficiency, pointing_corrections, pointing_overrides: see load_camera_frames()
         window, reference, plotting: see build_events()
 
     Returns:
-        see build_events()
+        events (see build_events()), {run folder name: SkyCoord} each run's array pointing (see load_camera_frames())
     """
-    frames, runs = load_camera_frames(
+    frames, array_pointings = load_camera_frames(
         output_dir, raw_dir, date, source, telescopes, rotate_postflip=rotate_postflip,
         rel_tel_efficiency=rel_tel_efficiency, pointing_corrections=pointing_corrections,
+        pointing_overrides=pointing_overrides,
     )
     events = build_events(frames, reference, window=window, plotting=plotting)
     if events is not None:
         events.insert(1, "Date", date)
-        # each event's run, from its earliest image and reference's runs, whose mount gives the pointing
-        events.insert(2, "Run", run_of(events.groupby("Event").Timestamp.transform("min").to_numpy(), runs[reference]))
-    return events
+        events.insert(2, "Run", events.pop("Run")) # every image of an event is in the same run, see build_events()
+    return events, array_pointings
 
 
 def apply_cut(array, column, mode, threshold):
@@ -473,11 +664,11 @@ def plot_event(
         pointings: dict = None,
         colors: dict = None,
         rotate_postflip: bool = True,
-        pointing_corrections: dict = None,
 ):
     """
-    Each cleaned image of one event in the camera frame, then every image's Hillas ellipse on one
-    camera plane, all with the reconstructed direction and the source position.
+    Each cleaned image of one event, shifted with its centroid (x_shift/y_shift, see
+    load_camera_frame()), then every image's Hillas ellipse on one camera plane, all with the
+    reconstructed direction and the source position.
 
     Parameters:
         event: one event's images, see apply_cuts()
@@ -485,18 +676,17 @@ def plot_event(
         output_dir: processed data dir (holding <date>/), see process_night()
         source: source name, for params_path() and the legend
         source_position: optional SkyCoord of the source; needs pointings to be drawn
-        pointings: optional {Run: SkyCoord} each run's pointing, see run_pointings()
+        pointings: optional {Run: SkyCoord} each run's array pointing, see mean_pointings()
         colors: optional {telescope: color} for the combined Hillas panel
-        rotate_postflip, pointing_corrections: as passed to build_array_events()
+        rotate_postflip: as passed to build_array_events()
 
     Returns:
         the Figure
     """
     half = CAMERA_HALF_WIDTH
     colors = colors or {}
-    pointing_corrections = pointing_corrections or {}
 
-    # source_position in this run's camera frame (deg from its pointing)
+    # source_position in camera coordinates relative to this run's array pointing
     source_xy = None
     if source_position is not None and pointings is not None and pointings.get(direction.Run) is not None:
         source_xy = make_wcs(pointings[direction.Run]).wcs_world2pix(source_position.ra.deg, source_position.dec.deg, 1)
@@ -506,8 +696,8 @@ def plot_event(
         img = _cleaned_images(params_path(output_dir, tel.Date, tel.Telescope, source))[tel.ImageIndex]
         if rotate_postflip and tel.FlipSide == "postflip":
             img = np.rot90(img, k=2)
-        dx, dy = pointing_corrections.get((tel.Date, tel.Telescope, tel.FlipSide), (0, 0))
-        im = ax.imshow(img, origin="lower", extent=[-half-dx, half-dx, -half-dy, half-dy], cmap=CAMERA_CMAP, vmin=0)
+        # shifted with its centroid (pointing correction and change of origin)
+        im = ax.imshow(img, origin="lower", extent=[-half+tel.x_shift, half+tel.x_shift, -half+tel.y_shift, half+tel.y_shift], cmap=CAMERA_CMAP, vmin=0)
         fig.colorbar(im, ax=ax, label="ADU", fraction=0.046, pad=0.04)
         draw_hillas(ax, tel, "white")
         draw_positions(ax, direction, "white", source_xy, source)

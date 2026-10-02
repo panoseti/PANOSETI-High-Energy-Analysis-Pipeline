@@ -14,8 +14,9 @@ source:
   name: Crab
   # Nights to analyze, e.g. [20260917, 20260918]; null = every night in raw_data_dir.
   dates: [20260917, 20260918, 20260922]
-  # Each run's pointing (camera center) comes from the reference telescope's hk mount table. Only for
-  # runs whose hk mount data is missing or wrong, give the pointing here, by run folder name, as
+  # Each telescope's pointing in each run comes from its own hk mount table, and each run's array
+  # pointing (what its events' camera coordinates are relative to) is the mean of them. Only for runs whose hk mount data is missing or wrong, give the
+  # pointing here (for every telescope in that run), by run folder name, as
   # "hh mm ss +dd mm ss" or [RA, Dec] in degrees, e.g.
   #   pointing_overrides:
   #     obs_Palomar.start_2026-09-17T09:50:18Z.runtype_eng-dual.pffd: "05 34 31.78 +22 31 02.6"
@@ -49,20 +50,25 @@ pipeline:
   keep_brightest_island: true
 
 events:
-  # Telescope other telescopes' timestamps get corrected against; its mount gives each run's pointing.
-  reference: Winter
+  # Timing reference: in each 120 s of each run, other telescopes' timestamps get corrected against the
+  # first of these with data in those 120 s (then any other telescope). Only used for timing.
+  reference: [Winter, Fern, Heli, Gattini]
   # Coincidence window (s), after correcting each telescope's timestamps against reference.
   coinc_window: 0.001
-  # Rotate postflip images by 180 deg into the preflip camera frame.
+  # Rotate postflip images by 180 deg to the preflip orientation.
   rotate_postflip: true
   # {telescope: efficiency}, divides size; panodisplay_REALDATA.C used Heli (PTI) 0.46, Fern 1.49,
   # Winter 1.0 for Jan 2026.
   rel_tel_efficiency: {}
-  # Offsets (deg) between each camera and the reference mount's pointing, subtracted from x_c/y_c
-  # (postflip offsets in the rotated, preflip frame), e.g.
+  # Each telescope's misalignment, per night and flip side: [dx, dy] in deg, subtracted from x_c/y_c.
+  #   [dx, dy] = (where a star appears in the camera) - (where it should be, from that telescope's
+  #              own mount pointing), with +x = east, +y = south.
+  #   Example: mount pointed at the Crab, Crab seen at (1, 1) instead of (0, 0) -> [1, 1].
+  #   Postflip: images are rotated 180 deg before the correction is subtracted; the correction is not
+  #             rotated. If you measured on raw (unrotated) postflip images, enter [-dx, -dy].
   #   20260917:
   #     Fern:
-  #       preflip: [0.05, -0.02]
+  #       preflip: [1.0, 1.0]
   pointing_corrections: {}
 
 cuts:

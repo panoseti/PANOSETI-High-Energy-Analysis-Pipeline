@@ -72,6 +72,8 @@ def load_analysis_config(path):
                 defaults to <raw_data_dir>/processed)
             source.dates: list of "YYYYMMDD" strings, or None
             source.pointing_overrides: {run folder name: SkyCoord}
+            events.reference: list of telescope names, in order of preference, see
+                heap.events.build_events()
             events.pointing_corrections: {(date, telescope, flip_side): (dx, dy)}, see
                 heap.events.build_array_events()
             cuts.telescopes: list of telescope names (default = every telescope in telescopes)
@@ -97,8 +99,10 @@ def load_analysis_config(path):
 
     names = [info["name"] for info in config["telescopes"].values()]
     events = config["events"]
-    if events["reference"] not in names:
-        raise ValueError(f"events.reference: {events['reference']!r} not one of {names}")
+    events["reference"] = [events["reference"]] if isinstance(events["reference"], str) else list(events["reference"])
+    unknown = [name for name in events["reference"] if name not in names]
+    if unknown:
+        raise ValueError(f"events.reference: {unknown} not in {names}")
     events["rel_tel_efficiency"] = events["rel_tel_efficiency"] or {}
     corrections = {}
     for date, telescopes in (events["pointing_corrections"] or {}).items():

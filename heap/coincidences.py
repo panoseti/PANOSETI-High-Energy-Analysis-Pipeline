@@ -74,8 +74,8 @@ def time_offset(timestamps1, timestamps2, window=0.02, plotting=False):
             idx1.extend([i] * (r - l))
             idx2.extend(range(l, r))
 
-    idx1 = np.asarray(idx1)
-    idx2 = np.asarray(idx2)
+    idx1 = np.asarray(idx1, dtype=int) # int even when empty, so no coincidences indexes cleanly
+    idx2 = np.asarray(idx2, dtype=int)
 
     time_coinc1 = t1[idx1]
     time_coinc2 = t2[idx2]
@@ -99,6 +99,7 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
     """
     Determines time dependant timing offset between two telescopes my matching events within a large window
     Corrects timestamp1 with the determined offset function and returns corrected timestamp 1
+    (nan where there's no offset: in bins with no coincidences, or outside the coincidences' time range)
     plotting: shows the before/after plot if True
     coinc_window: coincidence window (s) used afterwards; both panels' offset axes span the median
         offset and 0, plus a few of these, with the window marked on the after panel
@@ -113,9 +114,11 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
     rms=np.sqrt(np.mean(np.square(dt_median[~np.isnan(dt_median)])))
     sigma=np.std(dt_median[~np.isnan(dt_median)])
     print(f"{plot_name} timing offset: RMS= ",round(rms,5),"s, std=",round(sigma, 5),"s")
-    #Correcting timestamps1 with determined offset function
+    #Correcting timestamps1 with determined offset function; nan outside the offset bins
     t_corr=np.digitize(timestamps1,x)-1
-    timestamps1_corr=timestamps1-dt_median[t_corr]
+    in_bins=(t_corr>=0)&(t_corr<len(dt_median))
+    timestamps1_corr=np.full(len(timestamps1),np.nan)
+    timestamps1_corr[in_bins]=np.asarray(timestamps1)[in_bins]-dt_median[t_corr[in_bins]]
     #calculate corrected timing differences
     time_coinc1_corr,_,dt_corr=time_offset(timestamps1_corr,timestamps2,window=window)
     #check that time offset is 0 now
@@ -139,7 +142,7 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         ax[0].set_title("Before Correction")
         ax[1].scatter(time_coinc_pd1_corr,dt_corr,marker=".")
         ax[1].step(x_pd_corr,dt_median_corr,label="dt median, RMS="+str(round(rms_corr,5))+"s",color="red")
-        ax[1].set_xlabel("Time")
+        ax[1].set_xlabel("Time (America/Los_Angeles)")
         ax[1].set_ylabel("time offset [s]")
         ax[1].set_title("After Correction")
         ax[1].grid()
@@ -154,6 +157,7 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         ax[1].legend()
         for a in ax:
             a.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        fig.suptitle(plot_name)
         fig.tight_layout()
         plt.show()
     return(timestamps1_corr)
