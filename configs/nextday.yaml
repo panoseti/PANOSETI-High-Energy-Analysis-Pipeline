@@ -11,19 +11,19 @@ paths:
 
 telescopes:
   # module number -> telescope name (used to find files and label plots) and rate_cut
-  # (spike_cut's trigger-rate threshold in Hz).
+  # (spike_cut's trigger-rate threshold, as a multiple of each file's median trigger rate).
   module_250:
     name: Heli
-    rate_cut: 100
+    rate_cut: 3
   module_252:
     name: Fern
-    rate_cut: 100
+    rate_cut: 3
   module_253:
     name: Winter
-    rate_cut: 100
+    rate_cut: 3
   module_254:
     name: Gattini
-    rate_cut: 100
+    rate_cut: 3
     
 pipeline:
   # Telescope other telescopes' timestamps get corrected against.

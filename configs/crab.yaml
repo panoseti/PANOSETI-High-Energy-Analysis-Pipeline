@@ -23,19 +23,20 @@ source:
   pointing_overrides: {}
 
 telescopes:
-  # module number -> telescope name and rate_cut (spike_cut's trigger-rate threshold in Hz).
+  # module number -> telescope name and rate_cut (spike_cut's trigger-rate threshold, as a
+  # multiple of each file's median trigger rate).
   module_250:
     name: Heli
-    rate_cut: 10
+    rate_cut: 3
   module_252:
     name: Fern
-    rate_cut: 10
+    rate_cut: 3
   module_253:
     name: Winter
-    rate_cut: 10
+    rate_cut: 3
   module_254:
     name: Gattini
-    rate_cut: 10
+    rate_cut: 3
 
 pipeline:
   # Data product tag in .pff filenames.

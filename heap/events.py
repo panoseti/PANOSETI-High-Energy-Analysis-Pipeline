@@ -58,7 +58,7 @@ def process_night(
         raw_dir: this night's raw data dir, containing one subfolder per run
         output_dir: processed data dir (holding <date>/)
         date: night, YYYYMMDD
-        telescopes: {module: {"name": telescope_name, "rate_cut": Hz}}, e.g. {"module_253": {"name": "Winter", "rate_cut": 100}}
+        telescopes: {module: {"name": telescope_name, "rate_cut": multiple of median rate}}, e.g. {"module_253": {"name": "Winter", "rate_cut": 3}}
         data_product: data product tag in .pff filenames
         image_threshold, border_threshold, keep_brightest_island: passed through to process_dataset()
         reprocess: rerun telescopes that already have output for this night
@@ -71,7 +71,7 @@ def process_night(
         name = info["name"]
         out_dir = Path(output_dir) / date / name
         settings = {
-            "data_product": data_product, "rate_cut": info.get("rate_cut", 20),
+            "data_product": data_product, "rate_cut": info.get("rate_cut", 3),
             "image_threshold": image_threshold, "border_threshold": border_threshold,
             "keep_brightest_island": keep_brightest_island,
         }
@@ -92,7 +92,7 @@ def process_night(
             process_dataset(
                 raw_dir, out_dir, module_pattern, name,
                 fallback_map_path=fallback_map_path if fallback_map_path.exists() else None,
-                rate_cut=info.get("rate_cut", 20),
+                rate_cut=info.get("rate_cut", 3),
                 image_threshold=image_threshold, border_threshold=border_threshold,
                 keep_brightest_island=keep_brightest_island,
             )
@@ -263,7 +263,7 @@ def build_events(telescopes: dict, reference: str, window: float = 0.001, plotti
             continue
         df = df.copy()
         try:
-            df["Timestamp"] = coinc.correct_time(df.Timestamp.to_numpy(), ref_timestamps, plot_name=f"{reference}-{name}", base_dir=None, plotting=plotting)
+            df["Timestamp"] = coinc.correct_time(df.Timestamp.to_numpy(), ref_timestamps, plot_name=f"{reference}-{name}", base_dir=None, plotting=plotting, coinc_window=window)
         except ValueError:
             print(f"No {reference}-{name} coincidences to correct timing with, leaving uncorrected")
         # timestamps in a correction bin with no coincidences come back nan

@@ -535,7 +535,7 @@ def process_dataset(
         module_pattern: str,
         telescope: str,
         fallback_map_path=None,
-        rate_cut: float = 20,
+        rate_cut: float = 3,
         time_window: float = 600,
         max_gap: float = 300,
         nsig: float = 5.0,
@@ -567,7 +567,7 @@ def process_dataset(
             identify_source()/identify_flip_side())
         fallback_map_path: optional path to a fallback map file (see load_fallback_map()),
             used when hk.pff's mount data is missing
-        rate_cut: spike_cut's trigger-rate threshold (Hz), see coincidences.load_telescope_tv
+        rate_cut: spike_cut's trigger-rate threshold (multiple of the median rate), see coincidences.load_telescope_tv
         time_window, max_gap, nsig, fit_gaussian: passed through to build_calibrations()
         x, y, image_threshold, border_threshold, keep_brightest_island: passed through to process_image()
 

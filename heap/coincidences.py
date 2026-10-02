@@ -15,9 +15,8 @@ def load_telescope_tv(module_str, base_dir, rate_cut, plotting=False):
     Reads in all files for one telescope, applies
     read_pff -> cut_pkt_loss_old (tv-timestamps) -> spike_cut
     base_dir is where the raw .pff files are read from.
-    rate_cut is spike_cut's trigger-rate threshold (Hz) and must be passed explicitly: telescopes
-    with a higher steady-state rate need a higher rate_cut or spike_cut will discard real data as
-    "spikes" (e.g. PTI/Fern vs. Winter).
+    rate_cut is spike_cut's trigger-rate threshold, as a multiple of each file's median trigger rate,
+    and must be passed explicitly.
     plotting: shows each file's spike-cut plot if True
     Returns combined timestamps and data
     """
@@ -96,11 +95,13 @@ def time_offset(timestamps1, timestamps2, window=0.02, plotting=False):
 
     return time_coinc1, time_coinc2, dt
 
-def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bin_width=120, plotting=False):
+def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bin_width=120, plotting=False, coinc_window=0.001):
     """
     Determines time dependant timing offset between two telescopes my matching events within a large window
     Corrects timestamp1 with the determined offset function and returns corrected timestamp 1
     plotting: shows the before/after plot if True
+    coinc_window: coincidence window (s) used afterwards; both panels' offset axes span the median
+        offset and 0, plus a few of these, with the window marked on the after panel
     """
     #get timing differences and coincident timestamps of t1
     time_coinc1,_,dt=time_offset(timestamps1,timestamps2,window=window)
@@ -129,6 +130,7 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         time_coinc_pd1 = pd.to_datetime(time_coinc1, unit='s', utc=True).tz_convert('America/Los_Angeles')
         time_coinc_pd1_corr = pd.to_datetime(time_coinc1_corr, unit='s', utc=True).tz_convert('America/Los_Angeles')
         x_pd=pd.to_datetime(x[:-1], unit='s', utc=True).tz_convert('America/Los_Angeles')
+        x_pd_corr=pd.to_datetime(x_corr[:-1], unit='s', utc=True).tz_convert('America/Los_Angeles')
         fig,ax=plt.subplots(2,1,sharex=True)
         ax[0].scatter(time_coinc_pd1,dt,marker=".")
         ax[0].step(x_pd,dt_median,label="dt median, RMS="+str(round(rms,5))+"s",color="red")
@@ -136,11 +138,20 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         ax[0].grid()
         ax[0].set_title("Before Correction")
         ax[1].scatter(time_coinc_pd1_corr,dt_corr,marker=".")
+        ax[1].step(x_pd_corr,dt_median_corr,label="dt median, RMS="+str(round(rms_corr,5))+"s",color="red")
         ax[1].set_xlabel("Time")
         ax[1].set_ylabel("time offset [s]")
         ax[1].set_title("After Correction")
         ax[1].grid()
         ax[0].legend()
+        if coinc_window:
+            dt_median_ok = dt_median[~np.isnan(dt_median)]
+            ylim = (min(dt_median_ok.min(), 0) - 3*coinc_window, max(dt_median_ok.max(), 0) + 3*coinc_window)
+            for a in ax:
+                a.set_ylim(ylim)
+            ax[1].axhline(coinc_window, color="red", ls="--", lw=1, label=f"coinc window (±{coinc_window}s)")
+            ax[1].axhline(-coinc_window, color="red", ls="--", lw=1)
+        ax[1].legend()
         for a in ax:
             a.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
         fig.tight_layout()

@@ -211,7 +211,7 @@ def load_all_telescopes(telescope_map, raw_dir, run_out_dir, date_out_dir, manif
         if not sorted(raw_dir.glob(f"*{module_pattern}*.pff")):
             print(f"Skipping {name} ({module}): no {DATA_PRODUCT} .pff files found in {raw_dir}")
             continue
-        data, timestamps = coinc.load_telescope_tv(module_pattern, raw_dir, info.get("rate_cut", 20), plotting=True)
+        data, timestamps = coinc.load_telescope_tv(module_pattern, raw_dir, info.get("rate_cut", 3), plotting=True)
         telescopes[name] = (data, timestamps)
         spike_cut_path = run_out_dir / module_pattern / "spike_cut.png"
         save_plot(spike_cut_path)
@@ -356,7 +356,7 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
         try:
             results = process_dataset(
                 raw_dir, date_out_dir / name, module_pattern, name,
-                fallback_map_path=fallback_map_path, rate_cut=info.get("rate_cut", 20),
+                fallback_map_path=fallback_map_path, rate_cut=info.get("rate_cut", 3),
                 image_threshold=image_threshold, border_threshold=border_threshold,
             )
         except Exception as e:
