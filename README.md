@@ -48,7 +48,7 @@ Four notebooks in `analysis_tools/` process and analyze one source over one or m
 2. `inspect_data_products.ipynb` - what processing writes to `output_dir` and how to load it for further analysis (`heap.diagnostics.load_products()`, `heap.events.load_camera_frame()`, `heap.events.build_array_events()`).
 3. `explore_events.ipynb` - Hillas parameter distributions, image centroid histograms and reconstructed events (direction histogram and event displays) for a selection of telescopes, nights and cuts, overridable in the notebook without editing the config.
 4. `pff_analysis.ipynb` - the source analysis. Processes any nights not already in `output_dir`, then:
-    * corrects each telescope's pointing and puts every image in camera coordinates relative to its run's array pointing, then corrects timestamps against the timing reference and builds array events from coincident images (`heap.coincidences`, `heap.events`)
+    * applies each camera's pointing correction, then corrects timestamps against the timing reference and builds array events from coincident images (`heap.coincidences`, `heap.events`)
     * applies image cuts, then reconstructs each event's arrival direction from the intersection of image axes (`heap.reconstruction`)
     * counts on/off regions (reflected or ring), computes Li & Ma significance and makes sky maps (`heap.significance`)
 
@@ -60,7 +60,7 @@ Processing writes, per night, telescope and source:
 ```
 Nights already in `output_dir` are not reprocessed, and processing them with different settings raises an error, so give configs with different telescopes or cleaning settings their own `output_dir`. Events, directions and significances are not written.
 
-Each telescope's pointing comes from its own hk mount table, and each run's array pointing (which events are reconstructed relative to) is the mean of them. A telescope's images in runs where it has no mount pointing are dropped (with a printout), so give runs with missing or wrong mount data a pointing in the config's `source.pointing_overrides`. When hk `target_name` is blank, the source is identified by matching the pointing against the catalog in `heap/sources.py`, so add new sources there. The timing reference (`events.reference`) is only used for timing: in each 120 s of each run, the first telescope in that list with data.
+Each run's pointing, shared by every telescope, is its commanded wobble position: the source ±`source.wobble_offset` in Dec, or the source itself, whichever is closest to the hk mount positions (`heap.events.wobble_pointings()`). The hk mount positions aren't used as the pointing, since they drift away from it while the telescopes guide. Give runs commanded somewhere else, or with no hk mount data, a pointing in the config's `source.pointing_overrides`; runs with neither are left out (with a printout). When hk `target_name` is blank, the source is identified by matching the pointing against the catalog in `heap/sources.py`, so add new sources there. The timing reference (`events.reference`) is only used for timing: in each 120 s of each run, the first telescope in that list with data.
 
 To analyze a new source, copy `configs/crab.yaml`, set `source.name` and `paths`, and point the notebooks' `CONFIG` at it.
 

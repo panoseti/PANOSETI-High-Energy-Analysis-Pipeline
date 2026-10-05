@@ -14,10 +14,10 @@ source:
   name: Crab
   # Nights to analyze, e.g. [20260917, 20260918]; null = every night in raw_data_dir.
   dates: [20260917, 20260918, 20260922]
-  # Each telescope's pointing in each run comes from its own hk mount table, and each run's array
-  # pointing (what its events' camera coordinates are relative to) is the mean of them. Only for runs whose hk mount data is missing or wrong, give the
-  # pointing here (for every telescope in that run), by run folder name, as
-  # "hh mm ss +dd mm ss" or [RA, Dec] in degrees, e.g.
+  # Wobble offset (deg); each run's pointing is the source +-this in Dec (see heap.events.wobble_pointings()).
+  wobble_offset: 0.5
+  # Pointing for runs commanded elsewhere or with no hk mount data, by run folder name,
+  # as "hh mm ss +dd mm ss" or [RA, Dec] in degrees, e.g.
   #   pointing_overrides:
   #     obs_Palomar.start_2026-09-17T09:50:18Z.runtype_eng-dual.pffd: "05 34 31.78 +22 31 02.6"
   #     obs_Palomar.start_2026-09-18T10:53:14Z.runtype_ph.pffd: [83.6324, 21.5174]
@@ -61,15 +61,40 @@ events:
   # Winter 1.0 for Jan 2026.
   rel_tel_efficiency: {}
   # Each telescope's misalignment, per night and flip side: [dx, dy] in deg, subtracted from x_c/y_c.
-  #   [dx, dy] = (where a star appears in the camera) - (where it should be, from that telescope's
-  #              own mount pointing), with +x = east, +y = south.
-  #   Example: mount pointed at the Crab, Crab seen at (1, 1) instead of (0, 0) -> [1, 1].
+  #   [dx, dy] = (where a star appears in the camera) - (where it should be, from the run's
+  #              pointing, see source.wobble_offset), with +x = east, +y = south.
+  #   Example: pointed at the Crab, Crab seen at (1, 1) instead of (0, 0) -> [1, 1].
   #   Postflip: images are rotated 180 deg before the correction is subtracted; the correction is not
   #             rotated. If you measured on raw (unrotated) postflip images, enter [-dx, -dy].
   #   20260917:
   #     Fern:
   #       preflip: [1.0, 1.0]
-  pointing_corrections: {}
+  pointing_corrections:
+    20260917:
+      Fern:
+        preflip: [0,-0.62]
+      Winter:
+        preflip: [0,-0.31]
+      Heli:
+        preflip: [-0.31,-0.62]
+      Gattini:
+        preflip: [0,-0.62]
+    20260918:
+      Fern:
+        preflip: [0.31,0.465]
+      Winter:
+        preflip: [0,0.62]
+      Heli:
+        preflip: [-0.31,0.31]
+      Gattini:
+        preflip: [0,0.31]
+    20260922:
+      Fern:
+        preflip: [0,-0.62]
+      Winter:
+        preflip: [0,-0.31]
+      Heli:
+        preflip: [-0.31,-0.62]
 
 cuts:
   # Minimum number of pixels in an image.

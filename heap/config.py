@@ -13,7 +13,7 @@ from heap.significance import OFF_REGION_METHODS
 
 SECTIONS = {
     "paths": {"raw_data_dir", "output_dir"},
-    "source": {"name", "dates", "pointing_overrides"},
+    "source": {"name", "dates", "wobble_offset", "pointing_overrides"},
     "telescopes": None, # module -> {name, rate_cut}
     "pipeline": {"data_product", "image_threshold", "border_threshold", "keep_brightest_island"},
     "events": {"reference", "coinc_window", "rotate_postflip", "rel_tel_efficiency", "pointing_corrections"},
@@ -71,6 +71,7 @@ def load_analysis_config(path):
             paths.*: Path (relative paths resolved against the project root; output_dir
                 defaults to <raw_data_dir>/processed)
             source.dates: list of "YYYYMMDD" strings, or None
+            source.wobble_offset: float (deg), see heap.events.wobble_pointings()
             source.pointing_overrides: {run folder name: SkyCoord}
             events.reference: list of telescope names, in order of preference, see
                 heap.events.build_events()
@@ -95,6 +96,7 @@ def load_analysis_config(path):
 
     source = config["source"]
     source["dates"] = [str(d) for d in source["dates"]] if source["dates"] is not None else None
+    source["wobble_offset"] = float(source["wobble_offset"])
     source["pointing_overrides"] = {str(run): _pointing(p) for run, p in (source["pointing_overrides"] or {}).items()}
 
     names = [info["name"] for info in config["telescopes"].values()]

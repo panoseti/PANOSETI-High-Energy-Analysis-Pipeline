@@ -4,7 +4,7 @@ On/off region counting, Li & Ma significance, and sky maps for reconstructed arr
 (see heap.reconstruction).
 
 Each run is counted in its own camera coordinates (degrees from that run's pointing, see make_wcs()
-and heap.events.mean_pointings()), so runs with different wobble offsets combine correctly: a sky
+and heap.events.wobble_pointings()), so runs with different wobble offsets combine correctly: a sky
 position is converted to every run's camera coordinates, and off regions are placed around it there.
 Only regions entirely inside the camera are counted (in_camera()).
 """
@@ -42,7 +42,7 @@ def camera_to_sky(df, pointings, x="Xoffset", y="Yoffset"):
 
     Parameters:
         df: rows with Run and camera coordinates x, y (deg)
-        pointings: {Run: SkyCoord} each run's array pointing, see heap.events.mean_pointings()
+        pointings: {Run: SkyCoord} each run's pointing, see heap.events.wobble_pointings()
 
     Returns:
         (ra, dec) arrays aligned with df
@@ -253,7 +253,7 @@ class OnOffCounter:
     Parameters:
         directions: reconstructed events with Date and Run, see heap.reconstruction.reconstruct_directions()
         array: images passing cuts, see heap.events.apply_cuts()
-        pointings: {Run: SkyCoord} each run's array pointing, see heap.events.mean_pointings()
+        pointings: {Run: SkyCoord} each run's pointing, see heap.events.wobble_pointings()
         theta: region radius (deg)
         max_distance: max distance cut (deg); None for no cut
         off_method: "reflected" (around each pointing, default) or "ring" (around the on region),
@@ -311,16 +311,15 @@ class OnOffCounter:
             off_parts += [counter.directions.iloc[o] for o in off]
         return pd.concat(on_parts), pd.concat(off_parts)
 
-    def off_region_centers(self, ra, dec, pointings=None):
-        """Sky (RA, DEC) centers of every Run's off regions for the on region at (ra, dec); with pointings
-        (SkyCoords, e.g. the nominal wobble pointings), the off regions seen from each of those instead, for display."""
-        wcss = [counter.w for counter in self.counters.values()] if pointings is None else [make_wcs(p) for p in pointings]
+    def off_region_centers(self, ra, dec):
+        """Sky (RA, DEC) centers of the off regions for the on region at (ra, dec), each listed once:
+        Runs with the same pointing share them."""
         centers = []
-        for w in wcss:
-            regions = self.off_regions(*w.wcs_world2pix(ra, dec, 1))
+        for counter in self.counters.values():
+            regions = self.off_regions(*counter.to_camera(ra, dec))
             if regions:
-                centers += [tuple(c) for c in w.wcs_pix2world(np.array(regions), 1)]
-        return centers
+                centers += [tuple(c) for c in counter.w.wcs_pix2world(np.array(regions), 1)]
+        return list(dict.fromkeys(centers))
 
     def theta_square(self, ra, dec):
         """Each event's squared angular distance from (ra, dec) and max image distance (among
