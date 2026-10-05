@@ -20,6 +20,10 @@ SOURCES = {
     "Geminga": SkyCoord("06 33 54.15 +17 46 12.9", unit=(u.hourangle, u.deg)),
 }
 
+ALIASES = {
+    "M1": "Crab",
+}  # other names the mount's target_name may use, mapped to their SOURCES name
+
 MAX_OFFSET = 1.0 # deg; farthest a pointing can be from a source and still match it (wobbles are ~0.5 deg)
 
 

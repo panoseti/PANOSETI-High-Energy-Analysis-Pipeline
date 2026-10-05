@@ -20,7 +20,7 @@ from heap.image_cleaning import threshold_clean
 from heap.make_gain_map import gain_from_pedvars
 from heap.make_pedestals import calculate_pedestal_and_pedvar
 from heap.parameterize import calc_params
-from heap.sources import match_source
+from heap.sources import ALIASES, match_source
 
 
 def slugify(text, sep="-"):
@@ -478,7 +478,7 @@ def identify_source(run_dir, telescope, fallback_map=None):
     """
     mount = _mount_at_run_start(run_dir, telescope)
     if mount is not None and mount["target_name"]:
-        return mount["target_name"]
+        return ALIASES.get(mount["target_name"], mount["target_name"])
 
     if fallback_map is not None and run_dir.name in fallback_map:
         return fallback_map[run_dir.name]["source"]
