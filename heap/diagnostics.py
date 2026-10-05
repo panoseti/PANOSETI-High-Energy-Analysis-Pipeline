@@ -14,13 +14,14 @@ import pandas as pd
 
 from heap.events import params_path
 from heap.parameterize import CAMERA_CMAP, CAMERA_EXTENT, CAMERA_HALF_WIDTH, TAB10_COLORS, draw_params
-from heap.process_dataset import _get_mount_hk, _mount_pointing, _run_start_epoch, discover_runs, identify_flip_side, identify_source, load_fallback_map
+from heap.process_dataset import _mount_pointing, _run_start_epoch, discover_runs, identify_flip_side, identify_source, load_fallback_map
 
 
 def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
     """
     One night's runs as heap.process_dataset.process_dataset() sees them: each telescope's source,
-    flip side and mount pointing (from hk.pff), and its data product files. Uses
+    flip side and mount pointing at the run's start (heap.process_dataset._mount_at_run_start()),
+    and its data product files. Uses
     <raw_dir>/source_run_map.json as the fallback map if present (see
     heap.process_dataset.load_fallback_map()).
 
@@ -49,8 +50,7 @@ def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
                 flip_side = identify_flip_side(run_dir, name, fallback_map=fallback_map)
             except ValueError as e:
                 flip_side = f"? ({e})"
-            mount = _get_mount_hk(run_dir, name)
-            pointing = _mount_pointing(mount) if mount is not None else None
+            pointing = _mount_pointing(run_dir, name)
             rows.append({
                 "Run": run_dir.name,
                 "Start": pd.to_datetime(_run_start_epoch(run_dir), unit="s", utc=True),

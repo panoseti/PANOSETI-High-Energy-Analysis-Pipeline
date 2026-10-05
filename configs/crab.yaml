@@ -10,13 +10,12 @@ paths:
   output_dir: /home/nkorzoun/research/PANOSETI/data/processed
 
 source:
-  # hk target_name, else heap.sources catalog name; its catalog position is the on region center.
+  # Mount target name, else heap.sources catalog name; its catalog position is the on region center.
   name: Crab
   # Nights to analyze, e.g. [20260917, 20260918]; null = every night in raw_data_dir.
   dates: [20260917, 20260918, 20260922]
-  # Wobble offset (deg); each run's pointing is the source +-this in Dec (see heap.events.wobble_pointings()).
-  wobble_offset: 0.5
-  # Pointing for runs commanded elsewhere or with no hk mount data, by run folder name,
+  # Each run's pointing is the mount positions at its start (heap.events.run_pointings()). Give it here
+  # for runs that didn't start with an alignment or have no mount data, by run folder name,
   # as "hh mm ss +dd mm ss" or [RA, Dec] in degrees, e.g.
   #   pointing_overrides:
   #     obs_Palomar.start_2026-09-17T09:50:18Z.runtype_eng-dual.pffd: "05 34 31.78 +22 31 02.6"
@@ -62,7 +61,7 @@ events:
   rel_tel_efficiency: {}
   # Each telescope's misalignment, per night and flip side: [dx, dy] in deg, subtracted from x_c/y_c.
   #   [dx, dy] = (where a star appears in the camera) - (where it should be, from the run's
-  #              pointing, see source.wobble_offset), with +x = east, +y = south.
+  #              pointing), with +x = east, +y = south.
   #   Example: pointed at the Crab, Crab seen at (1, 1) instead of (0, 0) -> [1, 1].
   #   Postflip: images are rotated 180 deg before the correction is subtracted; the correction is not
   #             rotated. If you measured on raw (unrotated) postflip images, enter [-dx, -dy].

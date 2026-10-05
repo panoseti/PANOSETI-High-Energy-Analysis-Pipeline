@@ -1,6 +1,6 @@
 """sources
 
-Catalog of observed sources, used to identify a run's target from its hk.pff mount pointing when
+Catalog of observed sources, used to identify a run's target from its mount pointing when
 target_name is blank (see heap.process_dataset.identify_source()). Names are the source names
 analyses use (e.g. pff_analysis.ipynb's SOURCE); add an entry here for each newly observed source.
 """

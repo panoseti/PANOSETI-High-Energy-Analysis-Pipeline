@@ -9,17 +9,16 @@ origin at camera center, see heap.parameterize.calc_params()). x_c runs along th
 along the rows of the (32, 32) image, so x_c/y_c here are the transpose of the ROOT CSVs'
 MeanX/MeanY (ROOT fills bin (i+1, j+1) from pixel [i][j]).
 
-Every telescope in a run points at the run's commanded wobble position (Ekos aligns each one to it,
-then guides), so each run has one pointing, shared by every telescope (wobble_pointings()). The hk
-mount positions only tell which wobble a run is: while guiding they drift away from where the
-telescope actually points. pointing_corrections correct each camera's offset from that pointing
+Every telescope in a run points at the same target (Ekos aligns each one to it before the run, then
+guides), so each run has one pointing, shared by every telescope: the mount positions at the run's
+start (run_pointings()). Later mount positions drift away from it as they follow the guide
+corrections. pointing_corrections correct each camera's offset from that pointing
 (load_camera_frame()). Only timing uses a reference telescope (build_events()).
 """
 import json
 from functools import cache
 from pathlib import Path
 
-import astropy.units as u
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -30,8 +29,7 @@ from matplotlib.patches import Ellipse
 from heap import coincidences as coinc
 from heap.parameterize import CAMERA_CMAP, CAMERA_HALF_WIDTH, TAB10_COLORS, plot_hillas_histograms
 from heap.significance import make_wcs
-from heap.sources import SOURCES
-from heap.process_dataset import _get_mount_hk, _mount_pointing, _run_start_epoch, discover_runs, group_runs_by_source, load_fallback_map, process_dataset, slugify
+from heap.process_dataset import _mount_pointing, _run_start_epoch, discover_runs, group_runs_by_source, load_fallback_map, process_dataset, slugify
 
 
 
@@ -110,7 +108,7 @@ def process_night(
 
 def source_runs(raw_dir, telescope, source):
     """
-    One night's runs of source, by flip side, from hk.pff (see
+    One night's runs of source, by flip side, from the mount logs (see
     heap.process_dataset.group_runs_by_source()). Uses <raw_dir>/source_run_map.json as the
     fallback map if present.
 
@@ -167,61 +165,42 @@ def run_of(timestamps, runs_by_flip):
     return np.array([Path(s[2]).name for s in starts])[idx]
 
 
-MAX_WOBBLE_MISMATCH = 0.25 # deg; farthest a run's hk position may be from its wobble position (guiding drift reaches ~0.15)
-
-
-def wobble_pointings(raw_dir, source, telescopes: list, wobble_offset: float, pointing_overrides: dict = None):
+def run_pointings(raw_dir, source, telescopes: list, pointing_overrides: dict = None):
     """
-    Each run of source on one night's pointing, shared by every telescope: its commanded wobble
-    position, source +-wobble_offset in Dec (wobble N/S), or the source itself (on-source), whichever
-    is closest to the run's hk mount position (each telescope's median RA/Dec while tracking, see
-    heap.process_dataset._mount_pointing(), averaged over the telescopes). The hk positions aren't
-    used as the pointing: Ekos aligns every telescope to the commanded position and guiding holds it
-    there, while the hk positions drift away by up to ~0.15 deg.
+    Each run of source on one night's pointing, shared by every telescope: the mount positions at the
+    run's start (heap.process_dataset._mount_pointing()), averaged over the telescopes. Each run
+    starts right after Ekos aligns every telescope to the target, and guiding then holds it there.
 
-    pointing_overrides replace this for runs whose commanded position was something else or whose hk
-    is missing. Runs whose hk position is more than MAX_WOBBLE_MISMATCH from every wobble position,
-    or with no hk position at all, and no override, are left out, with a printout.
+    pointing_overrides replace this for runs that didn't start with an alignment (e.g. a DAQ restart
+    mid-observation) or have no mount data; runs with neither are left out, with a printout.
 
     Parameters:
         raw_dir: this night's raw data dir, see source_runs()
-        source: source name, in heap.sources.SOURCES
+        source: source name
         telescopes: telescope names
-        wobble_offset: wobble offset (deg)
         pointing_overrides: optional {run folder name: SkyCoord}
 
     Returns:
         {run folder name: SkyCoord}
     """
-    if source not in SOURCES:
-        raise ValueError(f"{source!r} not in heap.sources.SOURCES; add it, since wobble positions are relative to it")
-    position = SOURCES[source]
-    wobbles = {name: SkyCoord(position.ra, position.dec + offset*u.deg)
-               for name, offset in [("N", wobble_offset), ("S", -wobble_offset), ("on-source", 0)]}
-
-    hk = {} # {run: each telescope's hk mount position}
+    starts = {} # {run: each telescope's mount position at its start}
     for telescope in telescopes:
         for run_dirs in source_runs(raw_dir, telescope, source).values():
             for run_dir in run_dirs:
-                positions = hk.setdefault(Path(run_dir).name, [])
-                mount = _get_mount_hk(run_dir, telescope)
-                position = _mount_pointing(mount) if mount is not None else None
+                positions = starts.setdefault(Path(run_dir).name, [])
+                position = _mount_pointing(run_dir, telescope)
                 if position is not None:
                     positions.append(position)
 
     pointings = {}
-    for run, positions in sorted(hk.items()):
+    for run, positions in sorted(starts.items()):
         if run in (pointing_overrides or {}):
             pointings[run] = pointing_overrides[run]
-        elif not positions:
-            print(f"{run}: no hk mount position to tell its wobble from and no pointing_overrides, leaving it out")
-        else:
+        elif positions:
             mean = SkyCoord(SkyCoord(positions).cartesian.mean(), frame="icrs")
-            name, separation = min(((name, mean.separation(w).deg) for name, w in wobbles.items()), key=lambda item: item[1])
-            if separation > MAX_WOBBLE_MISMATCH:
-                print(f"{run}: hk mount position {separation:.2f} deg from the nearest wobble position ({name}), leaving it out; give its pointing in pointing_overrides")
-            else:
-                pointings[run] = wobbles[name]
+            pointings[run] = SkyCoord(mean.ra, mean.dec)
+        else:
+            print(f"{run}: no mount position at its start and no pointing_overrides, leaving it out")
     return pointings
 
 
@@ -245,7 +224,7 @@ def load_camera_frame(
         rel_efficiency: relative telescope efficiency; size is divided by it
         pointing_corrections: optional {flip_side: (dx, dy)} in deg, corrects this camera's
             misalignment, subtracted from x_c/y_c: where a sky position appears in this camera minus
-            where it should appear given the run's pointing (wobble_pointings(); +x east, +y south).
+            where it should appear given the run's pointing (run_pointings(); +x east, +y south).
             E.g. pointed at the Crab but it appears at (1, 1): (dx, dy) = (1, 1). Postflip offsets
             are subtracted after the 180 deg rotation and are NOT rotated themselves, so they must
             already be in rotated coordinates: measured on rotated images, or measured on raw
@@ -421,7 +400,6 @@ def load_camera_frames(
         date: str,
         source: str,
         telescopes: list,
-        wobble_offset: float = 0.5,
         rotate_postflip: bool = True,
         rel_tel_efficiency: dict = None,
         pointing_corrections: dict = None,
@@ -429,12 +407,12 @@ def load_camera_frames(
 ):
     """
     load_camera_frame() for every telescope with processed data for source on date, keeping only
-    runs with a pointing (wobble_pointings()).
+    runs with a pointing (run_pointings()).
 
     Parameters:
         output_dir: processed data dir (holding <date>/), see process_night()
-        raw_dir: this night's raw data dir, for flip sides and hk mount positions (see source_runs())
-        wobble_offset, pointing_overrides: see wobble_pointings()
+        raw_dir: this night's raw data dir, for flip sides and mount positions (see source_runs())
+        pointing_overrides: see run_pointings()
         rel_tel_efficiency: optional {telescope: efficiency}, see load_camera_frame()
         pointing_corrections: optional {(date, telescope, flip_side): (dx, dy)} in deg, each camera's
             offset from the run's pointing, see load_camera_frame()
@@ -443,7 +421,7 @@ def load_camera_frames(
     Returns:
         {telescope: DataFrame from load_camera_frame()}, {run folder name: SkyCoord} each run's pointing
     """
-    pointings = wobble_pointings(raw_dir, source, telescopes, wobble_offset, pointing_overrides)
+    pointings = run_pointings(raw_dir, source, telescopes, pointing_overrides)
     frames = {}
     for name in telescopes:
         path = params_path(output_dir, date, name, source)
@@ -459,7 +437,7 @@ def load_camera_frames(
             rel_efficiency=(rel_tel_efficiency or {}).get(name, 1.0),
             pointing_corrections=corrections,
         )
-        frames[name] = frame[frame.Run.isin(pointings)].reset_index(drop=True) # runs left out by wobble_pointings() say so there
+        frames[name] = frame[frame.Run.isin(pointings)].reset_index(drop=True) # runs left out by run_pointings() say so there
     return frames, pointings
 
 
@@ -471,7 +449,6 @@ def build_array_events(
         telescopes: list,
         reference: list,
         window: float = 0.001,
-        wobble_offset: float = 0.5,
         rotate_postflip: bool = True,
         rel_tel_efficiency: dict = None,
         pointing_corrections: dict = None,
@@ -480,17 +457,17 @@ def build_array_events(
 ):
     """
     load_camera_frames() then build_events(). Adds a Date column holding date; x_c/y_c are relative
-    to each event's run's pointing (see wobble_pointings()).
+    to each event's run's pointing (see run_pointings()).
 
     Parameters:
-        output_dir, raw_dir, wobble_offset, rotate_postflip, rel_tel_efficiency, pointing_corrections, pointing_overrides: see load_camera_frames()
+        output_dir, raw_dir, rotate_postflip, rel_tel_efficiency, pointing_corrections, pointing_overrides: see load_camera_frames()
         window, reference, plotting: see build_events()
 
     Returns:
-        events (see build_events()), {run folder name: SkyCoord} each run's pointing (see wobble_pointings())
+        events (see build_events()), {run folder name: SkyCoord} each run's pointing (see run_pointings())
     """
     frames, pointings = load_camera_frames(
-        output_dir, raw_dir, date, source, telescopes, wobble_offset=wobble_offset, rotate_postflip=rotate_postflip,
+        output_dir, raw_dir, date, source, telescopes, rotate_postflip=rotate_postflip,
         rel_tel_efficiency=rel_tel_efficiency, pointing_corrections=pointing_corrections,
         pointing_overrides=pointing_overrides,
     )
@@ -619,7 +596,7 @@ def plot_event(
         output_dir: processed data dir (holding <date>/), see process_night()
         source: source name, for params_path() and the legend
         source_position: optional SkyCoord of the source; needs pointings to be drawn
-        pointings: optional {Run: SkyCoord} each run's pointing, see wobble_pointings()
+        pointings: optional {Run: SkyCoord} each run's pointing, see run_pointings()
         colors: optional {telescope: color} for the combined Hillas panel
         rotate_postflip: as passed to build_array_events()
 

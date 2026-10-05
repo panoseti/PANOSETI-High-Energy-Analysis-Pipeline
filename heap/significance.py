@@ -4,7 +4,7 @@ On/off region counting, Li & Ma significance, and sky maps for reconstructed arr
 (see heap.reconstruction).
 
 Each run is counted in its own camera coordinates (degrees from that run's pointing, see make_wcs()
-and heap.events.wobble_pointings()), so runs with different wobble offsets combine correctly: a sky
+and heap.events.run_pointings()), so runs with different wobble offsets combine correctly: a sky
 position is converted to every run's camera coordinates, and off regions are placed around it there.
 Only regions entirely inside the camera are counted (in_camera()).
 """
@@ -42,7 +42,7 @@ def camera_to_sky(df, pointings, x="Xoffset", y="Yoffset"):
 
     Parameters:
         df: rows with Run and camera coordinates x, y (deg)
-        pointings: {Run: SkyCoord} each run's pointing, see heap.events.wobble_pointings()
+        pointings: {Run: SkyCoord} each run's pointing, see heap.events.run_pointings()
 
     Returns:
         (ra, dec) arrays aligned with df
@@ -253,7 +253,7 @@ class OnOffCounter:
     Parameters:
         directions: reconstructed events with Date and Run, see heap.reconstruction.reconstruct_directions()
         array: images passing cuts, see heap.events.apply_cuts()
-        pointings: {Run: SkyCoord} each run's pointing, see heap.events.wobble_pointings()
+        pointings: {Run: SkyCoord} each run's pointing, see heap.events.run_pointings()
         theta: region radius (deg)
         max_distance: max distance cut (deg); None for no cut
         off_method: "reflected" (around each pointing, default) or "ring" (around the on region),

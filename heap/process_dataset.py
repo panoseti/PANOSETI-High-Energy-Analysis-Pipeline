@@ -389,7 +389,12 @@ def discover_runs(raw_dir):
     return sorted((unwrap_duplicate_dir(p) for p in base.iterdir() if p.is_dir()), key=lambda p: p.name)
 
 
-HK_MOUNT_NAMES = {"HELI": "PTI"} # telescopes whose hk.pff mount table uses another name
+MOUNT_NAMES = {"Heli": "PTI"} # telescopes whose mount log and hk.pff mount table use another name
+MAX_TRACKING_DELAY = 600 # s; latest after a run's start its first tracking mount entry may be
+MOUNT_LOG_LINE = re.compile(
+    r"\] (?P<time>\S+) \|.*RA_J2000:(?P<ra>[\d.]+)h Dec_J2000:(?P<dec>[-\d.]+)°"
+    r".*Side:(?P<side>\w+).*Tracking:(?P<tracking>\w+).*Target:(?P<target>.*)$"
+)
 
 
 @lru_cache(maxsize=128)
@@ -399,58 +404,94 @@ def _get_hk(run_dir):
     return pypff.PanosetiRun(run_dir).get_hk()
 
 
-def _get_mount_hk(run_dir, telescope):
-    """Returns hk.pff's MOUNT_<TELESCOPE> table for this run, or None if it's not present
-    (e.g. telescope has no tracked mount or it was never written)."""
-    name = telescope.upper()
-    return _get_hk(str(Path(run_dir).resolve())).get(f"MOUNT_{HK_MOUNT_NAMES.get(name, name)}")
+@lru_cache(maxsize=32)
+def _read_mount_log(path):
+    """One night's mount log (<telescope>_mount_<date>.log) as a DataFrame with time (Unix s, UTC),
+    ra/dec (J2000 deg), side, tracking and target_name, one row per logged line. Treat as read-only."""
+    rows = []
+    with open(path) as f:
+        for line in f:
+            m = MOUNT_LOG_LINE.search(line)
+            if m:
+                rows.append((
+                    datetime.fromisoformat(m["time"]).replace(tzinfo=timezone.utc).timestamp(),
+                    float(m["ra"]) * 15, float(m["dec"]), m["side"], m["tracking"] == "True", m["target"].strip(),
+                ))
+    return pd.DataFrame(rows, columns=["time", "ra", "dec", "side", "tracking", "target_name"])
 
 
-def _mount_pointing(mount):
-    """Median J2000 RA/Dec while tracking in one run's MOUNT table, or None if it never tracked."""
-    tracking = np.asarray(mount["tracking"]).astype(bool)
-    if not tracking.any():
+def _mount_at_run_start(run_dir, telescope):
+    """
+    One telescope's mount at the start of a run: its first tracking entry at most
+    MAX_TRACKING_DELAY after the run's start, from <night>/<telescope>/mount/<telescope>_mount_<date>.log
+    (PTI for Heli), else from the run's hk.pff MOUNT_<TELESCOPE> table (older data without mount logs).
+    Taken at the start because each run starts right after Ekos aligns the telescopes to the target:
+    later entries drift away from it as they follow the guide corrections.
+
+    Returns:
+        {"ra", "dec" (J2000 deg), "side", "target_name"}, or None if neither source has the telescope
+        tracking at the run's start
+    """
+    run_dir = Path(run_dir).resolve()
+    name = MOUNT_NAMES.get(telescope, telescope)
+    start = _run_start_epoch(run_dir)
+    log_name = f"{name}_mount_{datetime.fromtimestamp(start, timezone.utc):%Y%m%d}.log"
+    log_path = next((p / name / "mount" / log_name for p in run_dir.parents if (p / name / "mount" / log_name).exists()), None)
+    if log_path is not None:
+        log = _read_mount_log(str(log_path))
+        log = log[log.tracking & (log.time >= start) & (log.time <= start + MAX_TRACKING_DELAY)]
+        return log.iloc[0][["ra", "dec", "side", "target_name"]].to_dict() if len(log) else None
+
+    mount = _get_hk(str(run_dir)).get(f"MOUNT_{name.upper()}")
+    if mount is None:
         return None
-    ra = np.median(np.asarray(mount["ra_hours_j2000"], dtype=float)[tracking]) * 15
-    dec = np.median(np.asarray(mount["dec_deg_j2000"], dtype=float)[tracking])
-    return SkyCoord(ra, dec, unit=u.deg)
+    tracking = np.flatnonzero(np.asarray(mount["tracking"]).astype(bool))
+    if not len(tracking):
+        return None
+    i = tracking[0]
+    return {"ra": float(mount["ra_hours_j2000"][i]) * 15, "dec": float(mount["dec_deg_j2000"][i]),
+            "side": str(mount["side"][i]), "target_name": str(mount["target_name"][i])}
+
+
+def _mount_pointing(run_dir, telescope):
+    """One telescope's J2000 pointing at the start of a run (see _mount_at_run_start()), or None."""
+    mount = _mount_at_run_start(run_dir, telescope)
+    return SkyCoord(mount["ra"], mount["dec"], unit=u.deg) if mount is not None else None
 
 
 def identify_source(run_dir, telescope, fallback_map=None):
     """
     Identify which astronomical source a run was tracking.
 
-    Tries target_name from hk.pff's MOUNT_<TELESCOPE> table first. 
+    Tries the mount's target_name at the run's start first (see _mount_at_run_start()).
     Falls back to fallback_map when it's missing or blank, then to the heap.sources catalog
-    source nearest the mount's tracked pointing (see heap.sources.match_source()).
+    source nearest the mount's pointing (see heap.sources.match_source()).
 
     Parameters:
         run_dir: path to one run folder
-        telescope: telescope name, used to look up hk.pff's MOUNT_<TELESCOPE> table
+        telescope: telescope name, used to look up its mount log (see _mount_at_run_start())
         fallback_map: optional {run_dir_name: {"source": ..., "flip_side": ...}} dict (see
-            load_fallback_map()), used when hk.pff's target_name isn't usable for this run
+            load_fallback_map()), used when the mount's target_name isn't usable for this run
 
     Returns:
         source_name
     """
-    mount = _get_mount_hk(run_dir, telescope)
-    if mount is not None:
-        names = {n for n in mount["target_name"] if n}
-        if len(names) == 1:
-            return names.pop()
+    mount = _mount_at_run_start(run_dir, telescope)
+    if mount is not None and mount["target_name"]:
+        return mount["target_name"]
 
     if fallback_map is not None and run_dir.name in fallback_map:
         return fallback_map[run_dir.name]["source"]
 
-    pointing = _mount_pointing(mount) if mount is not None else None
+    pointing = _mount_pointing(run_dir, telescope)
     if pointing is not None:
         source = match_source(pointing)
         if source is not None:
             return source
 
     raise ValueError(
-        f"Could not identify source for {run_dir}: no usable hk target_name, no fallback_map entry, "
-        f"and no heap.sources catalog source near the pointing ({pointing.to_string('hmsdms') if pointing is not None else 'no tracked hk pointing'})"
+        f"Could not identify source for {run_dir}: no usable mount target_name, no fallback_map entry, "
+        f"and no heap.sources catalog source near the pointing ({pointing.to_string('hmsdms') if pointing is not None else 'no tracking mount entry'})"
     )
 
 
@@ -458,38 +499,35 @@ def identify_flip_side(run_dir, telescope, fallback_map=None):
     """
     Identify whether a run is pre-flip or post-flip.
 
-    Tries side from hk.pff's MOUNT_<TELESCOPE> table first. 
-    Falls back to fallback_map when it's missing or ambiguous.
+    Tries the mount's side at the run's start first (see _mount_at_run_start()).
+    Falls back to fallback_map when it's missing.
 
     Parameters:
         run_dir: path to one run folder
-        telescope: telescope name, used to look up hk.pff's MOUNT_<TELESCOPE> table
+        telescope: telescope name, used to look up its mount log (see _mount_at_run_start())
         fallback_map: optional {run_dir_name: {"source": ..., "flip_side": ...}} dict (see
-            load_fallback_map()), used when hk.pff's side isn't usable for this run
+            load_fallback_map()), used when the mount's side isn't usable for this run
 
     Returns:
         "preflip" or "postflip"
     """
-    mount = _get_mount_hk(run_dir, telescope)
-    if mount is not None:
-        sides = {s for s in mount["side"] if s}
-        if len(sides) == 1:
-            side = sides.pop().upper()
-            if side == "WEST":
-                return "preflip"
-            if side == "EAST":
-                return "postflip"
+    mount = _mount_at_run_start(run_dir, telescope)
+    side = mount["side"].upper() if mount is not None else None
+    if side == "WEST":
+        return "preflip"
+    if side == "EAST":
+        return "postflip"
 
     if fallback_map is not None and run_dir.name in fallback_map:
         return fallback_map[run_dir.name]["flip_side"]
 
-    raise ValueError(f"Could not identify flip side for {run_dir}: no usable hk side and no fallback_map entry")
+    raise ValueError(f"Could not identify flip side for {run_dir}: no usable mount side and no fallback_map entry")
 
 
 def load_fallback_map(path):
     """
     Load a user-maintained fallback map for identify_source()/identify_flip_side(), for runs
-    where hk.pff's mount data is missing.
+    whose mount data is missing.
 
     Expects a JSON file: {run_dir_name: {"source": source_name, "flip_side": "preflip" | "postflip"}}
     """
@@ -505,7 +543,7 @@ def group_runs_by_source(raw_dir, telescope, fallback_map=None):
         raw_dir: path to a night's raw data folder, containing one subfolder per run
         telescope: telescope name, passed through to identify_source()/identify_flip_side()
         fallback_map: optional {run_dir_name: {"source": ..., "flip_side": ...}} dict (see
-            load_fallback_map()), used when hk.pff's mount data is missing
+            load_fallback_map()), used when the mount data is missing
 
     Returns:
         {source_name: {"preflip": [run_dir, ...], "postflip": [run_dir, ...]}}
@@ -569,10 +607,10 @@ def process_dataset(
         out_dir: directory to write each source's <source>.npz to (created if missing)
         module_pattern: glob pattern identifying this telescope's files within a run folder,
             e.g. "dp_ph1024*module_252"
-        telescope: telescope name, used to look up hk.pff's MOUNT_<TELESCOPE> table (see
+        telescope: telescope name, used to look up its mount data (see
             identify_source()/identify_flip_side())
         fallback_map_path: optional path to a fallback map file (see load_fallback_map()),
-            used when hk.pff's mount data is missing
+            used when the mount data is missing
         rate_cut: spike_cut's trigger-rate threshold (multiple of the median rate), see coincidences.load_telescope_tv
         time_window, max_gap, nsig, fit_gaussian: passed through to build_calibrations()
         x, y, image_threshold, border_threshold, keep_brightest_island: passed through to process_image()
