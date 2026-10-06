@@ -28,6 +28,9 @@ def load_telescope_tv(module_str, base_dir, rate_cut, plotting=False):
 
     for f in files:
         print(f"  -> {f}")
+        if f.stat().st_size == 0: # pypff can't mmap an empty file
+            print("     empty file, skipping")
+            continue
         data, metadata = pre_cleaning.read_pff(str(f))
         data, timestamps = pre_cleaning.cut_pkt_loss_old(data, metadata)
 

@@ -22,6 +22,7 @@ SOURCES = {
 
 ALIASES = {
     "M1": "Crab",
+    "M 1": "Crab", # Jan 2026 mount logs
 }  # other names the mount's target_name may use, mapped to their SOURCES name
 
 MAX_OFFSET = 1.0 # deg; farthest a pointing can be from a source and still match it (wobbles are ~0.5 deg)
