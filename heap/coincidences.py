@@ -48,8 +48,11 @@ def load_telescope_tv(module_str, base_dir, rate_cut, plotting=False):
         all_timestamps.append(timestamps_clean)
         all_data.append(data_clean)
 
-    if not all_timestamps:
+    if not files:
         raise RuntimeError(f"No files for {module_str} found.")
+    if not all_timestamps: # every file was empty
+        print(f"{module_str}: all files empty, no data")
+        return np.empty((0, 1024)), np.empty((0,))
 
     # combine to one array
     data_all=np.concatenate(all_data)
