@@ -56,8 +56,7 @@ events:
   coinc_window: 0.001
   # Rotate postflip images by 180 deg to the preflip orientation.
   rotate_postflip: true
-  # {telescope: efficiency}, divides size; panodisplay_REALDATA.C used Heli (PTI) 0.46, Fern 1.49,
-  # Winter 1.0 for Jan 2026.
+  # {telescope: efficiency}, divides size; Jan 2026 values: Heli (PTI) 0.46, Fern 1.49, Winter 1.0.
   rel_tel_efficiency: {}
   # Each telescope's misalignment, per night and flip side: [dx, dy] in deg, subtracted from x_c/y_c.
   #   [dx, dy] = (where a star appears in the camera) - (where it should be, from the run's

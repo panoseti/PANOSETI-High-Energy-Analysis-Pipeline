@@ -4,8 +4,8 @@ Builds array events (images from 2+ telescopes of the same shower) out of per-te
 parameters (<output_dir>/<date>/<telescope>/<source_slug>/<source_slug>.npz, see process_night()
 and heap.process_dataset.process_dataset()), applies the analysis cuts, and plots single events.
 
-Hillas parameters are in degrees on the panodisplay_REALDATA.C camera (32 pixels over +-4.95 deg,
-origin at camera center, see heap.parameterize.calc_params()). x_c runs along the columns and y_c
+Hillas parameters are in degrees on the camera (32 pixels over +-4.95 deg, origin at camera
+center, see heap.parameterize.calc_params()). x_c runs along the columns and y_c
 along the rows of the (32, 32) image, so x_c/y_c here are the transpose of the ROOT CSVs'
 MeanX/MeanY (ROOT fills bin (i+1, j+1) from pixel [i][j]).
 
