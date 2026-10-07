@@ -6,7 +6,7 @@ A night's raw data is split into runs (separate acquisition sessions, e.g. eithe
 meridian flip or a DAQ restart), each its own subfolder named after its start time. Reads
 raw .pff files from <raw_data_dir>/<date>/<run_id>/ and writes plots + manifest.json +
 index.html to <out_data_dir>/<date>/, with each run's plots under <run_id>/ (raw_data_dir and
-output_dir come from a config file, see nextday_config.yaml).
+output_dir come from a config file, see configs/nextday.yaml).
 
 For every run: loads + cleans each telescope's data (spike_cut.png per telescope under
 <run_id>/module_<n>/), corrects other telescopes' timestamps against a reference telescope
@@ -42,14 +42,14 @@ import numpy as np
 import pandas as pd
 import yaml
 from datetime import datetime, timezone
-from itertools import combinations
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = Path(__file__).resolve().parent / "nextday_config.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "nextday.yaml"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from heap import coincidences as coinc
+from heap.parameterize import plot_hillas_histograms
 from heap.make_pedestals import plot_pedestal_mean_over_interval, plot_pedestal_pedvar_intervals, plot_pedvar_histogram
 from heap.process_dataset import discover_runs, identify_source, load_fallback_map, process_dataset, slugify
 
@@ -211,7 +211,7 @@ def load_all_telescopes(telescope_map, raw_dir, run_out_dir, date_out_dir, manif
         if not sorted(raw_dir.glob(f"*{module_pattern}*.pff")):
             print(f"Skipping {name} ({module}): no {DATA_PRODUCT} .pff files found in {raw_dir}")
             continue
-        data, timestamps = coinc.load_telescope_tv(module_pattern, raw_dir, info.get("rate_cut", 20), plotting=True)
+        data, timestamps = coinc.load_telescope_tv(module_pattern, raw_dir, info.get("rate_cut", 3), plotting=True)
         telescopes[name] = (data, timestamps)
         spike_cut_path = run_out_dir / module_pattern / "spike_cut.png"
         save_plot(spike_cut_path)
@@ -329,9 +329,9 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
     colors: {telescope_name: color}, used for each telescope's pedvar histogram (see
         telescope_color_map()).
     image_threshold, border_threshold: threshold_clean()'s per-pixel cut in units of pedvar (see
-        heap.image_cleaning.threshold_clean), from nextday_config.yaml's pipeline section.
+        heap.image_cleaning.threshold_clean), from configs/nextday.yaml's pipeline section.
     event_preview_min_pixels: minimum surviving (post-cleaning) pixels for an event to be
-        included in the returned telescope_events.
+        included in the returned telescope_events (N_pix >= event_preview_min_pixels).
 
     Looks for <raw_dir>/source_run_map.json as a fallback map for identify_source()/
     identify_flip_side() (see process_dataset.load_fallback_map()).
@@ -356,7 +356,7 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
         try:
             results = process_dataset(
                 raw_dir, date_out_dir / name, module_pattern, name,
-                fallback_map_path=fallback_map_path, rate_cut=info.get("rate_cut", 20),
+                fallback_map_path=fallback_map_path, rate_cut=info.get("rate_cut", 3),
                 image_threshold=image_threshold, border_threshold=border_threshold,
             )
         except Exception as e:
@@ -381,7 +381,7 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
             )
             save_pedestal_pedvar_interval_plots(source_data, source_timestamps, source_dir)
 
-            above_pixel_cut = params_df["N_pix"].values > event_preview_min_pixels
+            above_pixel_cut = params_df["N_pix"].values >= event_preview_min_pixels
             timestamps_parts.append(params_df["Timestamp"].values[above_pixel_cut])
             cleaned_parts.append(cleaned_images[above_pixel_cut])
             raw_parts.append(raw_images[above_pixel_cut])
@@ -450,62 +450,6 @@ def add_calibration_plots(run_dir, run_manifest, date_out_dir, fallback_map, hil
         )
 
 
-def find_coincidences(telescope_events, window=0.001):
-    """Finds every 2-way coincidence between telescope pairs (on raw, uncorrected timestamps - see
-    heap.coincidences.match_coinc), then unions overlapping matches via union-find so a group
-    spans however many telescopes ended up linked (2+).
-
-    telescope_events: {telescope_name: (timestamps, cleaned_images, raw_images)}, see
-        process_telescope_datasets().
-
-    Returns a list of (telescope_names, event_indices, event_times) tuples, one per group, all
-    three ordered the same way (by telescope_events' iteration order).
-    """
-    names = list(telescope_events)
-    parent = {}
-
-    def find(node):
-        while parent[node] != node:
-            parent[node] = parent[parent[node]]
-            node = parent[node]
-        return node
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    for name, (timestamps, _, _) in telescope_events.items():
-        for idx in range(len(timestamps)):
-            parent[(name, idx)] = (name, idx)
-
-    node_time = {}
-    for a, b in combinations(names, 2):
-        timestamps_a = telescope_events[a][0]
-        timestamps_b = telescope_events[b][0]
-        t1, i1, t2, i2 = coinc.match_coinc(
-            timestamps_a, np.arange(len(timestamps_a)), timestamps_b, np.arange(len(timestamps_b)), window=window,
-        )
-        for ta, ia, tb, ib in zip(t1, i1, t2, i2):
-            node_a, node_b = (a, ia), (b, ib)
-            node_time[node_a] = ta
-            node_time[node_b] = tb
-            union(node_a, node_b)
-
-    groups = {}
-    for node in node_time:
-        groups.setdefault(find(node), []).append(node)
-
-    coincidences = []
-    for nodes in groups.values():
-        if len({n[0] for n in nodes}) < 2:
-            continue
-        nodes = sorted(nodes, key=lambda n: names.index(n[0]))
-        coincidences.append(([n[0] for n in nodes], [n[1] for n in nodes], [node_time[n] for n in nodes]))
-
-    return coincidences
-
-
 def plot_preview_event(tel_names, event_idx, telescope_events, all_names):
     """One figure for a single coincident event: 2 rows (raw, cleaned) x len(all_names) columns
     (one per telescope with data this night), matching next_day_plots_pff.ipynb's plot_event().
@@ -537,7 +481,7 @@ def plot_preview_event(tel_names, event_idx, telescope_events, all_names):
 
 
 def build_event_preview(telescope_events, out_dir, manifest, image_threshold, border_threshold, n_events=12, window=0.001):
-    """Finds every cross-telescope coincidence across the whole night (see find_coincidences()),
+    """Finds every cross-telescope coincidence across the whole night (see heap.coincidences.find_coincidences()),
     randomly samples up to n_events, and saves one raw+cleaned image grid per sample to
     <out_dir>/event_preview/event_<n>.png (see plot_preview_event()). Adds an "event_preview"
     entry to manifest for write_gallery() to render as a bottom-of-page section. Does nothing if
@@ -550,7 +494,7 @@ def build_event_preview(telescope_events, out_dir, manifest, image_threshold, bo
     if len(telescope_events) < 2:
         return
 
-    coincidences = find_coincidences(telescope_events, window=window)
+    coincidences = coinc.find_coincidences(telescope_events, window=window)
     if not coincidences:
         print("Event preview: no cross-telescope coincidences found")
         return
@@ -579,96 +523,20 @@ def build_event_preview(telescope_events, out_dir, manifest, image_threshold, bo
     }
 
 
-def convert_units(df):
-    """Converts a params_df's pixel-unit columns (see heap.parameterize.calc_params()) to degrees
-    (0.31 deg/pixel plate scale) and re-centers x_c/y_c on the optical center. Returns a copy."""
-    df = df.copy()
-    columns = ["x_c", "y_c", "s_xx", "s_yy", "s_xy", "length", "width", "miss", "distance"]
-    for c in columns:
-        df[c] = df[c] * 0.31
-        if c in ["x_c", "y_c"]:
-            df[c] = df[c] - 4.96 + 0.31
-    return df
-
-
-def postprocess_df(df):
+def postprocess_df(df, min_pixels):
     """Drops events with no well-defined Hillas ellipse (missing length/width/miss/distance/alpha,
-    zero width, or too few surviving pixels) and duplicate rows, ahead of plotting."""
+    zero width, or fewer than min_pixels surviving pixels) and duplicate rows, ahead of plotting."""
     df = df.dropna(subset=["length", "width", "miss", "distance", "alpha"])
     df = df[df["width"] > 0]
-    df = df[df.N_pix > 3]
+    df = df[df.N_pix >= min_pixels]
     df = df.drop_duplicates(subset=df.drop(["Event"], axis=1))
     return df
 
 
-def plot_hillas_histograms(dfs, title="Hillas Params", colors=None, pooled_df=None, pooled_label="All telescopes"):
-    """Plots length/width/log10(size)/distance histograms (params_df already in degrees, see
-    convert_units()), one step-histogram line per entry in dfs overlaid on the same 4 axes. If
-    pooled_df is given, also overlays it as a black alpha=0.4 filled histogram.
-
-    dfs: {label: params_df}, e.g. one entry per telescope.
-    colors: optional {label: color} so a label keeps the same color across calls; falls back to
-        tab10 by position for any label not present.
-    pooled_df: optional params_df pooled across labels, drawn filled alongside dfs' step lines.
-    pooled_label: legend label for pooled_df (default = "All telescopes")
-
-    Returns the Figure.
-    """
-    fig, axs = plt.subplots(2, 2, figsize=(12, 12))
-    axs = axs.flatten()
-    fig.suptitle(title)
-
-    axs[0].set_title("length")
-    axs[0].set_xlabel("degrees")
-    axs[0].set_ylabel("normalized counts")
-
-    axs[1].set_title("width")
-    axs[1].set_xlabel("degrees")
-    axs[1].set_ylabel("normalized counts")
-
-    axs[2].set_title("log10(size)")
-    axs[2].set_yscale("log")
-    axs[2].set_xlabel("log10(ADC)")
-    axs[2].set_ylabel("normalized counts")
-
-    axs[3].set_title("distance")
-    axs[3].set_xlabel("degrees")
-    axs[3].set_ylabel("normalized counts")
-
-    colors = colors or {}
-
-    for i, (name, df) in enumerate(dfs.items()):
-        color = colors.get(name, TAB10_COLORS[i % len(TAB10_COLORS)])
-        label = f"{name} N={len(df)}"
-        width_mean = df.width.mean()
-        width_label = f"{label}, $\\mu$={width_mean:.3f}°"
-        axs[0].hist(df.length, bins=80, range=(0, 2), histtype="step", density=True, label=label, color=color)
-        axs[1].hist(df.width, bins=80, range=(0, 1), histtype="step", density=True, label=width_label, color=color)
-        axs[1].axvline(width_mean, color=color, linestyle="--", linewidth=1.5)
-        axs[2].hist(np.log10(df["size"]), bins=80, range=(0, 6), histtype="step", density=True, label=label, color=color)
-        axs[3].hist(df.distance, bins=80, range=(0, 6), histtype="step", density=True, label=label, color=color)
-
-    if pooled_df is not None:
-        label = f"{pooled_label} N={len(pooled_df)}"
-        width_mean = pooled_df.width.mean()
-        width_label = f"{label}, $\\mu$={width_mean:.3f}°"
-        axs[0].hist(pooled_df.length, bins=80, range=(0, 2), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
-        axs[1].hist(pooled_df.width, bins=80, range=(0, 1), histtype="stepfilled", density=True, label=width_label, color="black", alpha=0.4)
-        axs[2].hist(np.log10(pooled_df["size"]), bins=80, range=(0, 6), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
-        axs[3].hist(pooled_df.distance, bins=80, range=(0, 6), histtype="stepfilled", density=True, label=label, color="black", alpha=0.4)
-
-    for ax in axs:
-        ax.legend(loc="upper right")
-
-    fig.tight_layout()
-    return fig
-
-
-def load_telescope_params_df(telescope_dir):
+def load_telescope_params_df(telescope_dir, min_pixels):
     """Loads and concatenates every source's params_df for one telescope (one <source_slug>.npz
-    per source under telescope_dir, see heap.process_dataset.process_dataset()), converted to
-    degrees and postprocessed (see convert_units()/postprocess_df()). Returns None if no usable
-    data."""
+    per source under telescope_dir, see heap.process_dataset.process_dataset(); already in
+    degrees) and postprocessed (see postprocess_df()). Returns None if no usable data."""
     dfs = []
     for npz_path in sorted(telescope_dir.glob("*/*.npz")):
         if npz_path.name == "calibrations.npz":
@@ -679,11 +547,11 @@ def load_telescope_params_df(telescope_dir):
     if not dfs:
         return None
 
-    df = postprocess_df(convert_units(pd.concat(dfs, ignore_index=True)))
+    df = postprocess_df(pd.concat(dfs, ignore_index=True), min_pixels)
     return df if len(df) else None
 
 
-def build_hillas_plots(telescope_map, out_dir, colors):
+def build_hillas_plots(telescope_map, out_dir, colors, min_pixels):
     """Builds each telescope's own Hillas histogram (length/width/log10(size)/distance, whole
     night across every source) at <out_dir>/<name>/hillas_params.png, plus one combined overlay
     at <out_dir>/hillas_params_combined.png (see plot_hillas_histograms()). Reused across every
@@ -691,13 +559,14 @@ def build_hillas_plots(telescope_map, out_dir, colors):
 
     colors: {telescope_name: color}, shared with the combined event-rate plot (see
         telescope_color_map()).
+    min_pixels: minimum surviving (post-cleaning) pixels for an image to be plotted.
 
     Returns the sorted list of telescopes with usable Hillas data, or [] if none had any.
     """
     telescope_dfs = {}
     for info in telescope_map.values():
         name = info["name"]
-        df = load_telescope_params_df(out_dir / name)
+        df = load_telescope_params_df(out_dir / name, min_pixels)
         if df is None:
             continue
         telescope_dfs[name] = df
@@ -900,7 +769,7 @@ def main():
     telescope_events = process_telescope_datasets(
         telescope_map, raw_dir, out_dir, colors, image_threshold, border_threshold, event_preview_min_pixels,
     )
-    hillas_telescopes = build_hillas_plots(telescope_map, out_dir, colors)
+    hillas_telescopes = build_hillas_plots(telescope_map, out_dir, colors, event_preview_min_pixels)
     build_event_preview(telescope_events, out_dir, manifest, image_threshold, border_threshold)
 
     fallback_map_path = raw_dir / "source_run_map.json"
