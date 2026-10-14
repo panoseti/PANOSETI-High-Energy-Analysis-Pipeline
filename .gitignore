@@ -19,3 +19,5 @@ heap/__version__.py
 eventbuilding/pcapreader
 
 NextDay/test_output
+# simulation_tools default output
+sim_output

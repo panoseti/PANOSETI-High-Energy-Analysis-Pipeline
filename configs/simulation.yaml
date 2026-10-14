@@ -1,0 +1,75 @@
+# Config for simulation_tools/run_simulation.py (CORSIKA -> sim_telarray).
+# Paths are resolved relative to the project root if not absolute; ~ and $VARS are expanded.
+
+paths:
+  # CORSIKA run directory: holds the CORSIKA binary and the data tables it reads at runtime
+  # (EGSDAT*, atmprof*.dat, ...). Each run gets its own working directory symlinked to it.
+  corsika_run_dir: ~/Software/corsika/corsika-77410/run
+  # CORSIKA binary, relative to corsika_run_dir.
+  corsika_binary: corsika77410Linux_QGSII_urqmd
+  # sim_telarray install directory (the one holding bin/sim_telarray).
+  sim_telarray_dir: ~/Software/sim_telarray/sim_telarray
+  # PANOSETI sim_telarray config. Its directory is added to sim_telarray's include path, so
+  # the .dat files next to it are found.
+  sim_telarray_config: ~/research/PANOSETI/PANOSETI_sim_telarray_config/panoseti_simtelarray_example.cfg
+  # CORSIKA input card template, see simulation_tools/corsika_template.inp. RUNNR, SEED and
+  # TELFIL are set per run; other keywords can be overridden in corsika: below.
+  corsika_template: simulation_tools/corsika_template.inp
+  # Where everything is written (input cards, CORSIKA files, sim_telarray files, logs,
+  # SLURM scripts), see the layout in simulation_tools/run_simulation.py.
+  output_dir: sim_output/gamma_10TeV
+  # CORSIKA files for the simtel stage (sim_telarray only), as a glob. null = this
+  # production's own <output_dir>/corsika/*.corsika.zst.
+  corsika_input: null
+  # Scratch space for each run while it runs, moved to output_dir when done. null = $TMPDIR
+  # if set (usually node-local on SLURM), otherwise <output_dir>/work.
+  work_dir: null
+
+production:
+  # Prefix of every file name: <name>_run<RUNNR, 6 digits>.
+  name: gamma_10TeV
+  # files: CORSIKA writes <output_dir>/corsika/*.corsika.zst, then sim_telarray runs on it
+  #        (the simtel stage can rerun sim_telarray on them later, e.g. after a config change).
+  # pipe:  CORSIKA streams straight into sim_telarray; no CORSIKA files are kept.
+  mode: files
+  # CORSIKA run numbers first_run ... first_run + n_runs - 1 (CORSIKA allows up to 999999).
+  first_run: 1
+  n_runs: 10
+  # Base seed: every run's CORSIKA and sim_telarray seeds are derived from (seed, run number).
+  seed: 31812
+
+# CORSIKA keyword overrides applied to the template, e.g. NSHOW: 100 or ERANGE: [1E3, 1E5].
+# TELESCOPE takes a list of rows ([x, y, z, r] in cm) and replaces every TELESCOPE line.
+# RUNNR, SEED, TELFIL and DIRECT are set by the pipeline.
+corsika: {}
+
+sim_telarray:
+  # Telescope pointing [deg], in sim_telarray's convention (azimuth from north, clockwise).
+  # Check the "Array viewing direction" line in the sim_telarray log.
+  telescope_theta: 0.0
+  telescope_phi: 0.0
+  # Output subdirectory under simtel/ and logs/, so reruns with other settings don't
+  # overwrite earlier ones.
+  tag: v1
+  # Preprocessor macros (-D), e.g. PANOSETI_TRIGGER_PIXELS: 1
+  defines: {}
+  # Config parameter overrides (-C), e.g. discriminator_threshold: 5.5
+  parameters: {}
+
+slurm:
+  partition: null
+  account: null
+  time: "7-00:00:00"
+  mem: 4G
+  # Maximum number of array tasks running at once (null = no limit).
+  max_concurrent: 1000
+  # Email for SLURM notifications (null = none), and which events to send, e.g. END,FAIL
+  # (once for the whole array) or END,FAIL,ARRAY_TASKS (once per task).
+  mail_user: null
+  mail_type: END,FAIL
+  # Python that runs run_simulation.py on the nodes (null = the one running prepare/submit).
+  python: null
+  # Extra "#SBATCH ..." options, e.g. ["--qos=normal"].
+  extra_options: []
+  # Shell lines run before the pipeline in each job, e.g. module loads or conda activation.
+  setup: []

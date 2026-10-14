@@ -24,7 +24,7 @@ This will let you run jupyter notebooks after making changes to the package with
 * `analysis_tools/` - pff processing and analysis notebooks (see pff analysis) and `pcap_to_root_analysis.ipynb`.
 * `example_notebooks/` - step-by-step examples of individual `heap` modules (pre-cleaning, pedestals, gain, image cleaning, coincidences, meridian flip correction).
 * `test_data/` - the data the example notebooks and `pcap_to_root_analysis.ipynb` run on.
-* `simulation_tools/` - CORSIKA simulation scripts and `panodisplay.C` (see simulation_tools below).
+* `simulation_tools/` - the CORSIKA -> sim_telarray simulation pipeline (see simulation_tools below).
 * `misc_tools/` - standalone notebooks (PSF, array layout, stellar spectra, transmission, ...).
 
 Raw data is expected as one folder per night, holding one folder per run (acquisition session, e.g. either side of a meridian flip):
@@ -65,20 +65,8 @@ Each run's pointing, shared by every telescope, is the mount positions at its st
 To analyze a new source, copy `configs/crab.yaml`, set `source.name` and `paths`, and point the notebooks' `CONFIG` at it.
 
 ## simulation_tools
-### Dependencies
-* [ROOT](http://root.cern.ch/). Verified for version 6.28/04
-* [CORSIKA 7](https://www.iap.kit.edu/corsika/index.php). Verified for version 77410. Compiled with the following options enabled:
-    * IACT
-    * CHERENKOV
-    * VOLUMEDET
-    * SLANT
-    * ATMEXT
-    * QGSJET-II-04
-    * UrQMD 1.3.1
-* [This version](https://github.com/nkorzoun/corsikaIOreader) of corsikaIOreader
-
-### Installation
-* Install dependencies and be sure to compile corsikaIOreader with `make corsikaIOreader`
-
-### Examples
-Examples can be found on the [repo wiki](https://github.com/nkorzoun/PANOSETI-High-Energy-Analysis-Pipeline/wiki)
+CORSIKA -> sim_telarray simulations of the array with the [PANOSETI sim_telarray config](https://github.com/orelgueta/PANOSETI_sim_telarray_config), run as SLURM job arrays. Configured by `configs/simulation.yaml` (tool and data paths, runs, CORSIKA overrides, sim_telarray settings, SLURM resources):
+```
+python simulation_tools/run_simulation.py submit --config my_simulation.yaml
+```
+See [simulation_tools/README.md](simulation_tools/README.md) for requirements, the config, stages and outputs.
