@@ -4,9 +4,9 @@
 paths:
   # CORSIKA run directory: holds the CORSIKA binary and the data tables it reads at runtime
   # (EGSDAT*, atmprof*.dat, ...). Each run gets its own working directory symlinked to it.
-  corsika_run_dir: ~/Software/corsika/corsika-77410/run
+  corsika_run_dir: ~/Software/corsika/corsika-78010/run
   # CORSIKA binary, relative to corsika_run_dir.
-  corsika_binary: corsika77410Linux_QGSII_urqmd
+  corsika_binary: corsika78010Linux_QGSIII_urqmd
   # sim_telarray install directory (the one holding bin/sim_telarray).
   sim_telarray_dir: ~/Software/sim_telarray/sim_telarray
   # PANOSETI sim_telarray config. Its directory is added to sim_telarray's include path, so

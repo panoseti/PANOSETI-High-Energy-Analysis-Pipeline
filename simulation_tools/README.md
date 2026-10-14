@@ -6,7 +6,7 @@ CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI s
 * `corsika_template.inp` - the CORSIKA input card every run's card is made from
 
 ## Requirements
-* [CORSIKA 7](https://www.iap.kit.edu/corsika/index.php), verified for 77410, compiled with IACT, CHERENKOV, VOLUMEDET, SLANT, ATMEXT, QGSJET-II-04 and UrQMD 1.3.1
+* [CORSIKA 7](https://www.iap.kit.edu/corsika/index.php), verified for 78010, compiled with IACT, CHERENKOV, VOLUMEDET, VIEWCONE, SLANT, ATMEXT, QGSJET-III and UrQMD
 * [sim_telarray](https://www.mpi-hd.mpg.de/hfm/~bernlohr/sim_telarray/), verified for release 2025.51.0
 * [PANOSETI_sim_telarray_config](https://github.com/orelgueta/PANOSETI_sim_telarray_config)
 * `zstd` on the `PATH`: CORSIKA and sim_telarray write their `.zst` files through it
@@ -106,7 +106,17 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `setup` | shell lines run before the pipeline in each job, e.g. `module load ...` or activating a conda environment |
 
 ## CORSIKA template
-`corsika_template.inp` is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, gammas at 10 TeV, `THETAP 0. 20.`, `CSCAT 1 1200.E2 1200.E2`. Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
+`corsika_template.inp` is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, gammas at 10 TeV, `CSCAT 1 1200.E2 1200.E2`, and primary directions from a viewing cone around zenith (`THETAP 0. 0.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
+
+`VIEWCONE inner outer` draws each primary's direction uniformly in solid angle between `inner` and `outer` degrees of the cone's axis (`THETAP`/`PHIP`, which must then have equal low and high values). Point the telescopes along the axis (`sim_telarray.telescope_theta`/`telescope_phi`), so the cone angles are off-axis angles. Set it per production in the config's `corsika` section:
+
+| sample | `VIEWCONE` |
+|---|---|
+| point-source gammas, at the 0.5 deg wobble offset (a ring at random azimuth) | `[0.5, 0.5]` |
+| on-axis gammas | `[0., 0.]` (the template's default) |
+| diffuse gammas, protons | `[0., 10.]` |
+
+The 10 deg diffuse cone covers the ~10 deg field of view (corners ~7 deg off-axis) with a few degrees' margin for showers from outside it whose images still reach the camera.
 
 Keep `OBSLEV` matched to the PANOSETI config's `altitude` and its atmospheric transmission table (`atm_trans_1650_...` for 1650 m): sim_telarray refuses a table for another altitude, or gives zero transmission below the table's lowest altitude.
 
