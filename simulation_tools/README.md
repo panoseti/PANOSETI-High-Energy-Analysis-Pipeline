@@ -17,34 +17,82 @@ Copy the config and set the paths to your CORSIKA, sim_telarray and PANOSETI con
 ```
 cp configs/simulation.yaml my_simulation.yaml
 ```
-Try one run locally first; for a quick test, set e.g. `corsika: {NSHOW: 2}` in the config:
+Try one run locally first; for a quick test, set e.g. `corsika: {NSHOW: 2}` in the config (2 showers in the run; `--run 1` is the run number, not a shower count):
 ```
 python simulation_tools/run_simulation.py run --config my_simulation.yaml --run 1
 ```
+Add `--verbose` to also print CORSIKA's and sim_telarray's output (otherwise only in their logs in `<output_dir>/logs/`).
 Then submit the production to SLURM. `--dry-run` writes the sbatch script without submitting it, so you can check it:
 ```
 python simulation_tools/run_simulation.py submit --config my_simulation.yaml --dry-run
 python simulation_tools/run_simulation.py submit --config my_simulation.yaml
 ```
 
+## Stages
+`run_simulation.py` has four commands, given as its first argument: `prepare`, `submit`, `run` and `simtel` (see Commands). `submit` sends a whole production to SLURM; `run` and `simtel` each do one task locally.
+
+A stage is the part of the CORSIKA -> sim_telarray chain that `submit` sends to SLURM, chosen with `submit --stage`:
+
+| stage | each array task runs | one array task per | same task run locally, one at a time |
+|---|---|---|---|
+| `full` (default) | CORSIKA, then sim_telarray | run number, `first_run` ... `first_run + n_runs - 1` | `run_simulation.py run --run N` |
+| `simtel` | sim_telarray only, on a CORSIKA file that already exists | file matching `paths.corsika_input` | `run_simulation.py simtel --file PATH` |
+
+Each SLURM array task itself calls `run_simulation.py run` or `run_simulation.py simtel`.
+
+A CORSIKA run number only labels a run (and seeds it); it is not a number of showers. Each run simulates `NSHOW` showers (set in the template or the config's `corsika` section), so a production has `n_runs` runs and `n_runs x NSHOW` showers. Each shower is reused `CSCAT`'s first value times at random core positions, giving `n_runs x NSHOW x CSCAT` events. E.g. `first_run: 1`, `n_runs: 10`, `NSHOW: 10`, `CSCAT 5 ...` gives runs 1 ... 10, 100 showers and 500 events.
+
 ## Commands
-| command | what it does |
+Every command takes `--config` with the path to your simulation YAML, e.g.
+```
+python simulation_tools/run_simulation.py <command> --config my_simulation.yaml [flags]
+```
+
+### `prepare`
+Checks the config's paths and writes every run's CORSIKA card to `<output_dir>/inputs/`. No other flags.
+
+### `submit`
+Writes a SLURM array script for a stage and submits it (the `full` stage runs `prepare` first).
+
+| flag | |
 |---|---|
-| `prepare --config C` | checks the config's paths and writes every run's CORSIKA card to `<output_dir>/inputs/` |
-| `submit --config C [--stage full\|simtel] [--dry-run] [--verbose]` | writes a SLURM array script for the stage and submits it (`full` runs `prepare` first); `--verbose` is passed on to the jobs |
-| `run --config C (--run N \| --index I)` | the full stage for one run: CORSIKA, then sim_telarray. `--index I` is run `first_run + I`, what the SLURM array tasks call |
-| `simtel --config C (--file F \| --index I)` | sim_telarray only, on one CORSIKA file (`--index I`: the I-th file matching `paths.corsika_input`, sorted) |
+| `--stage full` or `--stage simtel` | which stage to submit, see Stages (default `full`) |
+| `--dry-run` | write the sbatch script but don't submit it |
+| `--verbose` | passed on to the jobs, so their SLURM logs include CORSIKA's and sim_telarray's output |
 
-`run` and `simtel` skip outputs that already exist; add `--overwrite` to redo them.
+### `run`
+The full stage for one CORSIKA run: CORSIKA, then sim_telarray. Give exactly one of `--run` or `--index`:
 
-They print timestamped progress: the run's card and work directory, a line per finished CORSIKA shower, how long each step took, sim_telarray's summary (triggered telescopes, events processed) and the output paths. `--verbose` also echoes the CORSIKA and sim_telarray commands and their full output, which otherwise only go to their logs (in pipe mode sim_telarray's output only goes to its log either way).
+| flag | |
+|---|---|
+| `--run N` | CORSIKA run number `N`, e.g. `--run 1` |
+| `--index I` | run number `first_run + I` (what the SLURM array tasks call) |
+| `--overwrite` | redo outputs that already exist |
+| `--verbose` | also print CORSIKA's and sim_telarray's output |
 
-## Stages and modes
-`production.mode` sets how the full stage chains CORSIKA and sim_telarray:
-* `files` - CORSIKA writes `<output_dir>/corsika/<name>_run<NNNNNN>.corsika.zst`, then sim_telarray runs on it. The CORSIKA files are kept, so sim_telarray can be rerun on them later.
-* `pipe` - CORSIKA streams its output straight into sim_telarray (`TELFIL |./simtel_pipe.sh`; the script holds the sim_telarray command, since CORSIKA doesn't allow shell syntax in `TELFIL`). No CORSIKA files are kept, so any sim_telarray change means rerunning CORSIKA.
+### `simtel`
+sim_telarray only, on one existing CORSIKA IACT file. Outputs are named after the file, minus `.corsika.zst`. Give exactly one of `--file` or `--index`:
 
-The `simtel` stage reruns sim_telarray only, e.g. after a change to the PANOSETI config or to the `sim_telarray` section. Give it a new `sim_telarray.tag`, so its outputs go next to the earlier ones instead of being skipped as already done:
+| flag | |
+|---|---|
+| `--file PATH` | the CORSIKA file, e.g. `--file sim_output/gamma_10TeV/corsika/gamma_10TeV_run000001.corsika.zst` |
+| `--index I` | the I-th file (from 0) matching `paths.corsika_input`, sorted (what the SLURM array tasks call) |
+| `--overwrite` | redo outputs that already exist |
+| `--verbose` | also print sim_telarray's output |
+
+`run` and `simtel` skip outputs that already exist, unless given `--overwrite`. They print timestamped progress: the run's card and work directory, a line per finished CORSIKA shower, how long each step took, sim_telarray's summary (triggered telescopes, events processed) and the output paths. `--verbose` also echoes the CORSIKA and sim_telarray commands and their full output, which otherwise only go to their logs (with `mode: pipe` sim_telarray's output only goes to its log either way).
+
+## Data levels (mode)
+The `full` stage produces two data levels: CORSIKA's air-shower output (Cherenkov photons at the telescopes) and sim_telarray's telescope events. `production.mode` sets which of them are kept:
+* `files` - both. CORSIKA writes `<output_dir>/corsika/<name>_run<NNNNNN>.corsika.zst`, then sim_telarray runs on it. The kept CORSIKA files let you rerun sim_telarray later without rerunning CORSIKA.
+* `pipe` - sim_telarray events only. CORSIKA streams its output straight into sim_telarray (`TELFIL |./simtel_pipe.sh`; the script holds the sim_telarray command, since CORSIKA doesn't allow shell syntax in `TELFIL`). This saves disk space, but any sim_telarray change means rerunning CORSIKA.
+
+## Rerunning sim_telarray
+The `simtel` stage reruns sim_telarray only, e.g. after a change to the PANOSETI config or to the `sim_telarray` section. Copy your config and give the copy a new `tag` in its `sim_telarray` section, so the new outputs go to `simtel/<tag>/` next to the earlier ones instead of being skipped as already done. The tag can be any name, e.g. one describing the change:
+```yaml
+sim_telarray:
+  tag: threshold_5.5     # was v1
+```
 ```
 python simulation_tools/run_simulation.py submit --config my_simulation_v2.yaml --stage simtel
 ```
@@ -69,8 +117,8 @@ Paths are resolved relative to the project root if not absolute; `~` and `$VARS`
 | key | |
 |---|---|
 | `name` | prefix of every file name, `<name>_run<NNNNNN>` (letters, digits and `_.+-` only) |
-| `mode` | `files` or `pipe`, see above |
-| `first_run`, `n_runs` | CORSIKA run numbers `first_run` ... `first_run + n_runs - 1` (at most 999999) |
+| `mode` | which data levels are kept: `files` (CORSIKA and sim_telarray) or `pipe` (sim_telarray only), see Data levels |
+| `first_run`, `n_runs` | number of runs, `n_runs`, and the CORSIKA run numbers they get, `first_run` ... `first_run + n_runs - 1` (at most 999999). Showers per run are `NSHOW` in the `corsika` section, see Stages |
 | `seed` | base seed; each run's CORSIKA and sim_telarray seeds are derived from it and the run number, so a production can be regenerated exactly |
 
 ### corsika
@@ -106,7 +154,7 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `setup` | shell lines run before the pipeline in each job, e.g. `module load ...` or activating a conda environment |
 
 ## CORSIKA template
-`corsika_template.inp` is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, gammas at 10 TeV, `CSCAT 1 1200.E2 1200.E2`, and primary directions from a viewing cone around zenith (`THETAP 0. 0.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
+`corsika_template.inp` is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, 10 gammas per run at 10 TeV (`NSHOW 10`), each used 5 times (`CSCAT 5 1200.E2 1200.E2`), and primary directions from a viewing cone around zenith (`THETAP 0. 0.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
 
 `VIEWCONE inner outer` draws each primary's direction uniformly in solid angle between `inner` and `outer` degrees of the cone's axis (`THETAP`/`PHIP`, which must then have equal low and high values). Point the telescopes along the axis (`sim_telarray.telescope_theta`/`telescope_phi`), so the cone angles are off-axis angles. Set it per production in the config's `corsika` section:
 
@@ -123,7 +171,7 @@ Keep `OBSLEV` matched to the PANOSETI config's `altitude` and its atmospheric tr
 ## Outputs
 ```
 <output_dir>/inputs/<name>_run<NNNNNN>.inp                 CORSIKA cards
-<output_dir>/corsika/<name>_run<NNNNNN>.corsika.zst        CORSIKA IACT files (files mode)
+<output_dir>/corsika/<name>_run<NNNNNN>.corsika.zst        CORSIKA IACT files (`mode: files` only)
 <output_dir>/simtel/<tag>/<name>_run<NNNNNN>.simtel.zst    sim_telarray events
 <output_dir>/simtel/<tag>/<name>_run<NNNNNN>.hdata.zst     sim_telarray histograms
 <output_dir>/logs/<name>_run<NNNNNN>.corsika.log
@@ -139,5 +187,5 @@ with `<job>` = `<stage>_<tag>_<YYYYmmdd-HHMMSS>`. Because each submission's jobs
 Each run works in its own scratch directory and moves its outputs to `output_dir` only when CORSIKA reports `END OF RUN` and sim_telarray reports it finished. A failed run raises an error naming its log and keeps its scratch directory for debugging. Runs whose outputs exist are skipped, so submitting the same config again reruns only the failed ones.
 
 ## Notes
-* sim_telarray reads only the first 4 telescopes of a CORSIKA file unless told otherwise; the pipeline sets `maximum_telescopes` from the file's header (pipe mode: from the card's `TELESCOPE` lines).
+* sim_telarray reads only the first 4 telescopes of a CORSIKA file unless told otherwise; the pipeline sets `maximum_telescopes` from the file's header (with `mode: pipe`: from the card's `TELESCOPE` lines).
 * Many clusters cap SLURM job arrays at about 1000 tasks (`MaxArraySize`). Split bigger productions into several configs with different `first_run`.
