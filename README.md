@@ -25,7 +25,7 @@ This will let you run jupyter notebooks after making changes to the package with
 * `example_notebooks/` - step-by-step examples of individual `heap` modules (pre-cleaning, pedestals, gain, image cleaning, coincidences, meridian flip correction).
 * `test_data/` - the data the example notebooks and `pcap_to_root_analysis.ipynb` run on.
 * `simulation_tools/` - CORSIKA simulation scripts and `panodisplay.C` (see simulation_tools below).
-* `misc_tools/` - standalone notebooks (PSF, array layout, stellar spectra, transmission, ...).
+* `misc_tools/` - standalone notebooks (like wobble coordinates).
 
 Raw data is expected as one folder per night, holding one folder per run (acquisition session, e.g. either side of a meridian flip):
 ```
