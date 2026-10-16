@@ -16,7 +16,10 @@ dependencies = [
   "matplotlib",
   "pypff",
   "uproot",
-  "pyyaml"
+  "pyyaml",
+  "pandas",
+  "scipy",
+  "astropy"
 ]
 
 [tool.setuptools]
