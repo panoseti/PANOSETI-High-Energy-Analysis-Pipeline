@@ -15,6 +15,7 @@ import pandas as pd
 from heap.events import params_path
 from heap.parameterize import CAMERA_CMAP, CAMERA_EXTENT, CAMERA_HALF_WIDTH, TAB10_COLORS, draw_params
 from heap.process_dataset import _mount_pointing, _run_start_epoch, discover_runs, identify_flip_side, identify_source, load_fallback_map
+from heap.sources import wobble_offset
 
 
 def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
@@ -32,8 +33,9 @@ def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
 
     Returns:
         DataFrame with one row per run and telescope: Run, Start (UTC), Telescope, Source,
-        FlipSide, RA, Dec (deg, median while tracking), Files, MB. Source/FlipSide are the
-        error message if they couldn't be identified.
+        FlipSide, RA, Dec (deg, median while tracking), WobbleOffset (deg) and WobblePA (deg east
+        of north) of the pointing from Source (see heap.sources.wobble_offset()), Files, MB.
+        Source/FlipSide are the error message if they couldn't be identified.
     """
     fallback_map_path = Path(raw_dir) / "source_run_map.json"
     fallback_map = load_fallback_map(fallback_map_path) if fallback_map_path.exists() else None
@@ -51,6 +53,7 @@ def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
             except ValueError as e:
                 flip_side = f"? ({e})"
             pointing = _mount_pointing(run_dir, name)
+            offset, pa = wobble_offset(source, pointing)
             rows.append({
                 "Run": run_dir.name,
                 "Start": pd.to_datetime(_run_start_epoch(run_dir), unit="s", utc=True),
@@ -59,6 +62,8 @@ def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
                 "FlipSide": flip_side,
                 "RA": round(pointing.ra.deg, 3) if pointing is not None else np.nan,
                 "Dec": round(pointing.dec.deg, 3) if pointing is not None else np.nan,
+                "WobbleOffset": round(offset, 3),
+                "WobblePA": round(pa, 1),
                 "Files": len(files),
                 "MB": round(sum(f.stat().st_size for f in files) / 1e6, 1),
             })

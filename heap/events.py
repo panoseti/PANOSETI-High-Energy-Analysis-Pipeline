@@ -30,6 +30,7 @@ from heap import coincidences as coinc
 from heap.parameterize import CAMERA_CMAP, CAMERA_HALF_WIDTH, TAB10_COLORS, plot_hillas_histograms
 from heap.significance import make_wcs
 from heap.process_dataset import _mount_pointing, _run_start_epoch, discover_runs, group_runs_by_source, load_fallback_map, process_dataset, slugify
+from heap.sources import wobble_offset
 
 
 
@@ -202,6 +203,22 @@ def run_pointings(raw_dir, source, telescopes: list, pointing_overrides: dict = 
         else:
             print(f"{run}: no mount position at its start and no pointing_overrides, leaving it out")
     return pointings
+
+
+def run_wobbles(source, pointings: dict):
+    """
+    Each run's wobble: its pointing's (run_pointings()) offset and position angle from source (see
+    heap.sources.wobble_offset()).
+
+    Parameters:
+        source: source name
+        pointings: {run folder name: SkyCoord}, see run_pointings()
+
+    Returns:
+        DataFrame indexed by run folder name with WobbleOffset (deg), WobblePA (deg east of north: 0 = N, 90 = E)
+    """
+    rows = {run: wobble_offset(source, pointing) for run, pointing in pointings.items()}
+    return pd.DataFrame.from_dict(rows, orient="index", columns=["WobbleOffset", "WobblePA"])
 
 
 def load_camera_frame(
@@ -456,8 +473,9 @@ def build_array_events(
         plotting: bool = False,
 ):
     """
-    load_camera_frames() then build_events(). Adds a Date column holding date; x_c/y_c are relative
-    to each event's run's pointing (see run_pointings()).
+    load_camera_frames() then build_events(). Adds a Date column holding date, and each event's run's
+    WobbleOffset/WobblePA (see run_wobbles()); x_c/y_c are relative to each event's run's
+    pointing (see run_pointings()).
 
     Parameters:
         output_dir, raw_dir, rotate_postflip, rel_tel_efficiency, pointing_corrections, pointing_overrides: see load_camera_frames()
@@ -475,6 +493,9 @@ def build_array_events(
     if events is not None:
         events.insert(1, "Date", date)
         events.insert(2, "Run", events.pop("Run")) # every image of an event is in the same run, see build_events()
+        wobbles = run_wobbles(source, pointings)
+        for i, col in enumerate(wobbles.columns):
+            events.insert(3 + i, col, events.Run.map(wobbles[col]))
     return events, pointings
 
 

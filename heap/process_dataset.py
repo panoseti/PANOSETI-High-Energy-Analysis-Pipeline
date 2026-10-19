@@ -20,7 +20,7 @@ from heap.image_cleaning import threshold_clean
 from heap.make_gain_map import gain_from_pedvars
 from heap.make_pedestals import calculate_pedestal_and_pedvar
 from heap.parameterize import calc_params
-from heap.sources import ALIASES, match_source
+from heap.sources import MAX_OFFSET, match_source, parse_target_name, wobble_offset
 
 
 def slugify(text, sep="-"):
@@ -459,39 +459,61 @@ def _mount_pointing(run_dir, telescope):
     return SkyCoord(mount["ra"], mount["dec"], unit=u.deg) if mount is not None else None
 
 
+def _fallback_hint(run_dir):
+    """How to give run_dir's source/flip side by hand, for error messages."""
+    return (
+        f"To set it by hand, add the run to source_run_map.json in the night's raw data folder (see load_fallback_map()): "
+        f'{{"{Path(run_dir).name}": {{"source": "<heap.sources name>", "flip_side": "preflip" or "postflip"}}}}'
+    )
+
+
 def identify_source(run_dir, telescope, fallback_map=None):
     """
     Identify which astronomical source a run was tracking.
 
-    Tries the mount's target_name at the run's start first (see _mount_at_run_start()).
-    Falls back to fallback_map when it's missing or blank, then to the heap.sources catalog
-    source nearest the mount's pointing (see heap.sources.match_source()).
+    Uses this run's fallback_map entry if it has one, so the fallback map overrides the mount.
+    Otherwise tries the mount's target_name at the run's start (see _mount_at_run_start()), without
+    its wobble suffix (see heap.sources.parse_target_name()), raising if it's a catalog source more
+    than heap.sources.MAX_OFFSET from the mount's pointing. Then, when target_name is missing or
+    blank, the one heap.sources catalog source near the mount's pointing (see
+    heap.sources.match_source(); raises if there's more than one).
 
     Parameters:
         run_dir: path to one run folder
         telescope: telescope name, used to look up its mount log (see _mount_at_run_start())
         fallback_map: optional {run_dir_name: {"source": ..., "flip_side": ...}} dict (see
-            load_fallback_map()), used when the mount's target_name isn't usable for this run
+            load_fallback_map()), overriding the mount for the runs in it
 
     Returns:
         source_name
     """
-    mount = _mount_at_run_start(run_dir, telescope)
-    if mount is not None and mount["target_name"]:
-        return ALIASES.get(mount["target_name"], mount["target_name"])
-
     if fallback_map is not None and run_dir.name in fallback_map:
         return fallback_map[run_dir.name]["source"]
 
+    mount = _mount_at_run_start(run_dir, telescope)
+    if mount is not None and mount["target_name"]:
+        source = parse_target_name(mount["target_name"])
+        offset = wobble_offset(source, SkyCoord(mount["ra"], mount["dec"], unit=u.deg))[0]
+        if offset > MAX_OFFSET: # nan (source not in the catalog) passes
+            raise ValueError(
+                f"Mount target_name {mount['target_name']!r} for {run_dir} is {source}, but the pointing is "
+                f"{offset:.2f} deg from it (> heap.sources.MAX_OFFSET = {MAX_OFFSET} deg). {_fallback_hint(run_dir)}"
+            )
+        return source
+
     pointing = _mount_pointing(run_dir, telescope)
     if pointing is not None:
-        source = match_source(pointing)
+        try:
+            source = match_source(pointing)
+        except ValueError as e:
+            raise ValueError(f"Could not identify source for {run_dir}: {e}. {_fallback_hint(run_dir)}") from None
         if source is not None:
             return source
 
     raise ValueError(
-        f"Could not identify source for {run_dir}: no usable mount target_name, no fallback_map entry, "
-        f"and no heap.sources catalog source near the pointing ({pointing.to_string('hmsdms') if pointing is not None else 'no tracking mount entry'})"
+        f"Could not identify source for {run_dir}: no usable mount target_name, and no heap.sources catalog "
+        f"source near the pointing ({pointing.to_string('hmsdms') if pointing is not None else 'no tracking mount entry'}). "
+        f"{_fallback_hint(run_dir)}"
     )
 
 
@@ -521,15 +543,17 @@ def identify_flip_side(run_dir, telescope, fallback_map=None):
     if fallback_map is not None and run_dir.name in fallback_map:
         return fallback_map[run_dir.name]["flip_side"]
 
-    raise ValueError(f"Could not identify flip side for {run_dir}: no usable mount side and no fallback_map entry")
+    raise ValueError(f"Could not identify flip side for {run_dir}: no usable mount side and no fallback_map entry. {_fallback_hint(run_dir)}")
 
 
 def load_fallback_map(path):
     """
     Load a user-maintained fallback map for identify_source()/identify_flip_side(), for runs
-    whose mount data is missing.
+    whose mount data is missing or wrong. Its source overrides the mount's; its flip_side is used
+    when the mount's side is missing.
 
-    Expects a JSON file: {run_dir_name: {"source": source_name, "flip_side": "preflip" | "postflip"}}
+    Expects a JSON file, <raw_dir>/source_run_map.json for the night's raw data folder:
+    {run_dir_name: {"source": source_name, "flip_side": "preflip" | "postflip"}}
     """
     with open(path) as f:
         return json.load(f)

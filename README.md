@@ -60,7 +60,13 @@ Processing writes, per night, telescope and source:
 ```
 Nights already in `output_dir` are not reprocessed, and processing them with different settings raises an error, so give configs with different telescopes or cleaning settings their own `output_dir`. Events, directions and significances are not written.
 
-Each run's pointing, shared by every telescope, is the mount positions at its start, read from each telescope's mount log (`<night>/<telescope>/mount/`, else hk.pff), since every run starts right after Ekos aligns the telescopes; later positions drift as they follow the guide corrections (`heap.events.run_pointings()`). Give runs that didn't start with an alignment (e.g. a DAQ restart), or have no mount data, a pointing in the config's `source.pointing_overrides`; runs with neither are left out (with a printout). When the mount's target name is blank, the source is identified by matching the pointing against the catalog in `heap/sources.py`, so add new sources there. The timing reference (`events.reference`) is only used for timing: in each 120 s of each run, the first telescope in that list with data.
+Each run's pointing, shared by every telescope, is the mount positions at its start, read from each telescope's mount log (`<night>/<telescope>/mount/`, else hk.pff), since every run starts right after Ekos aligns the telescopes; later positions drift as they follow the guide corrections (`heap.events.run_pointings()`). Give runs that didn't start with an alignment (e.g. a DAQ restart), or have no mount data, a pointing in the config's `source.pointing_overrides`; runs with neither are left out (with a printout). The timing reference (`events.reference`) is only used for timing: in each 120 s of each run, the first telescope in that list with data.
+
+Each run's source is the mount's target name at its start without its wobble (e.g. `Crab 0.5 N` -> `Crab`). When the name is blank, it's the one source in the `heap/sources.py` catalog within `MAX_OFFSET` (1 deg) of the pointing. A run named after a catalog source more than `MAX_OFFSET` from its pointing, or with a blank name and no or several catalog sources near its pointing, raises an error. Each run's wobble (`WobbleOffset`, `WobblePA` in `heap.diagnostics.run_table()` and the events) is its pointing's offset and position angle from the source's catalog position, which is also the on region center, so add new sources to the catalog. To set a run's source by hand, or a flip side the mount didn't record, add it to the night's `source_run_map.json`; its source overrides the mount's:
+```
+<raw_data_dir>/<YYYYMMDD>/source_run_map.json
+{"<run_id>.pffd": {"source": "Crab", "flip_side": "preflip"}}
+```
 
 To analyze a new source, copy `configs/crab.yaml`, set `source.name` and `paths`, and point the notebooks' `CONFIG` at it.
 
