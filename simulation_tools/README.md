@@ -154,7 +154,12 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `setup` | shell lines run before the pipeline in each job, e.g. `module load ...` or activating a conda environment |
 
 ## CORSIKA template
-`corsika_template.inp` is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, 10 gammas per run at 10 TeV (`NSHOW 10`), each used 5 times (`CSCAT 5 1200.E2 1200.E2`), and primary directions from a viewing cone around zenith (`THETAP 0. 0.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
+`corsika_template.inp` is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, 10 gammas per run at 10 TeV (`NSHOW 10`), each used 5 times (`CSCAT 5 250.E2 500.E2`), and primary directions from a viewing cone around zenith (`THETAP 0. 0.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
+
+### Array layout
+![PANOSETI array layout](array_layout.png)
+
+The template's `TELESCOPE` lines (`x y z r` in cm) place the 7 telescopes in CORSIKA's array frame, which is rotated from magnetic north by `ARRANG`. Left: the telescopes on the ground, east right and north up. Right: the same in the array frame, with x up and y pointing left so it reads like the left panel; labels are each telescope's (x, y) in m. The shaded rectangle is where `CSCAT 5 250.E2 500.E2` throws shower cores: uniformly within ±250 m in x and ±500 m in y of the array origin (+), i.e. 500 x 1000 m.
 
 `VIEWCONE inner outer` draws each primary's direction uniformly in solid angle between `inner` and `outer` degrees of the cone's axis (`THETAP`/`PHIP`, which must then have equal low and high values). Point the telescopes along the axis (`sim_telarray.telescope_theta`/`telescope_phi`), so the cone angles are off-axis angles. Set it per production in the config's `corsika` section:
 
