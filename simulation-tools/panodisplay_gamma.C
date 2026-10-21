@@ -24,7 +24,12 @@
 #include "TROOT.h"
 #include "TStyle.h"
 #include "TTree.h"
+#include "Math/Vector3D.h"
+#include "Math/Rotation3D.h"
+#include "Math/RotationX.h"
+#include "Math/RotationZ.h"
 
+#include <limits>
 #include "iostream"
 #include "fstream"
 
@@ -36,6 +41,9 @@
 // Random seed
 int seed = 200;
 TRandom3 *r = new TRandom3(seed);
+
+// Set to true to use ray tracing with thin Fresnel lens model, false to use Gaussian approximation
+const bool kUseRayTrace = true;
 
 // Root file
 TFile *f;
@@ -95,10 +103,243 @@ double redang( double iangle )
     return iangle;
 }
 
+// ============================================================================
+// PANOSETI Thin Lens Optical Model Parameters & Tables
+// ============================================================================
+
+const double kOpticsF = 60.78;         // Focal length (cm)
+const double kOpticsD = 46.09;         // Aperture diameter (cm)
+const double kOpticsR = 23.045;        // Aperture radius (cm)
+const double kOpticsRoughness = 0.0;   // Lens surface roughness (cm), 0 = disabled
+const double kSigmaScattering = kOpticsRoughness/kOpticsF;
+
+// Fresnel polynomial sag coefficients: y = sum(a_k * rho^(2k))
+const double kPolyCoeffs[11] = {
+    0.00000000000000000e+00, // a0
+    1.70651353139298460e-02, // a1
+    -3.53352632884415423e-06, // a2
+    9.57163484153624398e-10, // a3
+    3.55711029991929572e-13, // a4
+    -1.12361085705273497e-15, // a5
+    1.96912674836582728e-19, // a6
+    9.79010455872597239e-22, // a7
+    3.32575748290361466e-25, // a8
+    -6.27878102919874693e-28, // a9
+    -7.74304624855183072e-31  // a10
+};
+
+// Inverse CDF of photon energy (eV) for Cherenkov spectrum folded with full PDE
+// (Atmospheric transmission at alt=10km, zn=30deg * PMMA transmission * SiPM PDE).
+// Zero-tail trimmed to physical detection window [1.305 eV, 3.647 eV] (~340 to 950 nm, 201 points).
+const int kNumUGrid = 201;
+const double kInvCDFEnergy[201] = {
+    1.305097, 1.405120, 1.449981, 1.486680, 1.519204,
+    1.547630, 1.573380, 1.596913, 1.619006, 1.642698,
+    1.661821, 1.680094, 1.697955, 1.715681, 1.732686,
+    1.748250, 1.763344, 1.778084, 1.792426, 1.806646,
+    1.819888, 1.832719, 1.845235, 1.857458, 1.869423,
+    1.881172, 1.892775, 1.904193, 1.915422, 1.926377,
+    1.937024, 1.947466, 1.957723, 1.967757, 1.977610,
+    1.987181, 1.996568, 2.005831, 2.014978, 2.024016,
+    2.032950, 2.041785, 2.050527, 2.059185, 2.067772,
+    2.076315, 2.084811, 2.093248, 2.101612, 2.109908,
+    2.117991, 2.125959, 2.133850, 2.141674, 2.149439,
+    2.157156, 2.164818, 2.172418, 2.179967, 2.187447,
+    2.194839, 2.202173, 2.209452, 2.216678, 2.223854,
+    2.230979, 2.238057, 2.245086, 2.252068, 2.259010,
+    2.265911, 2.272772, 2.279595, 2.286380, 2.293128,
+    2.299846, 2.306532, 2.313189, 2.319814, 2.326411,
+    2.332977, 2.339517, 2.346026, 2.352510, 2.358970,
+    2.365408, 2.371824, 2.378220, 2.384596, 2.390950,
+    2.397286, 2.403601, 2.409896, 2.416173, 2.422430,
+    2.428669, 2.434889, 2.441093, 2.447280, 2.453458,
+    2.459628, 2.465787, 2.471937, 2.478078, 2.484211,
+    2.490338, 2.496462, 2.502582, 2.508699, 2.514813,
+    2.520924, 2.527031, 2.533136, 2.539237, 2.545336,
+    2.551432, 2.557525, 2.563617, 2.569710, 2.575803,
+    2.581896, 2.587990, 2.594085, 2.600179, 2.606274,
+    2.612370, 2.618466, 2.624564, 2.630663, 2.636764,
+    2.642866, 2.648969, 2.655074, 2.661182, 2.667294,
+    2.673412, 2.679535, 2.685663, 2.691795, 2.697935,
+    2.704084, 2.710244, 2.716415, 2.722597, 2.728793,
+    2.735005, 2.741233, 2.747478, 2.753740, 2.760019,
+    2.766316, 2.772630, 2.778961, 2.785310, 2.791677,
+    2.798063, 2.804472, 2.810905, 2.817363, 2.823845,
+    2.830353, 2.836886, 2.843450, 2.850046, 2.856676,
+    2.863339, 2.870040, 2.876786, 2.883577, 2.890412,
+    2.897305, 2.904265, 2.911298, 2.918407, 2.925599,
+    2.932890, 2.940294, 2.947809, 2.955475, 2.963291,
+    2.971274, 2.979451, 2.987828, 2.996470, 3.005357,
+    3.014575, 3.024096, 3.034036, 3.044433, 3.055327,
+    3.066807, 3.078999, 3.092001, 3.106080, 3.121486,
+    3.138554, 3.158061, 3.181192, 3.210602, 3.254194,
+    3.646594
+};
+
+// Refractive index table for PMMA vs photon energy (1.0 to 6.0 eV, 51 points, step 0.1 eV)
+const double kRefractiveIndexEMin = 1.00;
+const double kRefractiveIndexEMax = 6.00;
+const int kNumRefractiveIndexGrid = 51;
+const double kRefractiveIndexGrid[51] = {
+    1.466383, 1.467147, 1.467994, 1.468914, 1.469911, 1.470988, 1.472144, 1.473380,
+    1.474700, 1.476102, 1.477590, 1.479164, 1.480827, 1.482580, 1.484426, 1.486365,
+    1.488401, 1.490535, 1.492770, 1.495111, 1.497558, 1.500117, 1.502792, 1.505586,
+    1.508467, 1.511482, 1.514626, 1.517903, 1.521315, 1.524868, 1.528565, 1.532412,
+    1.536416, 1.540581, 1.544915, 1.549424, 1.554115, 1.558997, 1.564076, 1.569360,
+    1.574865, 1.580594, 1.586560, 1.592774, 1.599251, 1.606005, 1.613040, 1.620392,
+    1.628056, 1.636061, 1.644431
+};
+
+// Sample photon energy from precomputed inverse CDF
+double sample_photon_energy() {
+    double u = r->Rndm();
+    double idx_d = u * (kNumUGrid - 1);
+    int idx = (int)idx_d;
+    if (idx >= kNumUGrid - 1) return kInvCDFEnergy[kNumUGrid - 1];
+    if (idx < 0) return kInvCDFEnergy[0];
+    double frac = idx_d - idx;
+    return kInvCDFEnergy[idx] * (1.0 - frac) + kInvCDFEnergy[idx + 1] * frac;
+}
+
+// Get PMMA refractive index for a given energy (eV)
+double get_refractive_index(double energy_eV) {
+    if (energy_eV <= kRefractiveIndexEMin) return kRefractiveIndexGrid[0];
+    if (energy_eV >= kRefractiveIndexEMax) return kRefractiveIndexGrid[kNumRefractiveIndexGrid - 1];
+    double frac_idx = (energy_eV - kRefractiveIndexEMin) / (kRefractiveIndexEMax - kRefractiveIndexEMin) * (kNumRefractiveIndexGrid - 1);
+    int idx = (int)frac_idx;
+    double frac = frac_idx - idx;
+    return kRefractiveIndexGrid[idx] * (1.0 - frac) + kRefractiveIndexGrid[idx + 1] * frac;
+}
+
+/*
+ * Trace a photon through the PANOSETI Fresnel thin-lens optical model:
+ * - Samples photon energy according to Cherenkov spectrum * atmosphere * PMMA * SiPM PDE
+ * - Evaluates PMMA dispersion n(E)
+ * - Uniformly samples entrance pupil impact position on circular aperture (diameter D = 46.09 cm)
+ * - Refracts into lens at entry plane y = 0
+ * - Refracts out of lens with normal defined by aspheric polynomial surface y = P(rho^2)
+ * - Applies surface micro-roughness scattering if kOpticsRoughness > 0
+ * - Propagates to focal plane at y = -F (F = 60.78 cm)
+ *
+ * Args:
+ *   imgX_deg, imgY_deg: Incident photon direction in telescope frame (in degrees)
+ * Returns:
+ *   std::tuple<double, double>: Focal plane position converted back to angular degrees on sky
+ */
+std::tuple<double, double> sample_and_trace_photon(double imgX_deg, double imgY_deg) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    // Direction cosines in lens frame (optical axis is -Y, X is horizontal, Z is vertical)
+    double tx = TMath::DegToRad() * imgX_deg;
+    double tz = TMath::DegToRad() * imgY_deg;
+    double dx = tx;
+    double dz = tz;
+    double dy = -1.0;
+    double norm = sqrt(dx*dx + dy*dy + dz*dz);
+    dx /= norm; dy /= norm; dz /= norm;
+
+    // Sample photon energy and corresponding PMMA refractive index
+    double energy = sample_photon_energy();
+    double n_pmma = get_refractive_index(energy);
+
+    // Uniformly sample entrance pupil disk (radius = D/2)
+    double u1 = r->Rndm();
+    double u2 = r->Rndm();
+    double rad = kOpticsR * sqrt(u1);
+    double phi = 2.0 * M_PI * u2;
+    double x0 = rad * cos(phi);
+    double z0 = rad * sin(phi);
+
+    // 1. Refract into lens at y=0 (normal = (0, 1, 0))
+    double cos_i = -dy; // since normal is (0, 1, 0)
+    double n_ratio1 = 1.0 / n_pmma;
+    double sin2_t1 = n_ratio1 * n_ratio1 * (1.0 - cos_i * cos_i);
+    if (sin2_t1 > 1.0) {
+        return std::make_tuple(nan, nan); // Total internal reflection fallback
+    }
+    double cos_t1 = sqrt(1.0 - sin2_t1);
+    double lx = n_ratio1 * dx;
+    double ly = n_ratio1 * dy + (n_ratio1 * cos_i - cos_t1);
+    double lz = n_ratio1 * dz;
+    double lnorm = sqrt(lx*lx + ly*ly + lz*lz);
+    lx /= lnorm; ly /= lnorm; lz /= lnorm;
+
+    // 2. Refract out of lens at aspheric polynomial surface y = P(rho^2)
+    double rho2 = x0*x0 + z0*z0;
+    double dp_du = 0.0;
+    double rho2_pow = 1.0;
+    for (int k = 1; k < 11; k++) {
+        dp_du += k * kPolyCoeffs[k] * rho2_pow;
+        rho2_pow *= rho2;
+    }
+
+    // Surface outward normal: N = (-2*x0*dp_du, 1, -2*z0*dp_du)
+    double nx = -2.0 * dp_du * x0;
+    double ny = 1.0;
+    double nz = -2.0 * dp_du * z0;
+    double nnorm = sqrt(nx*nx + ny*ny + nz*nz);
+    nx /= nnorm; ny /= nnorm; nz /= nnorm;
+
+    double cos_i2 = -(lx*nx + ly*ny + lz*nz);
+    if (cos_i2 < 0) {
+        nx = -nx; ny = -ny; nz = -nz;
+        cos_i2 = -cos_i2;
+    }
+    double n_ratio2 = n_pmma;
+    double sin2_t2 = n_ratio2 * n_ratio2 * (1.0 - cos_i2 * cos_i2);
+    if (sin2_t2 > 1.0) {
+        return std::make_tuple(nan, nan); // Total internal reflection fallback
+    }
+    double cos_t2 = sqrt(1.0 - sin2_t2);
+    double ox = n_ratio2 * lx + (n_ratio2 * cos_i2 - cos_t2) * nx;
+    double oy = n_ratio2 * ly + (n_ratio2 * cos_i2 - cos_t2) * ny;
+    double oz = n_ratio2 * lz + (n_ratio2 * cos_i2 - cos_t2) * nz;
+    double onorm = sqrt(ox*ox + oy*oy + oz*oz);
+    ox /= onorm; oy /= onorm; oz /= onorm;
+
+    // Surface micro-roughness scattering (Gaussian angular deviation)
+    if (kSigmaScattering > 0.0) {
+        double theta_scat = kSigmaScattering * sqrt(-2.0 * log(r->Rndm() + 1e-12));
+        double phi_scat = 2.0 * M_PI * r->Rndm();
+
+        // Scattered direction in a frame whose y axis is the outgoing ray
+        double sin_th = sin(theta_scat);
+        double wx = sin_th * cos(phi_scat), wy = cos(theta_scat), wz = sin_th * sin(phi_scat);
+
+        // Rotate that frame's y axis onto (ox, oy, oz)
+        double st = sqrt(ox*ox + oz*oz);
+        if (st > 1e-12) {
+            double cp = ox / st, sp = oz / st;
+            double wr =  wx*cp + wz*sp;
+            double wt = -wx*sp + wz*cp;
+            double nx = wy*ox + wr*oy*cp - wt*sp;
+            double ny = wy*oy - wr*st;
+            double nz = wy*oz + wr*oy*sp + wt*cp;
+            ox = nx; oy = ny; oz = nz;
+        } else {                       // ray exactly along -y
+            ox = wx; oy = -wy; oz = wz;
+        }
+    }
+
+    // 3. Propagate to focal plane at y = -F
+    if (oy >= 0.0) {
+        return std::make_tuple(nan, nan); // Propagating away from focal plane
+    }
+    double s = -kOpticsF / oy;
+    double x_fp = x0 + s * ox;
+    double z_fp = z0 + s * oz;
+
+    // Convert focal plane displacement (cm) to angular degrees on sky
+    double out_x_deg = TMath::RadToDeg() * (x_fp / kOpticsF);
+    double out_y_deg = TMath::RadToDeg() * (z_fp / kOpticsF);
+
+    return std::make_tuple(out_x_deg, out_y_deg);
+}
+
 /*
  * Randomly spread arrival direction of photons to simulate PANOSETI PSF
 */
-std::tuple<double,double> spread(double positionX, double positionY){
+std::tuple<double,double> spread_gaussian(double positionX, double positionY){
 
     // axial separation
     double R = TMath::Hypot(positionX,positionY);
@@ -114,9 +355,17 @@ std::tuple<double,double> spread(double positionX, double positionY){
     double sigma = fwhm/2.355;
 
     return std::make_tuple(r->Gaus(positionX, sigma),r->Gaus(positionY, sigma));
-
-
 }
+
+// Retain spread() as an alias calling sample_and_trace_photon() or spread_gaussian()
+std::tuple<double, double> spread(double positionX, double positionY) {
+    if (kUseRayTrace) {
+        return sample_and_trace_photon(positionX, positionY);
+    } else {
+        return spread_gaussian(positionX, positionY);
+    }   
+}
+
 /*
 void testspread(double x, double y){
     // histogram
@@ -138,7 +387,7 @@ void testspread(double x, double y){
     test->Draw("COLZ");
     test->ResetStats();
 }
-*/
+*/ 
 
 /*
 * Add noise consistent with typical pedvar to each pixel
@@ -1373,10 +1622,11 @@ TH2D* telEvent(int telNumber, int eventNumber){
         double imgX = TMath::RadToDeg()*tTos_vecTC.X();
         double imgY = TMath::RadToDeg()*tTos_vecTC.Y();
 
-        // scatter by PSF
+        // Apply PSF: raytraced Fresnel optical model or Gaussian approximation
         std::tuple<double,double> coords = spread(imgX,imgY);
         double x = std::get<0>(coords);
         double y = std::get<1>(coords);
+        if (std::isnan(x) || std::isnan(y)) continue;
 
         // sign flip telescope coordinates to camera coordinates: y-> -1*y
             // via GrOptics README:
@@ -1659,10 +1909,11 @@ void showClean(int telNumber, int eventNumber){
         double imgX = TMath::RadToDeg()*tTos_vecTC.X();
         double imgY = TMath::RadToDeg()*tTos_vecTC.Y();
 
-        // scatter by PSF
+        // Apply PSF: raytraced Fresnel optical model or Gaussian approximation
         std::tuple<double,double> coords = spread(imgX,imgY);
         double x = std::get<0>(coords);
         double y = std::get<1>(coords);
+        if (std::isnan(x) || std::isnan(y)) continue;
 
         image->Fill(-1*x,y,petoadu); 
     }
@@ -1782,10 +2033,11 @@ void timegrad(int eventNumber){
 
         // fill image
         for(int i=0; i<NCp; i++){
-            // scatter by PSF
+            // Apply PSF: raytraced Fresnel optical model or Gaussian approximation
             std::tuple<double,double> coords = spread(imgX[i],imgY[i]);
             double x = std::get<0>(coords);
             double y = std::get<1>(coords);
+            if (std::isnan(x) || std::isnan(y)) continue;
 
             // sign flip ground->sky
             tmp->Fill(x,-1*y,petoadu);
