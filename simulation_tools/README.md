@@ -3,7 +3,7 @@
 CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI sim_telarray config](https://github.com/orelgueta/PANOSETI_sim_telarray_config). `run_simulation.py` runs a production as SLURM job arrays (one task per CORSIKA run), or one run at a time locally. Everything is set in one YAML config, see [`configs/simulation.yaml`](../configs/simulation.yaml).
 
 * `run_simulation.py` - the pipeline
-* `corsika_template.inp` - the CORSIKA input card every run's card is made from
+* [`configs/corsika_template.inp`](../configs/corsika_template.inp) - the CORSIKA input card every run's card is made from
 
 ## Requirements
 * [CORSIKA 7](https://www.iap.kit.edu/corsika/index.php), verified for 78010, compiled with IACT, CHERENKOV, VOLUMEDET, VIEWCONE, SLANT, ATMEXT, QGSJET-III and UrQMD
@@ -137,7 +137,8 @@ Lists are joined with spaces; keywords missing from the template are added befor
 ### sim_telarray
 | key | |
 |---|---|
-| `telescope_theta`, `telescope_phi` | telescope pointing [deg], in sim_telarray's convention (zenith angle; azimuth from north, clockwise). Check the `Array viewing direction` line in the sim_telarray log |
+| `telescope_theta`, `telescope_phi` | telescope pointing [deg], in sim_telarray's convention (zenith angle; azimuth from north, clockwise). `null` = `wobble_offset` from the CORSIKA primaries' direction (the `VIEWCONE` axis): zenith = middle of `THETAP`, azimuth = 180 + `ARRANG` − middle of `PHIP`, read from each CORSIKA file's header (from the card in pipe mode). An explicit value overrides it, with a warning if the pointing is then not `wobble_offset` from that direction. Check the `Array viewing direction` line in the sim_telarray log |
+| `wobble_offset`, `wobble_direction` | point the telescopes `wobble_offset` [deg] from the primaries' direction, towards `wobble_direction` [deg] from north, clockwise (0 = N, 90 = E, 180 = S, 270 = W). The wobble moves the telescopes, so a N wobble puts the source south of the camera center. North and east are the ground's, carried from the zenith to the primaries' direction along the great circle between them: exact at the zenith, and on the meridian N/S are towards the zenith or horizon. `0.0` = on the primaries' direction |
 | `tag` | output subdirectory under `simtel/` and `logs/` |
 | `defines` | preprocessor macros (`-D`), e.g. `PANOSETI_TRIGGER_PIXELS: 1` |
 | `parameters` | config parameter overrides (`-C`), e.g. `discriminator_threshold: 5.5`; lists are joined with commas |
@@ -154,19 +155,18 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `setup` | shell lines run before the pipeline in each job, e.g. `module load ...` or activating a conda environment |
 
 ## CORSIKA template
-`corsika_template.inp` is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, 10 gammas per run (`NSHOW 10`) from a 3-100 TeV power law with index -2.7 (`ERANGE 3E3 1E5`, `ESLOPE -2.7`), each used 5 times (`CSCAT 5 500.E2 0.`), and primary directions from a viewing cone around 20 deg zenith angle (`THETAP 20. 20.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
+[`configs/corsika_template.inp`](../configs/corsika_template.inp) is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, 10 gammas per run (`NSHOW 10`) from a 3-100 TeV power law with index -2.7 (`ERANGE 3E3 1E5`, `ESLOPE -2.7`), each used 5 times (`CSCAT 5 500.E2 0.`), and primary directions from a viewing cone around 20 deg zenith angle (`THETAP 20. 20.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
 
 ### Array layout
 ![PANOSETI array layout](array_layout.png)
 
 The template's `TELESCOPE` lines (`x y z r` in cm) place the 7 telescopes in CORSIKA's array frame, x north and y west, with `ARRANG` the angle from magnetic north to that x axis. The plot shows them on the ground, east right and north up; labels are each telescope's (x, y) in m. The shaded circle is where `CSCAT 5 500.E2 0.` throws shower cores: uniformly within 500 m of the array origin (+) (a `0.` second value makes the area a circle of the first value's radius).
 
-`VIEWCONE inner outer` draws each primary's direction uniformly in solid angle between `inner` and `outer` degrees of the cone's axis (`THETAP`/`PHIP`, which must then have equal low and high values). Point the telescopes along the axis (`sim_telarray.telescope_theta`/`telescope_phi`), so the cone angles are off-axis angles. Set it per production in the config's `corsika` section:
+`VIEWCONE inner outer` draws each primary's direction uniformly in solid angle between `inner` and `outer` degrees of the cone's axis (`THETAP`/`PHIP`, which must then have equal low and high values). The telescopes point along the axis, offset by `sim_telarray.wobble_offset`, when `sim_telarray.telescope_theta`/`telescope_phi` are `null`, so without a wobble the cone angles are off-axis angles. Set it per production in the config's `corsika` section:
 
 | sample | `VIEWCONE` |
 |---|---|
-| point-source gammas, at the 0.5 deg wobble offset (a ring at random azimuth) | `[0.5, 0.5]` |
-| on-axis gammas | `[0., 0.]` (the template's default) |
+| point-source gammas, on-axis or at a wobble offset (`sim_telarray.wobble_offset`/`wobble_direction`) | `[0., 0.]` (the template's default) |
 | diffuse gammas, protons | `[0., 10.]` |
 
 The 10 deg diffuse cone covers the ~10 deg field of view (corners ~7 deg off-axis) with a few degrees' margin for showers from outside it whose images still reach the camera.

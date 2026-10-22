@@ -12,9 +12,9 @@ paths:
   # PANOSETI sim_telarray config. Its directory is added to sim_telarray's include path, so
   # the .dat files next to it are found.
   sim_telarray_config: ~/research/PANOSETI/PANOSETI_sim_telarray_config/panoseti_simtelarray_example.cfg
-  # CORSIKA input card template, see simulation_tools/corsika_template.inp. RUNNR, SEED and
+  # CORSIKA input card template, see configs/corsika_template.inp. RUNNR, SEED and
   # TELFIL are set per run; other keywords can be overridden in corsika: below.
-  corsika_template: simulation_tools/corsika_template.inp
+  corsika_template: configs/corsika_template.inp
   # Where everything is written (input cards, CORSIKA files, sim_telarray files, logs,
   # SLURM scripts), see the layout in simulation_tools/run_simulation.py.
   output_dir: sim_output/gamma_10TeV
@@ -45,9 +45,16 @@ corsika: {}
 
 sim_telarray:
   # Telescope pointing [deg], in sim_telarray's convention (azimuth from north, clockwise).
-  # Check the "Array viewing direction" line in the sim_telarray log.
-  telescope_theta: 0.0
-  telescope_phi: 0.0
+  # null = wobble_offset from the CORSIKA primaries' direction (THETAP, PHIP and ARRANG; the
+  # VIEWCONE axis). Check the "Array viewing direction" line in the sim_telarray log.
+  telescope_theta: null
+  telescope_phi: null
+  # Wobble: point the telescopes wobble_offset [deg] from the primaries' direction, towards
+  # wobble_direction [deg] from north, clockwise (0 = N, 90 = E, 180 = S, 270 = W): the wobble
+  # moves the telescopes, so a N wobble puts the source south of the camera center. Exact at the
+  # zenith. Use VIEWCONE: [0., 0.] for a point source.
+  wobble_offset: 0.0
+  wobble_direction: 0.0
   # Output subdirectory under simtel/ and logs/, so reruns with other settings don't
   # overwrite earlier ones.
   tag: v1

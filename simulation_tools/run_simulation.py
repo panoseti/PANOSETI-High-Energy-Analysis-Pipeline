@@ -61,7 +61,8 @@ SECTIONS = {
               "corsika_template", "output_dir", "corsika_input", "work_dir"},
     "production": {"name", "mode", "first_run", "n_runs", "seed"},
     "corsika": None, # keyword -> value
-    "sim_telarray": {"telescope_theta", "telescope_phi", "tag", "defines", "parameters"},
+    "sim_telarray": {"telescope_theta", "telescope_phi", "wobble_offset", "wobble_direction", "tag", "defines",
+                     "parameters"},
     "slurm": {"partition", "account", "time", "mem", "max_concurrent", "mail_user", "mail_type", "python",
               "extra_options", "setup"},
 }
@@ -256,21 +257,89 @@ def _simtel_value(value):
     return str(value)
 
 
-def _n_telescopes(config, corsika_file):
-    """Number of telescopes in a CORSIKA file's header."""
+def _corsika_header(config, corsika_file):
+    """
+    A CORSIKA file's number of telescopes and primary direction, from extract_corsika_tel.
+
+    Returns:
+        (n_telescopes, theta, phi): the direction is the middle of the THETAP/PHIP ranges (the
+        VIEWCONE axis) in sim_telarray's convention, as in _card_direction()
+    """
     command = [str(config["paths"]["sim_telarray_dir"] / "bin" / "extract_corsika_tel"),
                "--header-only", "--only-telescopes", "1-999", str(corsika_file)]
     header = subprocess.run(command, capture_output=True, text=True).stdout
-    match = re.search(r"^CORSIKA_TELESCOPES=(\d+)$", header, re.MULTILINE)
-    if match is None:
-        raise RuntimeError(f"could not read the number of telescopes from {corsika_file}")
-    return int(match.group(1))
+    values = dict(re.findall(r"^(CORSIKA_TELESCOPES|CORSIKA_THETA|CORSIKA_PHI)=(\S+)$", header, re.MULTILINE))
+    if len(values) < 3:
+        raise RuntimeError(f"could not read the number of telescopes and primary direction from {corsika_file}")
+    return int(values["CORSIKA_TELESCOPES"]), float(values["CORSIKA_THETA"]), float(values["CORSIKA_PHI"])
 
 
-def simtel_command(config, input_file, name, output_file, hdata_file, n_telescopes):
+def _card_direction(card_text):
+    """
+    The primary direction of a CORSIKA card in sim_telarray's convention, computed like
+    extract_corsika_tel: zenith = middle of THETAP, azimuth (from north, clockwise, where the
+    primaries come from) = 180 + ARRANG - middle of PHIP (CORSIKA's direction of motion,
+    counter-clockwise from magnetic north).
+    """
+    keywords = {line.split()[0].upper(): line.split()[1:] for line in card_text.splitlines() if line.strip()}
+    theta = sum(float(v) for v in keywords.get("THETAP", ["0", "0"])[:2]) / 2
+    phi_low, phi_high = (float(v) for v in keywords.get("PHIP", ["0", "0"])[:2])
+    if phi_high < phi_low:
+        phi_high += 360.
+    phi = (180. + float(keywords.get("ARRANG", ["0"])[0]) - (phi_low + phi_high) / 2) % 360.
+    return theta, phi
+
+
+def _separation(theta1, phi1, theta2, phi2):
+    """Angle [deg] between two directions (zenith angle, azimuth) [deg]."""
+    theta1, phi1, theta2, phi2 = np.radians([theta1, phi1, theta2, phi2])
+    cos_separation = np.cos(theta1) * np.cos(theta2) + np.sin(theta1) * np.sin(theta2) * np.cos(phi1 - phi2)
+    return np.degrees(np.arccos(np.clip(cos_separation, -1., 1.)))
+
+
+def _wobble(theta, phi, offset, direction):
+    """
+    The direction (zenith angle, azimuth) [deg] offset [deg] from (theta, phi) towards direction
+    [deg] (from north, clockwise: 0 = N, 90 = E, 180 = S). North and east are the ground's,
+    carried from the zenith to (theta, phi) by the rotation between them, so exact at the zenith;
+    on the meridian, north and south are towards the zenith or horizon.
+    """
+    if offset == 0.:
+        return theta, phi
+    theta, phi, offset, direction = np.radians([theta, phi, offset, direction])
+    source = np.array([np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)]) # x north, y east, z up
+    axis = np.array([-np.sin(phi), np.cos(phi), 0.]) # zenith -> source is a rotation by theta about it
+    def rotate(v):
+        return v * np.cos(theta) + np.cross(axis, v) * np.sin(theta) + axis * (axis @ v) * (1. - np.cos(theta))
+    towards = np.cos(direction) * rotate(np.array([1., 0., 0.])) + np.sin(direction) * rotate(np.array([0., 1., 0.]))
+    wobbled = source * np.cos(offset) + towards * np.sin(offset)
+    return (float(np.degrees(np.arccos(np.clip(wobbled[2], -1., 1.)))),
+            float(np.degrees(np.arctan2(wobbled[1], wobbled[0]))) % 360.)
+
+
+def _pointing(config, theta, phi):
+    """
+    Telescope pointing: sim_telarray.wobble_offset from the primaries' direction (theta, phi)
+    towards wobble_direction (see _wobble()), with telescope_theta/phi overriding where not null.
+    Warns if the pointing is not wobble_offset from the primaries' direction.
+    """
+    sim_telarray = config["sim_telarray"]
+    wobble = _wobble(theta, phi, sim_telarray["wobble_offset"], sim_telarray["wobble_direction"])
+    pointing = (wobble[0] if sim_telarray["telescope_theta"] is None else sim_telarray["telescope_theta"],
+                wobble[1] if sim_telarray["telescope_phi"] is None else sim_telarray["telescope_phi"])
+    offset = _separation(*pointing, theta, phi)
+    if abs(offset - sim_telarray["wobble_offset"]) > 0.01:
+        _say(f"WARNING: telescopes point at theta={pointing[0]:g}, phi={pointing[1]:g} deg, {offset:.2f} deg from the "
+             f"CORSIKA primaries' direction theta={theta:g}, phi={phi:g} deg, not wobble_offset "
+             f"{sim_telarray['wobble_offset']:g} deg")
+    return pointing
+
+
+def simtel_command(config, input_file, name, output_file, hdata_file, n_telescopes, pointing):
     """
     sim_telarray command line for one CORSIKA input (a file, or '-' for standard input) with
-    n_telescopes telescopes (sim_telarray otherwise reads only the first 4).
+    n_telescopes telescopes (sim_telarray otherwise reads only the first 4), pointing at
+    pointing = (theta, phi) [deg], see _pointing().
     """
     paths = config["paths"]
     sim_telarray = config["sim_telarray"]
@@ -279,8 +348,8 @@ def simtel_command(config, input_file, name, output_file, hdata_file, n_telescop
     command += ["-c", str(paths["sim_telarray_config"])]
     parameters = {
         "maximum_telescopes": n_telescopes,
-        "telescope_theta": sim_telarray["telescope_theta"],
-        "telescope_phi": sim_telarray["telescope_phi"],
+        "telescope_theta": pointing[0],
+        "telescope_phi": pointing[1],
         "random_seed": _simtel_seed(config, name),
         **sim_telarray["parameters"],
         "output_file": output_file,
@@ -410,10 +479,12 @@ def run_simtel(config, corsika_file, overwrite=False, verbose=False):
         _say(f"{outputs['events']} exists, skipping sim_telarray")
         return outputs
     work = _work_dir(config, name)
-    n_telescopes = _n_telescopes(config, corsika_file)
+    n_telescopes, theta, phi = _corsika_header(config, corsika_file)
+    pointing = _pointing(config, theta, phi)
     command = simtel_command(config, corsika_file, name, work / outputs["events"].name, work / outputs["histograms"].name,
-                             n_telescopes)
-    _say(f"sim_telarray: {corsika_file} ({n_telescopes} telescopes, tag {config['sim_telarray']['tag']})")
+                             n_telescopes, pointing)
+    _say(f"sim_telarray: {corsika_file} ({n_telescopes} telescopes, pointing theta={pointing[0]:g}, "
+         f"phi={pointing[1]:g} deg, tag {config['sim_telarray']['tag']})")
     _say(f"    work directory {work}")
     start = time.time()
     returncode = _run(command, work / outputs["log"].name, work, verbose=verbose)
@@ -457,8 +528,9 @@ def run_corsika(config, run, overwrite=False, verbose=False):
         # CORSIKA starts this (TELFIL |./simtel_pipe.sh) and writes its output to its stdin.
         # TELFIL can't hold shell syntax, hence the script.
         n_telescopes = sum(line.split()[0].upper() == "TELESCOPE" for line in card.read_text().splitlines() if line.strip())
+        pointing = _pointing(config, *_card_direction(card.read_text()))
         command = simtel_command(config, "-", name, work / outputs["events"].name, work / outputs["histograms"].name,
-                                 n_telescopes)
+                                 n_telescopes, pointing)
         script = work / PIPE_SCRIPT
         script.write_text(f"#!/bin/bash\nexec {shlex.join(command)} > {shlex.quote(str(work / outputs['log'].name))} 2>&1\n")
         script.chmod(0o755)
