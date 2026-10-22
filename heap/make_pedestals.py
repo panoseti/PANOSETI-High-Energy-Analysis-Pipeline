@@ -5,6 +5,7 @@ Functions to calculate and visualise pedestals and pedestal variances.
 import numpy as np
 import pandas as pd
 from heap import pre_cleaning as pc
+from heap.read_pff import read_pff, read_pff_hk
 import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
@@ -82,7 +83,7 @@ def select_time_interval(filename, start_time, end_time):
     :param end_time: End of time interval in UTC in format: YYYY-MM-DDTHH:MM:SSZ or Timestamp
     '''
 
-    rawdata, metadata = pc.read_pff(filename)
+    rawdata, metadata = read_pff(filename)
     data, timestamps = pc.cut_pkt_loss(rawdata, metadata)
 
     timestamps_df = pd.to_datetime(timestamps, unit="s", utc=True)
@@ -451,9 +452,9 @@ def plot_trigger_rate(filename, hk_filename, bin_width=1.0, start_time=None, end
     :param end_time: End of time interval in UTC in format: YYYY-MM-DDTHH:MM:SSZ (default = None)
     '''
 
-    rawdata, metadata = pc.read_pff(filename)
+    rawdata, metadata = read_pff(filename)
     data, timestamps = pc.cut_pkt_loss(rawdata, metadata)
-    hk = pc.read_pff_hk(hk_filename)
+    hk = read_pff_hk(hk_filename)
     _, _, merflip_start, merflip_end = pc.cut_meridian_flip(data, timestamps, hk)
     merflip_start = pd.to_datetime(merflip_start, unit="s", utc=True)
     merflip_end = pd.to_datetime(merflip_end, unit="s", utc=True)

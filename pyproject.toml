@@ -16,6 +16,7 @@ dependencies = [
   "matplotlib",
   "pypff",
   "uproot",
+  "eventio",
   "pyyaml",
   "pandas",
   "scipy",

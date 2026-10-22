@@ -2,6 +2,7 @@ import sys, os
 project_root = os.path.abspath("..") 
 sys.path.insert(0, project_root)
 from heap import pre_cleaning
+from heap.read_pff import read_pff
 import numpy as np
 from itertools import combinations
 import matplotlib.pyplot as plt
@@ -31,7 +32,7 @@ def load_telescope_tv(module_str, base_dir, rate_cut, plotting=False):
         if f.stat().st_size == 0: # pypff can't mmap an empty file
             print("     empty file, skipping")
             continue
-        data, metadata = pre_cleaning.read_pff(str(f))
+        data, metadata = read_pff(str(f))
         data, timestamps = pre_cleaning.cut_pkt_loss_old(data, metadata)
 
         if len(timestamps) == 0: # spike_cut can't bin an empty file

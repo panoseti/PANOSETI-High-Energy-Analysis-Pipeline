@@ -1,6 +1,6 @@
-"""read_pcap
+"""read_root
 
-Functions for reading pcap data into numpy arrays
+Functions for reading .root files (converted from .pcap data) into numpy arrays
 """
 
 import numpy as np

@@ -141,7 +141,7 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `wobble_offset`, `wobble_direction` | point the telescopes `wobble_offset` [deg] from the primaries' direction, towards `wobble_direction` [deg] from north, clockwise (0 = N, 90 = E, 180 = S, 270 = W). The wobble moves the telescopes, so a N wobble puts the source south of the camera center. North and east are the ground's, carried from the zenith to the primaries' direction along the great circle between them: exact at the zenith, and on the meridian N/S are towards the zenith or horizon. `0.0` = on the primaries' direction |
 | `tag` | output subdirectory under `simtel/` and `logs/` |
 | `defines` | preprocessor macros (`-D`), e.g. `PANOSETI_TRIGGER_PIXELS: 1` |
-| `parameters` | config parameter overrides (`-C`), e.g. `discriminator_threshold: 5.5`; lists are joined with commas |
+| `parameters` | config parameter overrides (`-C`), e.g. `discriminator_threshold: 5.5`; lists are joined with commas. The default config sets `pedestal_events: 10`, the pedestal frames per run that `heap.process_simulation` needs (see Reading the outputs) |
 
 ### slurm
 | key | |
@@ -187,6 +187,29 @@ Keep `OBSLEV` matched to the PANOSETI config's `altitude` and its atmospheric tr
 <output_dir>/slurm/logs/<job>_<SLURM job id>_<task>.out    job stdout/stderr
 ```
 with `<job>` = `<stage>_<tag>_<YYYYmmdd-HHMMSS>`. Because each submission's jobs read their own config copy, editing the config or submitting again doesn't change jobs already queued.
+
+## Reading the outputs
+`heap.process_simulation.process_simulation()` runs a production through the same image processing as the pff data (`heap.process_dataset.process_image()`) and writes the same outputs, per telescope:
+```python
+import glob
+from heap.process_simulation import process_simulation
+
+files = sorted(glob.glob("sim_output/gamma_10TeV/simtel/v1/*.simtel.zst"))
+results, showers = process_simulation(files, "sim_output/gamma_10TeV/processed", "gamma_10TeV")
+```
+```
+<out_dir>/T<telescope id>/<name>/<name>.npz           cleaned_images and Hillas parameters, as process_dataset() writes them
+<out_dir>/T<telescope id>/<name>/calibrations.npz     pedestals, pedestal_variances and gain, as build_calibrations() writes them
+<out_dir>/<name>_showers.npz                          MC truth per event
+```
+* Pedestals and pedvars are calculated with `heap.make_pedestals.calculate_pedestal_and_pedvar()`, as for the data, but from sim_telarray's pedestal frames (NSB and noise only), pooled over all the runs. Their number per run is `pedestal_events` in the config's `sim_telarray: parameters` (10 by default); each telescope needs at least 100 in total, so 10+ runs. Each pedestal event adds about 0.2 s of sim_telarray time and 5 KB (all 7 telescopes) to a run.
+* The gain is flat (1): every simulated pixel has the same nominal gain.
+* The data-only steps (packet loss and rate spike cuts, meridian flips, mount logs) are left out.
+* Telescopes are sim_telarray's ids, 1 ... n in the order of the CORSIKA `TELESCOPE` lines.
+* The Hillas parameters have `Run` and `EventID` in place of the data's `Timestamp`: images of the same event share them, and they are the key into the showers (energy, direction, core, Xmax, ...). Match on them, not on timestamps: a simulated event's times are when sim_telarray processed it.
+
+`heap.read_simtel` is the reader underneath: `read_events()` returns the same (N, 32, 32) arrays as the pff and root readers, indexed [row, col] with columns along the camera's x, with sim_telarray's artificial `fadc_pedestal` offset removed and NSB and noise left in. Each telescope's pedestal frames are kept separate from its shower images (`pedestal_frames`), and `read_events(files, true_images=True)` also gives each image's true photoelectrons per pixel.
+* `read_run_header()` gives the pointing, telescope positions and what was thrown (`n_showers x n_use` events, energy range, spectral index, core range, viewcone), e.g. for effective areas.
 
 ## Failures and reruns
 Each run works in its own scratch directory and moves its outputs to `output_dir` only when CORSIKA reports `END OF RUN` and sim_telarray reports it finished. A failed run raises an error naming its log and keeps its scratch directory for debugging. Runs whose outputs exist are skipped, so submitting the same config again reruns only the failed ones.

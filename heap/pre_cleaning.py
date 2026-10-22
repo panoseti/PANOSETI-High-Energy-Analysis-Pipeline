@@ -1,14 +1,16 @@
 '''
 These functions are supposed to to be the first processing scripts we apply on the data.
-They include reading in the pff files and filtering out frames with package loss, spikes in the rates and frames during the meridian flip.
+They filter out frames with package loss, spikes in the rates and frames during the meridian flip.
 For these processing steps only metadata and housekeeping data is used, no need to look at the events for it.
+The pff files are read in with heap.read_pff.
 '''
 
 
 import numpy as np
-import pypff
 import pandas as pd
 import matplotlib.pyplot as plt
+
+from heap.read_pff import read_pff, read_pff_hk
 
 def wr_to_unix(pkt_nsec, tv_sec, tv_usec, ignore_clock_desync=False):
     """
@@ -69,13 +71,6 @@ def wr_to_unix(pkt_nsec, tv_sec, tv_usec, ignore_clock_desync=False):
     return out_ns.astype("datetime64[ns]")
     #return out_ns
 
-
-def read_pff(filename):
-    #Reads in pff file and returns data and metadata
-    pff = pypff.io.datapff(filename)
-    data, metadata = pff.readpff(metadata=True)
-    print("Data read in, number of events: ",len(data))
-    return(data,metadata)
 
 def cut_pkt_loss(data,metadata):
     #cut out frames with package loss and return data and timestamps
@@ -174,12 +169,6 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=3,plotting=False):
     print("Rate spikes at: ",time[bad_bins])
     print("Number of spike cut out events: ",len(data)-len(data_filtered)," (",round((len(data)-len(data_filtered))/len(data)*100,2),"%)")
     return(data_filtered,timestamps_filtered)
-
-def read_pff_hk(filename="hk.pff"):
-    #Read in housekeeping pff file and return data, default called hk.pff, gonna need to adjust path
-    hkpff = pypff.io.hkpff(filename)
-    hk = hkpff.readhk()
-    return(hk)
 
 def cut_meridian_flip(data,timestamps,hk, time_after=60, plotting=False,path=None):
     '''

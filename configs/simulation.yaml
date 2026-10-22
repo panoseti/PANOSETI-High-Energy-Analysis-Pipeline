@@ -61,7 +61,10 @@ sim_telarray:
   # Preprocessor macros (-D), e.g. PANOSETI_TRIGGER_PIXELS: 1
   defines: {}
   # Config parameter overrides (-C), e.g. discriminator_threshold: 5.5
-  parameters: {}
+  parameters:
+    # Pedestal frames (NSB and noise only) per run, for heap.process_simulation's pedestals and
+    # pedvars, which need at least 100 per telescope over the production.
+    pedestal_events: 10
 
 slurm:
   partition: null
