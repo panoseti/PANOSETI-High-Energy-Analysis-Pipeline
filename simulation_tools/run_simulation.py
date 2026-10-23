@@ -12,6 +12,11 @@ Stages:
     simtel  sim_telarray only, on existing CORSIKA files (paths.corsika_input), e.g. to rerun a
             files-mode production with a changed sim_telarray config under a new tag.
 
+On its way to sim_telarray, CORSIKA's output always goes through trace_photons.py, which traces
+the photons through the lens (optical_model.py, settings in sim_telarray.optics) to the camera;
+sim_telarray then skips its own optics (bypass_optics = 1 in its config, checked in its log) and
+points at the zenith, so the real pointing is written next to the events.
+
 prepare checks the config's paths and writes each run's CORSIKA card. submit (after prepare, for
 the full stage) writes a SLURM array script for the stage, one array task per run or per CORSIKA
 file, and submits it. Each submission's jobs read their own copy of the config, so editing the
@@ -22,8 +27,10 @@ Output layout:
     <output_dir>/corsika/<name>_run<NNNNNN>.corsika.zst        CORSIKA IACT files (files mode)
     <output_dir>/simtel/<tag>/<name>_run<NNNNNN>.simtel.zst    sim_telarray events
     <output_dir>/simtel/<tag>/<name>_run<NNNNNN>.hdata.zst     sim_telarray histograms
+    <output_dir>/simtel/<tag>/<name>_run<NNNNNN>.pointing.json real pointing and optics settings
     <output_dir>/logs/<name>_run<NNNNNN>.corsika.log
     <output_dir>/logs/<tag>/<name>_run<NNNNNN>.simtel.log
+    <output_dir>/logs/<tag>/<name>_run<NNNNNN>.trace.log       trace_photons.py
     <output_dir>/slurm/<job>.sbatch, <job>.yaml (config copy), <job>.files (simtel inputs)
     <output_dir>/slurm/logs/<job>_<SLURM job id>_<task>.out
 with <job> = <stage>_<tag>_<YYYYmmdd-HHMMSS>.
@@ -41,6 +48,7 @@ Usage:
 """
 import argparse
 import glob
+import json
 import os
 import re
 import shlex
@@ -62,7 +70,7 @@ SECTIONS = {
     "production": {"name", "mode", "first_run", "n_runs", "seed"},
     "corsika": None, # keyword -> value
     "sim_telarray": {"telescope_theta", "telescope_phi", "wobble_offset", "wobble_direction", "tag", "defines",
-                     "parameters"},
+                     "parameters", "optics"},
     "slurm": {"partition", "account", "time", "mem", "max_concurrent", "mail_user", "mail_type", "python",
               "extra_options", "setup"},
 }
@@ -75,6 +83,12 @@ CORSIKA_SUFFIX = ".corsika.zst"
 PIPE_SCRIPT = "simtel_pipe.sh"
 CORSIKA_DONE = "END OF RUN"
 SIMTEL_DONE = "Sim_telarray finished"
+# sim_telarray must take the traced photons' positions as camera positions (bypass_optics = 1 in
+# its config); it says so in its log.
+SIMTEL_BYPASS = "Bypassing optics"
+TRACE_SCRIPT = Path(__file__).resolve().parent / "trace_photons.py"
+TRACE_DONE = "trace_photons done"
+OPTICS_KEYS = {"thick_lens", "focal_offset"}
 # sim_telarray log lines repeated in the pipeline's output when a run finishes.
 SIMTEL_SUMMARY = re.compile(r"^(Run\(s\) completed|Sim_telarray finished|\s*Tel\. triggered:)")
 SHOWER_DONE = re.compile(r"END OF SHOWER NO\s+(\d+)")
@@ -107,14 +121,16 @@ def load_config(path):
     Returns:
         the config's sections as nested dicts, with paths.* as Path (relative paths resolved
         against the project root), except paths.corsika_input, a glob string (default
-        <output_dir>/corsika/*.corsika.zst); paths.processed_dir None if null or missing (as in configs
-        submitted before it existed); corsika keys upper-cased; and the sim_telarray
-        defines/parameters and slurm extra_options/setup defaulting to empty
+        <output_dir>/corsika/*.corsika.zst); paths.processed_dir and sim_telarray.optics None if null
+        or missing (running sim_telarray needs optics); corsika keys upper-cased; and the sim_telarray defines/parameters and slurm
+        extra_options/setup defaulting to empty
     """
     with open(path) as f:
         config = yaml.safe_load(f)
     if isinstance(config, dict) and isinstance(config.get("paths"), dict):
         config["paths"].setdefault("processed_dir", None)
+    if isinstance(config, dict) and isinstance(config.get("sim_telarray"), dict):
+        config["sim_telarray"].setdefault("optics", None)
     _check_keys("top level", config, set(SECTIONS))
     for section, required in SECTIONS.items():
         if required is None:
@@ -151,6 +167,10 @@ def load_config(path):
     sim_telarray = config["sim_telarray"]
     sim_telarray["defines"] = sim_telarray["defines"] or {}
     sim_telarray["parameters"] = sim_telarray["parameters"] or {}
+    if sim_telarray["optics"] is not None:
+        _check_keys("sim_telarray.optics", sim_telarray["optics"], OPTICS_KEYS)
+    if "bypass_optics" in sim_telarray["parameters"]:
+        raise ValueError("sim_telarray.parameters: bypass_optics belongs in the sim_telarray config (always 1, see trace_photons.py)")
     slurm = config["slurm"]
     slurm["extra_options"] = slurm["extra_options"] or []
     slurm["setup"] = slurm["setup"] or []
@@ -188,6 +208,12 @@ def _corsika_seeds(config, run, n):
 def _simtel_seed(config, name):
     """Seeded by the output name, so a simtel-stage rerun of a run reuses its seed."""
     rng = np.random.default_rng([config["production"]["seed"], zlib.crc32(name.encode()), 1])
+    return int(rng.integers(1, 2**31 - 1))
+
+
+def _trace_seed(config, name):
+    """trace_photons.py's seed (its wavelengths), like _simtel_seed()."""
+    rng = np.random.default_rng([config["production"]["seed"], zlib.crc32(name.encode()), 2])
     return int(rng.integers(1, 2**31 - 1))
 
 
@@ -338,11 +364,27 @@ def _pointing(config, theta, phi):
     return pointing
 
 
-def simtel_command(config, input_file, name, output_file, hdata_file, n_telescopes, pointing):
+def trace_command(config, input_file, name, pointing):
     """
-    sim_telarray command line for one CORSIKA input (a file, or '-' for standard input) with
-    n_telescopes telescopes (sim_telarray otherwise reads only the first 4), pointing at
-    pointing = (theta, phi) [deg], see _pointing().
+    trace_photons.py command line: CORSIKA input (a file, or '-' for standard input) traced
+    through the optics for telescopes pointing at pointing = (theta, phi) [deg] (see _pointing()),
+    written to standard output for sim_telarray.
+    """
+    optics = config["sim_telarray"]["optics"]
+    if optics is None:
+        raise ValueError("config has no sim_telarray.optics")
+    command = [sys.executable, str(TRACE_SCRIPT), str(input_file), "-", f"--theta={pointing[0]}", f"--phi={pointing[1]}",
+               f"--focal-offset={optics['focal_offset']}", f"--seed={_trace_seed(config, name)}"]
+    if optics["thick_lens"]:
+        command.append("--thick-lens")
+    return command
+
+
+def simtel_command(config, name, output_file, hdata_file, n_telescopes):
+    """
+    sim_telarray command line for n_telescopes telescopes (sim_telarray otherwise reads only the
+    first 4), reading trace_photons.py's output from standard input. No pointing: with
+    bypass_optics sim_telarray points at the zenith whatever it's given.
     """
     paths = config["paths"]
     sim_telarray = config["sim_telarray"]
@@ -351,8 +393,6 @@ def simtel_command(config, input_file, name, output_file, hdata_file, n_telescop
     command += ["-c", str(paths["sim_telarray_config"])]
     parameters = {
         "maximum_telescopes": n_telescopes,
-        "telescope_theta": pointing[0],
-        "telescope_phi": pointing[1],
         "random_seed": _simtel_seed(config, name),
         **sim_telarray["parameters"],
         "output_file": output_file,
@@ -361,19 +401,38 @@ def simtel_command(config, input_file, name, output_file, hdata_file, n_telescop
     }
     for key, value in parameters.items():
         command += ["-C", f"{key}={_simtel_value(value)}"]
-    command.append(str(input_file))
+    command.append("-")
     return command
 
 
 def _simtel_outputs(config, name):
-    """Final (output_dir) paths of one sim_telarray run's events, histograms and log."""
+    """
+    Final (output_dir) paths of one sim_telarray run's events, histograms, pointing (the real one,
+    which the events' header doesn't have, see write_pointing()) and logs (sim_telarray's and
+    trace_photons.py's).
+    """
     output_dir = config["paths"]["output_dir"]
     tag = config["sim_telarray"]["tag"]
     return {
         "events": output_dir / "simtel" / tag / f"{name}.simtel.zst",
         "histograms": output_dir / "simtel" / tag / f"{name}.hdata.zst",
+        "pointing": output_dir / "simtel" / tag / f"{name}.pointing.json",
         "log": output_dir / "logs" / tag / f"{name}.simtel.log",
+        "trace_log": output_dir / "logs" / tag / f"{name}.trace.log",
     }
+
+
+def write_pointing(config, path, pointing):
+    """
+    The telescopes' pointing = (theta, phi) [deg] and the optics settings, as JSON: sim_telarray
+    with bypass_optics records the zenith instead (read by heap.read_simtel.read_run_header()).
+    """
+    sim_telarray = config["sim_telarray"]
+    path.write_text(json.dumps({
+        "theta": pointing[0], "phi": pointing[1], "alt": 90. - pointing[0], "az": pointing[1],
+        "wobble_offset": sim_telarray["wobble_offset"], "wobble_direction": sim_telarray["wobble_direction"],
+        "optics": sim_telarray["optics"],
+    }, indent=2) + "\n")
 
 
 def _work_dir(config, name):
@@ -423,10 +482,12 @@ def _duration(seconds):
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
 
 
-def _run(command, log_path, cwd, stdin=None, verbose=False, on_line=None):
+def _run(command, log_path, cwd, stdin=None, verbose=False, on_line=None, close_stdin=False):
     """
     Run command in cwd, writing its output (stdout and stderr) to log_path, echoed to the
-    terminal if verbose; on_line(line) is called for every output line.
+    terminal if verbose; on_line(line) is called for every output line. close_stdin: close our
+    copy of stdin (another process's output pipe) once command has it, so that process sees a
+    broken pipe if command exits early.
 
     Returns:
         exit code
@@ -436,6 +497,8 @@ def _run(command, log_path, cwd, stdin=None, verbose=False, on_line=None):
     with open(log_path, "w") as log:
         process = subprocess.Popen(command, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    cwd=cwd, text=True, errors="replace")
+        if close_stdin:
+            stdin.close()
         for line in process.stdout:
             log.write(line)
             if verbose:
@@ -445,6 +508,22 @@ def _run(command, log_path, cwd, stdin=None, verbose=False, on_line=None):
         return process.wait()
 
 
+def _run_traced(trace, command, trace_log, log_path, cwd, verbose=False):
+    """
+    trace | command in cwd: trace_photons.py (trace) feeding sim_telarray (command), with
+    trace_photons.py's messages in trace_log and sim_telarray's output handled as by _run().
+
+    Returns:
+        trace_photons.py's exit code if not 0, else sim_telarray's
+    """
+    if verbose:
+        _say(f"$ {shlex.join(trace)} 2> {trace_log.name} |")
+    with open(trace_log, "w") as messages:
+        tracer = subprocess.Popen(trace, stdout=subprocess.PIPE, stderr=messages, cwd=cwd)
+        returncode = _run(command, log_path, cwd, stdin=tracer.stdout, verbose=verbose, close_stdin=True)
+        return tracer.wait() or returncode
+
+
 def _simtel_summary(log):
     for line in log.read_text(errors="replace").splitlines():
         if SIMTEL_SUMMARY.match(line):
@@ -452,13 +531,22 @@ def _simtel_summary(log):
 
 
 def _finish_simtel(work, outputs, returncode=0):
-    """Check a sim_telarray run in work finished, then move its files to outputs."""
-    log = work / outputs["log"].name
-    finished = log.exists() and SIMTEL_DONE in log.read_text(errors="replace")
-    if returncode != 0 or not finished or not (work / outputs["events"].name).exists():
-        raise RuntimeError(f"sim_telarray failed (exit {returncode}), see {log}; work directory kept")
+    """
+    Check a trace_photons.py | sim_telarray run in work finished, with sim_telarray taking the
+    traced photons as camera positions (bypass_optics), then move its files to outputs.
+    """
+    log, trace_log = work / outputs["log"].name, work / outputs["trace_log"].name
+    traced = trace_log.exists() and TRACE_DONE in trace_log.read_text(errors="replace")
+    simtel_log = log.read_text(errors="replace") if log.exists() else ""
+    if returncode != 0 or not traced or SIMTEL_DONE not in simtel_log or not (work / outputs["events"].name).exists():
+        raise RuntimeError(f"trace_photons.py | sim_telarray failed (exit {returncode}), see {trace_log} and {log}; "
+                           "work directory kept")
+    if SIMTEL_BYPASS not in simtel_log:
+        raise RuntimeError(f"sim_telarray traced the photons through its own optics again (no {SIMTEL_BYPASS!r} in {log}): "
+                           "set bypass_optics = 1 in the sim_telarray config; work directory kept")
     _simtel_summary(log)
-    for key in ("events", "histograms", "log"):
+    print(f"    {trace_log.read_text(errors='replace').strip().splitlines()[-1]}", flush=True)
+    for key in ("events", "histograms", "pointing", "log", "trace_log"):
         _move(work / outputs[key].name, outputs[key])
 
 
@@ -481,17 +569,18 @@ def run_simtel(config, corsika_file, overwrite=False, verbose=False):
     if outputs["events"].exists() and not overwrite:
         _say(f"{outputs['events']} exists, skipping sim_telarray")
         return outputs
-    work = _work_dir(config, name)
     n_telescopes, theta, phi = _corsika_header(config, corsika_file)
     pointing = _pointing(config, theta, phi)
-    command = simtel_command(config, corsika_file, name, work / outputs["events"].name, work / outputs["histograms"].name,
-                             n_telescopes, pointing)
-    _say(f"sim_telarray: {corsika_file} ({n_telescopes} telescopes, pointing theta={pointing[0]:g}, "
+    trace = trace_command(config, corsika_file, name, pointing)
+    work = _work_dir(config, name)
+    write_pointing(config, work / outputs["pointing"].name, pointing)
+    command = simtel_command(config, name, work / outputs["events"].name, work / outputs["histograms"].name, n_telescopes)
+    _say(f"trace_photons.py | sim_telarray: {corsika_file} ({n_telescopes} telescopes, pointing theta={pointing[0]:g}, "
          f"phi={pointing[1]:g} deg, tag {config['sim_telarray']['tag']})")
     _say(f"    work directory {work}")
     start = time.time()
-    returncode = _run(command, work / outputs["log"].name, work, verbose=verbose)
-    _say(f"sim_telarray finished in {_duration(time.time() - start)} (exit {returncode})")
+    returncode = _run_traced(trace, command, work / outputs["trace_log"].name, work / outputs["log"].name, work, verbose)
+    _say(f"trace_photons.py | sim_telarray finished in {_duration(time.time() - start)} (exit {returncode})")
     _finish_simtel(work, outputs, returncode)
     _remove_work(config, work)
     _say(f"sim_telarray outputs: {outputs['events']}, {outputs['histograms']}, {outputs['log']}")
@@ -532,10 +621,13 @@ def run_corsika(config, run, overwrite=False, verbose=False):
         # TELFIL can't hold shell syntax, hence the script.
         n_telescopes = sum(line.split()[0].upper() == "TELESCOPE" for line in card.read_text().splitlines() if line.strip())
         pointing = _pointing(config, *_card_direction(card.read_text()))
-        command = simtel_command(config, "-", name, work / outputs["events"].name, work / outputs["histograms"].name,
-                                 n_telescopes, pointing)
+        write_pointing(config, work / outputs["pointing"].name, pointing)
+        trace = trace_command(config, "-", name, pointing)
+        command = simtel_command(config, name, work / outputs["events"].name, work / outputs["histograms"].name, n_telescopes)
         script = work / PIPE_SCRIPT
-        script.write_text(f"#!/bin/bash\nexec {shlex.join(command)} > {shlex.quote(str(work / outputs['log'].name))} 2>&1\n")
+        script.write_text("#!/bin/bash\nset -o pipefail\n"
+                          f"{shlex.join(trace)} 2> {shlex.quote(str(work / outputs['trace_log'].name))} | "
+                          f"{shlex.join(command)} > {shlex.quote(str(work / outputs['log'].name))} 2>&1\n")
         script.chmod(0o755)
 
     keywords = {line.split()[0].upper(): line.split()[1:] for line in card.read_text().splitlines() if line.strip()}
@@ -582,7 +674,7 @@ def prepare(config):
     print(f"wrote {production['n_runs']} CORSIKA cards to {config['paths']['output_dir'] / 'inputs'}")
 
 
-def write_sbatch(config, config_path, stage, verbose=False):
+def write_sbatch(config, config_path, stage, verbose=False, overwrite=False):
     """
     Write a SLURM array script for one stage, one array task per run (full) or per CORSIKA file
     matching paths.corsika_input (simtel), as <output_dir>/slurm/<job>.sbatch with
@@ -592,6 +684,7 @@ def write_sbatch(config, config_path, stage, verbose=False):
 
     Parameters:
         verbose: jobs echo CORSIKA's and sim_telarray's output to their SLURM logs
+        overwrite: jobs redo outputs that already exist (each replaced when its run succeeds)
 
     Returns:
         (sbatch path, number of array tasks)
@@ -609,7 +702,7 @@ def write_sbatch(config, config_path, stage, verbose=False):
     shutil.copyfile(config_path, config_copy)
     python = slurm["python"] or sys.executable
     base = [python, str(Path(__file__).resolve())]
-    flags = " --verbose" if verbose else ""
+    flags = (" --verbose" if verbose else "") + (" --overwrite" if overwrite else "")
     if stage == "full":
         n_tasks = config["production"]["n_runs"]
         task = shlex.join(base + ["run", "--config", str(config_copy)]) + ' --index "$SLURM_ARRAY_TASK_ID"' + flags
@@ -656,6 +749,7 @@ def main():
             sub.add_argument("--stage", choices=sorted(STAGES), default="full")
             sub.add_argument("--dry-run", action="store_true", help="write the sbatch script but don't submit it")
             sub.add_argument("--verbose", action="store_true", help="jobs echo CORSIKA's and sim_telarray's output to their SLURM logs")
+            sub.add_argument("--overwrite", action="store_true", help="jobs redo outputs that already exist")
         if command in {"run", "simtel"}:
             which = sub.add_mutually_exclusive_group(required=True)
             if command == "run":
@@ -677,7 +771,7 @@ def main():
             prepare(config)
         else:
             check_paths(config)
-        path, n_tasks = write_sbatch(config, args.config, args.stage, args.verbose)
+        path, n_tasks = write_sbatch(config, args.config, args.stage, args.verbose, args.overwrite)
         print(f"wrote {path} ({n_tasks} array tasks)")
         if not args.dry_run:
             subprocess.run(["sbatch", str(path)], check=True)

@@ -3,6 +3,8 @@
 CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI sim_telarray config](https://github.com/orelgueta/PANOSETI_sim_telarray_config). `run_simulation.py` runs a production as SLURM job arrays (one task per CORSIKA run), or one run at a time locally. Everything is set in one YAML config, see [`configs/simulation.yaml`](../configs/simulation.yaml).
 
 * `run_simulation.py` - the pipeline
+* `trace_photons.py` - traces CORSIKA's photons through the lens to the camera on their way to sim_telarray, see Optics
+* `optical_model.py`, `resources/optical_model_data_pack.json` - the PANOSETI optical model it uses
 * `process_sims.ipynb` - processes a production into cleaned images and Hillas parameters, with diagnostics (the simulated `analysis_tools/process_pff.ipynb`)
 * `explore_sims.ipynb` - cuts, reconstruction and MC truth of a processed production (the simulated `analysis_tools/explore_events.ipynb`)
 * [`configs/corsika_template.inp`](../configs/corsika_template.inp) - the CORSIKA input card every run's card is made from
@@ -10,9 +12,9 @@ CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI s
 ## Requirements
 * [CORSIKA 7](https://www.iap.kit.edu/corsika/index.php), verified for 78010, compiled with IACT, CHERENKOV, VOLUMEDET, VIEWCONE, SLANT, ATMEXT, QGSJET-III and UrQMD
 * [sim_telarray](https://www.mpi-hd.mpg.de/hfm/~bernlohr/sim_telarray/), verified for release 2025.51.0
-* [PANOSETI_sim_telarray_config](https://github.com/orelgueta/PANOSETI_sim_telarray_config)
+* [PANOSETI_sim_telarray_config](https://github.com/orelgueta/PANOSETI_sim_telarray_config), with `bypass_optics = 1` (see Optics)
 * `zstd` on the `PATH`: CORSIKA and sim_telarray write their `.zst` files through it
-* Python with `numpy` and `pyyaml` (installing `heap` brings both)
+* Python with `numpy`, `scipy`, `zstandard` and `pyyaml` (installing `heap` brings them)
 
 ## Quick start
 Copy the config and set the paths to your CORSIKA, sim_telarray and PANOSETI config installs:
@@ -61,6 +63,7 @@ Writes a SLURM array script for a stage and submits it (the `full` stage runs `p
 | `--stage full` or `--stage simtel` | which stage to submit, see Stages (default `full`) |
 | `--dry-run` | write the sbatch script but don't submit it |
 | `--verbose` | passed on to the jobs, so their SLURM logs include CORSIKA's and sim_telarray's output |
+| `--overwrite` | passed on to the jobs, so they redo outputs that already exist (each run's are replaced when it succeeds), e.g. to rerun the `simtel` stage under the same `tag` |
 
 ### `run`
 The full stage for one CORSIKA run: CORSIKA, then sim_telarray. Give exactly one of `--run` or `--index`:
@@ -114,14 +117,14 @@ Paths are resolved relative to the project root if not absolute; `~` and `$VARS`
 | `output_dir` | where everything is written, see Outputs |
 | `corsika_input` | CORSIKA files for the `simtel` stage, as a glob (`null` = `<output_dir>/corsika/*.corsika.zst`) |
 | `work_dir` | scratch space for each run while it runs (`null` = `$TMPDIR` if set, usually node-local on SLURM, otherwise `<output_dir>/work`). Each run's directory in it is deleted when the run succeeds, and the work directory too once it's empty (except `$TMPDIR`) |
-| `processed_dir` | where `process_sims.ipynb` writes the processed production, as `<processed_dir>/<name>/<tag>/`. Keep it out of `output_dir`, which may be shared. No default: the notebooks raise while it's `null` (or missing, as in configs submitted before it existed) |
+| `processed_dir` | where `process_sims.ipynb` writes the processed production, as `<processed_dir>/<name>/<tag>/`. Keep it out of `output_dir`, which may be shared. No default: the notebooks raise while it's `null` or missing |
 
 ### production
 | key | |
 |---|---|
 | `name` | prefix of every file name, `<name>_run<NNNNNN>` (letters, digits and `_.+-` only) |
 | `mode` | which data levels are kept: `files` (CORSIKA and sim_telarray) or `pipe` (sim_telarray only), see Data levels |
-| `first_run`, `n_runs` | number of runs, `n_runs`, and the CORSIKA run numbers they get, `first_run` ... `first_run + n_runs - 1` (at most 999999). Showers per run are `NSHOW` in the `corsika` section, see Stages |
+| `first_run`, `n_runs` | number of runs, `n_runs`, and the CORSIKA run numbers they get, `first_run` ... `first_run + n_runs - 1` (at most 999999). Showers per run are `NSHOW` in the `corsika` section, see Stages. Many clusters cap SLURM job arrays at about 1000 tasks (`MaxArraySize`), so split bigger productions into several configs with different `first_run` |
 | `seed` | base seed; each run's CORSIKA and sim_telarray seeds are derived from it and the run number, so a production can be regenerated exactly |
 
 ### corsika
@@ -140,11 +143,12 @@ Lists are joined with spaces; keywords missing from the template are added befor
 ### sim_telarray
 | key | |
 |---|---|
-| `telescope_theta`, `telescope_phi` | telescope pointing [deg], in sim_telarray's convention (zenith angle; azimuth from north, clockwise). `null` = `wobble_offset` from the CORSIKA primaries' direction (the `VIEWCONE` axis): zenith = middle of `THETAP`, azimuth = 180 + `ARRANG` − middle of `PHIP`, read from each CORSIKA file's header (from the card in pipe mode). An explicit value overrides it, with a warning if the pointing is then not `wobble_offset` from that direction. Check the `Array viewing direction` line in the sim_telarray log |
+| `telescope_theta`, `telescope_phi` | telescope pointing [deg], in sim_telarray's convention (zenith angle; azimuth from north, clockwise). `null` = `wobble_offset` from the CORSIKA primaries' direction (the `VIEWCONE` axis): zenith = middle of `THETAP`, azimuth = 180 + `ARRANG` − middle of `PHIP`, read from each CORSIKA file's header (from the card in pipe mode). An explicit value overrides it, with a warning if the pointing is then not `wobble_offset` from that direction. It goes to `trace_photons.py` and `<name>.pointing.json`, not to sim_telarray, whose log says the zenith (see Optics) |
 | `wobble_offset`, `wobble_direction` | point the telescopes `wobble_offset` [deg] from the primaries' direction, towards `wobble_direction` [deg] from north, clockwise (0 = N, 90 = E, 180 = S, 270 = W). The wobble moves the telescopes, so a N wobble puts the source south of the camera center. North and east are the ground's, carried from the zenith to the primaries' direction along the great circle between them: exact at the zenith, and on the meridian N/S are towards the zenith or horizon. `0.0` = on the primaries' direction |
 | `tag` | output subdirectory under `simtel/` and `logs/` |
 | `defines` | preprocessor macros (`-D`), e.g. `PANOSETI_TRIGGER_PIXELS: 1` |
-| `parameters` | config parameter overrides (`-C`), e.g. `discriminator_threshold: 5.5`; lists are joined with commas. The default config sets `pedestal_events: 10`, the pedestal frames per run that `heap.process_simulation` needs (see Reading the outputs) |
+| `parameters` | config parameter overrides (`-C`), e.g. `discriminator_threshold: 5.5`; lists are joined with commas. The default config sets `pedestal_events: 10`, the pedestal frames per run that `heap.process_simulation` needs (see Reading the outputs). Not `bypass_optics`, which belongs in the PANOSETI config |
+| `optics` | the lens, traced by `trace_photons.py` (see Optics): `thick_lens` (`true`: the lens's grooves traced one by one; `false`: thin lens with the ideal aspheric profile) and `focal_offset` [cm] (camera plane at the focal length, 60.78 cm at 546 nm, + `focal_offset`) |
 
 ### slurm
 | key | |
@@ -176,14 +180,26 @@ The 10 deg diffuse cone covers the ~10 deg field of view (corners ~7 deg off-axi
 
 Keep `OBSLEV` matched to the PANOSETI config's `altitude` and its atmospheric transmission table (`atm_trans_1650_...` for 1650 m): sim_telarray refuses a table for another altitude, or gives zero transmission below the table's lowest altitude.
 
+## Optics
+sim_telarray doesn't simulate the lens well enough. CORSIKA's output always goes through `trace_photons.py` on its way to sim_telarray (`trace_photons.py <corsika file> - | sim_telarray ... -`, or after CORSIKA in the same pipe with `mode: pipe`), which traces every photon bunch through the PANOSETI optical model (`optical_model.py`) to the camera:
+* each bunch gets a wavelength, drawn from the Cherenkov spectrum (1/λ²) over CORSIKA's wavelength range (`CWAVLG`), as sim_telarray would otherwise draw it, so the refraction (PMMA's n(λ): the chromatic PSF), the lens's transmission, and sim_telarray's PDE and atmosphere all use the same one
+* its photons are scaled by the lens's (PMMA) transmission at that wavelength, or set to 0 if the lens vignettes it
+* its position becomes where it lands on the camera; direction, time and emission height are kept (sim_telarray's airmass uses the direction)
+
+sim_telarray then takes the positions as camera positions and skips its own optics (`bypass_optics = 1` in the PANOSETI config; the pipeline checks for `Bypassing optics` in its log). It also points at the zenith whatever it's given, so its events' header and log say zenith: the real pointing is in `<name>.pointing.json`, which `heap.read_simtel.read_run_header()` reads. Camera coordinates are sim_telarray's: +x towards higher altitude, +y towards lower azimuth.
+
+`sim_telarray.optics` picks the thin or thick lens model and the camera's distance from the lens.
+
 ## Outputs
 ```
 <output_dir>/inputs/<name>_run<NNNNNN>.inp                 CORSIKA cards
 <output_dir>/corsika/<name>_run<NNNNNN>.corsika.zst        CORSIKA IACT files (`mode: files` only)
 <output_dir>/simtel/<tag>/<name>_run<NNNNNN>.simtel.zst    sim_telarray events
 <output_dir>/simtel/<tag>/<name>_run<NNNNNN>.hdata.zst     sim_telarray histograms
+<output_dir>/simtel/<tag>/<name>_run<NNNNNN>.pointing.json the real pointing and the optics settings (see Optics)
 <output_dir>/logs/<name>_run<NNNNNN>.corsika.log
 <output_dir>/logs/<tag>/<name>_run<NNNNNN>.simtel.log
+<output_dir>/logs/<tag>/<name>_run<NNNNNN>.trace.log       trace_photons.py: bunches, vignetted, photons through the lens
 <output_dir>/slurm/<job>.sbatch                            submitted script
 <output_dir>/slurm/<job>.yaml                              config copy that submission's jobs read
 <output_dir>/slurm/<job>.files                             simtel stage: its input files, one per array task
@@ -227,11 +243,7 @@ Both notebooks read the production from a simulation config (`CONFIG`: this one,
 
 ### Readers
 `heap.read_simtel` is the reader underneath: `read_events()` returns the same (N, 32, 32) arrays as the pff and root readers, indexed [row, col] with columns along the camera's x, with sim_telarray's artificial `fadc_pedestal` offset removed and NSB and noise left in. Each telescope's pedestal frames are kept separate from its shower images (`pedestal_frames`), and `read_events(files, true_images=True)` also gives each image's true photoelectrons per pixel.
-* `read_run_header()` gives the pointing, telescope positions and what was simulated (`n_showers x n_use` events, energy range, spectral index, core range, viewcone), e.g. for effective areas.
+* `read_run_header()` gives the pointing, telescope positions and what was simulated (`n_showers x n_use` events, energy range, spectral index, core range, viewcone), e.g. for effective areas. The pointing comes from `<name>.pointing.json` next to the file, else from the file's header; a file pointing at the zenith without one raises.
 
 ## Failures and reruns
-Each run works in its own scratch directory and moves its outputs to `output_dir` only when CORSIKA reports `END OF RUN` and sim_telarray reports it finished. A failed run raises an error naming its log and keeps its scratch directory for debugging. Runs whose outputs exist are skipped, so submitting the same config again reruns only the failed ones.
-
-## Notes
-* sim_telarray reads only the first 4 telescopes of a CORSIKA file unless told otherwise; the pipeline sets `maximum_telescopes` from the file's header (with `mode: pipe`: from the card's `TELESCOPE` lines).
-* Many clusters cap SLURM job arrays at about 1000 tasks (`MaxArraySize`). Split bigger productions into several configs with different `first_run`.
+Each run works in its own scratch directory and moves its outputs to `output_dir` only when CORSIKA reports `END OF RUN`, `trace_photons.py` and sim_telarray report they finished, and sim_telarray skipped its optics. A failed run raises an error naming its log and keeps its scratch directory for debugging. Runs whose outputs exist are skipped, so submitting the same config again reruns only the failed ones.

@@ -12,6 +12,9 @@ Events are matched across telescopes by event_id, not by timestamps: a simulated
 when sim_telarray processed it.
 """
 
+import json
+from pathlib import Path
+
 import numpy as np
 from eventio import SimTelFile
 
@@ -129,7 +132,9 @@ def read_run_header(simtel_file):
 
     Returns dict with:
         - run: run number
-        - alt, az: array pointing [deg], az from north, clockwise
+        - alt, az: array pointing [deg], az from north, clockwise: from <name>.pointing.json next to
+          the file (simulation_tools/run_simulation.py writes it: sim_telarray with bypass_optics
+          records the zenith), else the file's header
         - tel_id: telescope ids, shape (n_tel,)
         - tel_pos: telescope positions [m], shape (n_tel, 3), x north, y west, z up (CORSIKA's frame)
         - n_showers, n_use: CORSIKA showers in the run and times each is reused, so n_showers * n_use events were simulated
@@ -143,10 +148,19 @@ def read_run_header(simtel_file):
         header = f.header
         mc_header = f.mc_run_headers[0]
 
+    alt, az = float(np.degrees(header["direction"][1])), float(np.degrees(header["direction"][0]))
+    pointing_file = Path(simtel_file).with_name(Path(simtel_file).name.split(".")[0] + ".pointing.json")
+    if pointing_file.exists():
+        pointing = json.loads(pointing_file.read_text())
+        alt, az = float(pointing["alt"]), float(pointing["az"])
+    elif alt == 90.:
+        raise FileNotFoundError(f"{simtel_file} points at the zenith and has no {pointing_file.name}: sim_telarray ran with "
+                                "bypass_optics, which records the zenith, so the real pointing is in that file")
+
     return {
         "run": int(header["run"]),
-        "alt": float(np.degrees(header["direction"][1])),
-        "az": float(np.degrees(header["direction"][0])),
+        "alt": alt,
+        "az": az,
         "tel_id": np.array(header["tel_id"], dtype=int),
         "tel_pos": np.array(header["tel_pos"], dtype=float),
         "n_showers": int(mc_header["n_showers"]),
