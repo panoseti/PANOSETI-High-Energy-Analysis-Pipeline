@@ -3,6 +3,8 @@
 CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI sim_telarray config](https://github.com/orelgueta/PANOSETI_sim_telarray_config). `run_simulation.py` runs a production as SLURM job arrays (one task per CORSIKA run), or one run at a time locally. Everything is set in one YAML config, see [`configs/simulation.yaml`](../configs/simulation.yaml).
 
 * `run_simulation.py` - the pipeline
+* `process_sims.ipynb` - processes a production into cleaned images and Hillas parameters, with diagnostics (the simulated `analysis_tools/process_pff.ipynb`)
+* `explore_sims.ipynb` - cuts, reconstruction and MC truth of a processed production (the simulated `analysis_tools/explore_events.ipynb`)
 * [`configs/corsika_template.inp`](../configs/corsika_template.inp) - the CORSIKA input card every run's card is made from
 
 ## Requirements
@@ -75,7 +77,7 @@ sim_telarray only, on one existing CORSIKA IACT file. Outputs are named after th
 
 | flag | |
 |---|---|
-| `--file PATH` | the CORSIKA file, e.g. `--file sim_output/gamma_10TeV/corsika/gamma_10TeV_run000001.corsika.zst` |
+| `--file PATH` | the CORSIKA file, e.g. `--file sim_output/gamma_pointlike/corsika/gamma_pointlike_run000001.corsika.zst` |
 | `--index I` | the I-th file (from 0) matching `paths.corsika_input`, sorted (what the SLURM array tasks call) |
 | `--overwrite` | redo outputs that already exist |
 | `--verbose` | also print sim_telarray's output |
@@ -194,22 +196,37 @@ with `<job>` = `<stage>_<tag>_<YYYYmmdd-HHMMSS>`. Because each submission's jobs
 import glob
 from heap.process_simulation import process_simulation
 
-files = sorted(glob.glob("sim_output/gamma_10TeV/simtel/v1/*.simtel.zst"))
-results, showers = process_simulation(files, "sim_output/gamma_10TeV/processed", "gamma_10TeV")
+files = sorted(glob.glob("sim_output/gamma_pointlike/simtel/v1/*.simtel.zst"))
+results, showers = process_simulation(files, "sim_output/gamma_pointlike/processed/v1", "gamma_pointlike")
 ```
 ```
 <out_dir>/T<telescope id>/<name>/<name>.npz           cleaned_images and Hillas parameters, as process_dataset() writes them
 <out_dir>/T<telescope id>/<name>/calibrations.npz     pedestals, pedestal_variances and gain, as build_calibrations() writes them
 <out_dir>/<name>_showers.npz                          MC truth per event
+<out_dir>/<name>_processing.json                      the settings it was processed with
 ```
+* Rerunning on an `out_dir` that already has the production reuses it if the settings match `<name>_processing.json`, and raises if they don't (or it's missing), unless `reprocess=True`, as `heap.events.process_night()` does for the data.
 * Pedestals and pedvars are calculated with `heap.make_pedestals.calculate_pedestal_and_pedvar()`, as for the data, but from sim_telarray's pedestal frames (NSB and noise only), pooled over all the runs. Their number per run is `pedestal_events` in the config's `sim_telarray: parameters` (10 by default); each telescope needs at least 100 in total, so 10+ runs. Each pedestal event adds about 0.2 s of sim_telarray time and 5 KB (all 7 telescopes) to a run.
 * The gain is flat (1): every simulated pixel has the same nominal gain.
 * The data-only steps (packet loss and rate spike cuts, meridian flips, mount logs) are left out.
 * Telescopes are sim_telarray's ids, 1 ... n in the order of the CORSIKA `TELESCOPE` lines.
 * The Hillas parameters have `Run` and `EventID` in place of the data's `Timestamp`: images of the same event share them, and they are the key into the showers (energy, direction, core, Xmax, ...). Match on them, not on timestamps: a simulated event's times are when sim_telarray processed it.
 
+### Notebooks
+Both notebooks read the production from a simulation config (`CONFIG`: this one, or the copy a production was submitted with, `<output_dir>/slurm/<job>.yaml`) and run from `simulation_tools/`. Run `process_sims.ipynb` first: it writes `<output_dir>/processed/<tag>/` (reused if it's already there with the same settings, see above), which `explore_sims.ipynb` reads. The functions they call are in `heap.process_simulation`:
+* `load_events()` reads the processed outputs back as array events, matched by `Run` and `EventID`, in the layout of `heap.events.build_array_events()`, so `heap.events.apply_cuts()` and `heap.reconstruction` work on them unchanged. Each image gets `impact`, its telescope's distance from the shower axis, and each shower `true_x`, `true_y`, the primary's direction in the camera relative to its run's pointing.
+* Camera coordinates are sim_telarray's, fixed to the alt-az mount: +x towards higher altitude, +y towards lower azimuth (`camera_position()`). This is measured from the images, which are displaced towards the shower core, not taken from sim_telarray's documentation.
+* `plot_energies()` plots the effective area in each energy bin as
+  ```
+  A_eff = A_sim x N_selected / N_simulated
+  ```
+  * `A_sim` = pi x `core_range[1]`^2, the circle on the ground that the shower cores were scattered over.
+  * `N_selected` = the events in the bin that triggered (or passed the cuts).
+  * `N_simulated` = all events simulated in the bin, triggered or not. The `.simtel.zst` files only hold triggered events, so it's calculated rather than counted: each run simulated `n_showers x n_use` events from a power law with `spectral_index` over `energy_range` (all from `read_run_header()`), summed over every run.
+
+### Readers
 `heap.read_simtel` is the reader underneath: `read_events()` returns the same (N, 32, 32) arrays as the pff and root readers, indexed [row, col] with columns along the camera's x, with sim_telarray's artificial `fadc_pedestal` offset removed and NSB and noise left in. Each telescope's pedestal frames are kept separate from its shower images (`pedestal_frames`), and `read_events(files, true_images=True)` also gives each image's true photoelectrons per pixel.
-* `read_run_header()` gives the pointing, telescope positions and what was thrown (`n_showers x n_use` events, energy range, spectral index, core range, viewcone), e.g. for effective areas.
+* `read_run_header()` gives the pointing, telescope positions and what was simulated (`n_showers x n_use` events, energy range, spectral index, core range, viewcone), e.g. for effective areas.
 
 ## Failures and reruns
 Each run works in its own scratch directory and moves its outputs to `output_dir` only when CORSIKA reports `END OF RUN` and sim_telarray reports it finished. A failed run raises an error naming its log and keeps its scratch directory for debugging. Runs whose outputs exist are skipped, so submitting the same config again reruns only the failed ones.

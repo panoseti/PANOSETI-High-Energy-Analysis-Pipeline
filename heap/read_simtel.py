@@ -122,7 +122,7 @@ def read_tel_data(simtel_file, telescope_id):
 
 def read_run_header(simtel_file):
     """
-    Read the run's pointing, telescope positions and simulated (thrown) showers from a .simtel(.zst) file
+    Read the run's pointing, telescope positions and simulated showers from a .simtel(.zst) file
 
     Parameters:
         simtel_file: .simtel(.zst) file written by sim_telarray
@@ -132,10 +132,10 @@ def read_run_header(simtel_file):
         - alt, az: array pointing [deg], az from north, clockwise
         - tel_id: telescope ids, shape (n_tel,)
         - tel_pos: telescope positions [m], shape (n_tel, 3), x north, y west, z up (CORSIKA's frame)
-        - n_showers, n_use: CORSIKA showers in the run and times each is reused, so n_showers * n_use events were thrown
+        - n_showers, n_use: CORSIKA showers in the run and times each is reused, so n_showers * n_use events were simulated
         - energy_range: [TeV], spectral_index
-        - core_range: [m], cores are thrown within core_range[1] of the array origin
-        - viewcone: [deg], primary directions are thrown between viewcone[0] and viewcone[1] off the cone's axis
+        - core_range: [m], cores are simulated within core_range[1] of the array origin
+        - viewcone: [deg], primary directions are simulated between viewcone[0] and viewcone[1] off the cone's axis
         - obsheight: observation level [m]
     """
 

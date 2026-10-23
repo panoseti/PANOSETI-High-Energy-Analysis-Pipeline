@@ -17,7 +17,7 @@ paths:
   corsika_template: configs/corsika_template.inp
   # Where everything is written (input cards, CORSIKA files, sim_telarray files, logs,
   # SLURM scripts), see the layout in simulation_tools/run_simulation.py.
-  output_dir: sim_output/gamma_10TeV
+  output_dir: sim_output/gamma_pointlike
   # CORSIKA files for the simtel stage (sim_telarray only), as a glob. null = this
   # production's own <output_dir>/corsika/*.corsika.zst.
   corsika_input: null
@@ -27,7 +27,7 @@ paths:
 
 production:
   # Prefix of every file name: <name>_run<RUNNR, 6 digits>.
-  name: gamma_10TeV
+  name: gamma_pointlike
   # files: CORSIKA writes <output_dir>/corsika/*.corsika.zst, then sim_telarray runs on it
   #        (the simtel stage can rerun sim_telarray on them later, e.g. after a config change).
   # pipe:  CORSIKA streams straight into sim_telarray; no CORSIKA files are kept.
