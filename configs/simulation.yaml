@@ -24,6 +24,10 @@ paths:
   # Scratch space for each run while it runs, moved to output_dir when done. null = $TMPDIR
   # if set (usually node-local on SLURM), otherwise <output_dir>/work.
   work_dir: null
+  # Where simulation_tools/process_sims.ipynb writes the processed production (cleaned images,
+  # Hillas parameters, calibrations), as <processed_dir>/<name>/<tag>/. Keep it out of output_dir,
+  # which may be shared. No default: the notebooks raise while it's null.
+  processed_dir: null
 
 production:
   # Prefix of every file name: <name>_run<RUNNR, 6 digits>.

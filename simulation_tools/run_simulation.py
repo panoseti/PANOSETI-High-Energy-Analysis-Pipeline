@@ -58,7 +58,7 @@ import yaml
 
 SECTIONS = {
     "paths": {"corsika_run_dir", "corsika_binary", "sim_telarray_dir", "sim_telarray_config",
-              "corsika_template", "output_dir", "corsika_input", "work_dir"},
+              "corsika_template", "output_dir", "corsika_input", "work_dir", "processed_dir"},
     "production": {"name", "mode", "first_run", "n_runs", "seed"},
     "corsika": None, # keyword -> value
     "sim_telarray": {"telescope_theta", "telescope_phi", "wobble_offset", "wobble_direction", "tag", "defines",
@@ -107,11 +107,14 @@ def load_config(path):
     Returns:
         the config's sections as nested dicts, with paths.* as Path (relative paths resolved
         against the project root), except paths.corsika_input, a glob string (default
-        <output_dir>/corsika/*.corsika.zst); corsika keys upper-cased; and the sim_telarray
+        <output_dir>/corsika/*.corsika.zst); paths.processed_dir None if null or missing (as in configs
+        submitted before it existed); corsika keys upper-cased; and the sim_telarray
         defines/parameters and slurm extra_options/setup defaulting to empty
     """
     with open(path) as f:
         config = yaml.safe_load(f)
+    if isinstance(config, dict) and isinstance(config.get("paths"), dict):
+        config["paths"].setdefault("processed_dir", None)
     _check_keys("top level", config, set(SECTIONS))
     for section, required in SECTIONS.items():
         if required is None:

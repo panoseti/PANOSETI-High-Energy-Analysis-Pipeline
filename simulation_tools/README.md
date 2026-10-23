@@ -114,6 +114,7 @@ Paths are resolved relative to the project root if not absolute; `~` and `$VARS`
 | `output_dir` | where everything is written, see Outputs |
 | `corsika_input` | CORSIKA files for the `simtel` stage, as a glob (`null` = `<output_dir>/corsika/*.corsika.zst`) |
 | `work_dir` | scratch space for each run while it runs (`null` = `$TMPDIR` if set, usually node-local on SLURM, otherwise `<output_dir>/work`). Each run's directory in it is deleted when the run succeeds, and the work directory too once it's empty (except `$TMPDIR`) |
+| `processed_dir` | where `process_sims.ipynb` writes the processed production, as `<processed_dir>/<name>/<tag>/`. Keep it out of `output_dir`, which may be shared. No default: the notebooks raise while it's `null` (or missing, as in configs submitted before it existed) |
 
 ### production
 | key | |
@@ -197,7 +198,7 @@ import glob
 from heap.process_simulation import process_simulation
 
 files = sorted(glob.glob("sim_output/gamma_pointlike/simtel/v1/*.simtel.zst"))
-results, showers = process_simulation(files, "sim_output/gamma_pointlike/processed/v1", "gamma_pointlike")
+results, showers = process_simulation(files, "/path/to/processed/gamma_pointlike/v1", "gamma_pointlike")
 ```
 ```
 <out_dir>/T<telescope id>/<name>/<name>.npz           cleaned_images and Hillas parameters, as process_dataset() writes them
@@ -213,7 +214,7 @@ results, showers = process_simulation(files, "sim_output/gamma_pointlike/process
 * The Hillas parameters have `Run` and `EventID` in place of the data's `Timestamp`: images of the same event share them, and they are the key into the showers (energy, direction, core, Xmax, ...). Match on them, not on timestamps: a simulated event's times are when sim_telarray processed it.
 
 ### Notebooks
-Both notebooks read the production from a simulation config (`CONFIG`: this one, or the copy a production was submitted with, `<output_dir>/slurm/<job>.yaml`) and run from `simulation_tools/`. Run `process_sims.ipynb` first: it writes `<output_dir>/processed/<tag>/` (reused if it's already there with the same settings, see above), which `explore_sims.ipynb` reads. The functions they call are in `heap.process_simulation`:
+Both notebooks read the production from a simulation config (`CONFIG`: this one, or the copy a production was submitted with, `<output_dir>/slurm/<job>.yaml`) and run from `simulation_tools/`. Run `process_sims.ipynb` first: it writes `<processed_dir>/<name>/<tag>/` (reused if it's already there with the same settings, see above), which `explore_sims.ipynb` reads. The functions they call are in `heap.process_simulation`:
 * `load_events()` reads the processed outputs back as array events, matched by `Run` and `EventID`, in the layout of `heap.events.build_array_events()`, so `heap.events.apply_cuts()` and `heap.reconstruction` work on them unchanged. Each image gets `impact`, its telescope's distance from the shower axis, and each shower `true_x`, `true_y`, the primary's direction in the camera relative to its run's pointing.
 * Camera coordinates are sim_telarray's, fixed to the alt-az mount: +x towards higher altitude, +y towards lower azimuth (`camera_position()`). This is measured from the images, which are displaced towards the shower core, not taken from sim_telarray's documentation.
 * `plot_energies()` plots the effective area in each energy bin as
