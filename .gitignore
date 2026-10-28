@@ -8,7 +8,7 @@
 __pycache__
 *.ipynb_checkpoints
 build
-HEAP.egg-info
+*.egg-info
 uv.lock
 heap/__version__.py
 
