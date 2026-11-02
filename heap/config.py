@@ -9,13 +9,14 @@ from pathlib import Path
 
 import astropy.units as u
 import yaml
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import EarthLocation, SkyCoord
 
 from heap.significance import OFF_REGION_METHODS
 
 SECTIONS = {
     "source": {"name", "dates", "pointing_overrides"},
-    "telescopes": None, # module -> {name, rate_cut}
+    "site": {"latitude", "longitude", "height"},
+    "telescopes": None, # module -> {name, rate_cut, position}
     "pipeline": {"data_product", "image_threshold", "border_threshold", "keep_brightest_island"},
     "events": {"reference", "coinc_window", "rotate_postflip", "rel_tel_efficiency", "pointing_corrections"},
     "cuts": {"min_npix", "min_tel", "telescopes", "theta", "max_distance", "off_regions", "image_cuts", "position_cuts"},
@@ -24,9 +25,9 @@ CUT_MODES = {"nsigma", "value"}
 POSITION_CUT_COLUMNS = {"distance", "alpha", "miss"}
 FLIP_SIDES = {"preflip", "postflip"}
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 LOCAL_CONFIG = PROJECT_ROOT / "configs" / "local.yaml"
 LOCAL_KEYS = {"analysis", "raw_data_dir", "processed_dir", "simulations"}
+
 
 def _check_keys(section, config, required):
     missing = required - set(config)
@@ -110,6 +111,8 @@ def load_analysis_config(path=None):
                 configs/local.yaml's processed_dir
             source.dates: list of "YYYYMMDD" strings, or None
             source.pointing_overrides: {run folder name: SkyCoord}
+            site: the site's EarthLocation, see heap.events.sky_frame()
+            telescope_positions: {telescope name: (x, y, z)} [m], see heap.reconstruction.tilted_positions()
             events.reference: list of telescope names, in order of preference, see
                 heap.events.build_events()
             events.pointing_corrections: {(date, telescope, flip_side): (dx, dy)}, see
@@ -137,7 +140,14 @@ def load_analysis_config(path=None):
     source["dates"] = [str(d) for d in source["dates"]] if source["dates"] is not None else None
     source["pointing_overrides"] = {str(run): _pointing(p) for run, p in (source["pointing_overrides"] or {}).items()}
 
+    site = config["site"]
+    config["site"] = EarthLocation(lat=site["latitude"] * u.deg, lon=site["longitude"] * u.deg, height=site["height"] * u.m)
+
     names = [info["name"] for info in config["telescopes"].values()]
+    for module, info in config["telescopes"].items():
+        if len(info.get("position", [])) != 3:
+            raise ValueError(f"telescopes.{module}.position: expected [x, y, z], got {info.get('position')!r}")
+    config["telescope_positions"] = {info["name"]: tuple(float(v) for v in info["position"]) for info in config["telescopes"].values()}
     events = config["events"]
     events["reference"] = [events["reference"]] if isinstance(events["reference"], str) else list(events["reference"])
     unknown = [name for name in events["reference"] if name not in names]

@@ -2,7 +2,7 @@
 CORSIKA -> sim_telarray simulation pipeline for PANOSETI, run as SLURM job arrays (or one run at
 a time locally).
 
-Configured by a YAML like configs/simulation.yaml: paths to CORSIKA, sim_telarray, the PANOSETI
+Configured by a YAML like configs/simulation.example.yaml: paths to CORSIKA, sim_telarray, the PANOSETI
 sim_telarray config, the CORSIKA card template and the output/scratch directories, plus the
 production's run numbers, CORSIKA keyword overrides, sim_telarray settings and SLURM resources.
 
@@ -40,11 +40,11 @@ output_dir when it succeeds; a failed run keeps its scratch directory for debugg
 outputs already exist are skipped unless --overwrite is given.
 
 Usage:
-    python simulation_tools/run_simulation.py prepare --config configs/simulation.yaml
-    python simulation_tools/run_simulation.py submit --config configs/simulation.yaml
-    python simulation_tools/run_simulation.py submit --config configs/simulation.yaml --stage simtel --dry-run
-    python simulation_tools/run_simulation.py run --config configs/simulation.yaml --run 1
-    python simulation_tools/run_simulation.py simtel --config configs/simulation.yaml --file some.corsika.zst
+    python simulation_tools/run_simulation.py prepare --config configs/simulation.example.yaml
+    python simulation_tools/run_simulation.py submit --config configs/simulation.example.yaml
+    python simulation_tools/run_simulation.py submit --config configs/simulation.example.yaml --stage simtel --dry-run
+    python simulation_tools/run_simulation.py run --config configs/simulation.example.yaml --run 1
+    python simulation_tools/run_simulation.py simtel --config configs/simulation.example.yaml --file some.corsika.zst
 """
 import argparse
 import glob
@@ -71,6 +71,7 @@ SECTIONS = {
     "corsika": None, # keyword -> value
     "sim_telarray": {"telescope_theta", "telescope_phi", "wobble_offset", "wobble_direction", "tag", "defines",
                      "parameters", "optics"},
+    "pipeline": {"image_threshold", "border_threshold", "keep_brightest_island"}, # image processing, as the data's
     "slurm": {"partition", "account", "time", "mem", "max_concurrent", "mail_user", "mail_type", "python",
               "extra_options", "setup"},
 }
@@ -116,13 +117,13 @@ def load_config(path):
     Load and check a simulation config.
 
     Parameters:
-        path: config YAML, see configs/simulation.yaml
+        path: config YAML, see configs/simulation.example.yaml
 
     Returns:
         the config's sections as nested dicts, with paths.* as Path (relative paths resolved
         against the project root), except paths.corsika_input, a glob string (default
-        <output_dir>/corsika/*.corsika.zst); paths.processed_dir and sim_telarray.optics None if null
-        or missing (running sim_telarray needs optics); corsika keys upper-cased; and the sim_telarray defines/parameters and slurm
+        <output_dir>/corsika/*.corsika.zst); paths.processed_dir, sim_telarray.optics and pipeline None if
+        null or missing (running sim_telarray needs optics, processing the production needs pipeline); corsika keys upper-cased; and the sim_telarray defines/parameters and slurm
         extra_options/setup defaulting to empty
     """
     with open(path) as f:
@@ -131,8 +132,12 @@ def load_config(path):
         config["paths"].setdefault("processed_dir", None)
     if isinstance(config, dict) and isinstance(config.get("sim_telarray"), dict):
         config["sim_telarray"].setdefault("optics", None)
+    if isinstance(config, dict):
+        config.setdefault("pipeline", None)
     _check_keys("top level", config, set(SECTIONS))
     for section, required in SECTIONS.items():
+        if section == "pipeline" and config[section] is None:
+            continue
         if required is None:
             config[section] = config[section] or {}
             if not isinstance(config[section], dict):
@@ -744,7 +749,7 @@ def main():
                           ("run", "full stage (CORSIKA + sim_telarray) for one run"),
                           ("simtel", "sim_telarray only, for one CORSIKA file")]:
         sub = commands.add_parser(command, help=help)
-        sub.add_argument("--config", required=True, help="simulation config YAML, see configs/simulation.yaml")
+        sub.add_argument("--config", required=True, help="simulation config YAML, see configs/simulation.example.yaml")
         if command == "submit":
             sub.add_argument("--stage", choices=sorted(STAGES), default="full")
             sub.add_argument("--dry-run", action="store_true", help="write the sbatch script but don't submit it")

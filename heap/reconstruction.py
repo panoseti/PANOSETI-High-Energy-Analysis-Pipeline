@@ -1,7 +1,11 @@
 """reconstruction
 
-Arrival direction reconstruction from the intersection of image axes, weighted by size,
-elongation, and angle between axes (Eventdisplay's method).
+Arrival direction and shower core reconstruction from the intersection of image axes, weighted by
+size, elongation, and angle between axes (Hofmann et al. 1999, Astropart. Phys. 12, 135, method 1).
+
+Data and simulations are reconstructed by the same functions. They differ only in the camera's axes
+on the sky, which tilted_positions() takes as unit vectors: tilted_frame() for the simulations' alt-az
+cameras, heap.events.sky_frame() for the data's cameras fixed to the sky.
 """
 import numpy as np
 import pandas as pd
@@ -139,3 +143,94 @@ def reconstruct_directions(array):
         rows.append((e, event.iloc[0].Date, event.iloc[0].Run, *direction))
 
     return pd.DataFrame(rows, columns=["Event", "Date", "Run", "Xoffset", "Yoffset"])
+
+
+def tilted_frame(pointing_alt, pointing_az):
+    """
+    Unit vectors of the plane perpendicular to the pointing, along the camera's axes, in CORSIKA's frame
+    (x north, y west, z up).
+
+    Parameters:
+        pointing_alt, pointing_az: [deg], azimuth from north towards east
+
+    Returns:
+        (e_x, e_y): towards higher altitude and towards lower azimuth, as sim_telarray's camera +x and +y
+        (see heap.process_simulation.camera_position())
+    """
+    alt, az = np.radians(pointing_alt), np.radians(pointing_az)
+    e_x = np.array([-np.sin(alt) * np.cos(az), np.sin(alt) * np.sin(az), np.cos(alt)])
+    e_y = np.array([np.sin(az), np.cos(az), 0.])
+    return e_x, e_y
+
+
+def tilted_positions(array, tel_pos, e_x, e_y):
+    """
+    Each image's telescope position in the plane perpendicular to the pointing.
+
+    Parameters:
+        array: images, see heap.events.apply_cuts()
+        tel_pos: {telescope: position [m] in CORSIKA's frame (x north, y west, z up)}
+        e_x, e_y: the camera's axes in that frame: tilted_frame() (simulations) or
+            heap.events.sky_frame() (data)
+
+    Returns:
+        array of shape (n images, 2) [m], one row per row of array
+    """
+    pos = np.array([tel_pos[tel] for tel in array.Telescope], dtype=float).reshape(-1, 3)
+    return np.stack([(pos * e_x).sum(axis=1), (pos * e_y).sum(axis=1)], axis=1)
+
+
+def _least_squares_point(x, y, angle, w):
+    """
+    The point minimizing the w-weighted squared perpendicular distances to the lines through (x, y) at
+    angle [rad]; None if the lines are all parallel.
+    """
+    n = np.stack([-np.sin(angle), np.cos(angle)], axis=1) # normals
+    a = (w[:, None, None] * n[:, :, None] * n[:, None, :]).sum(axis=0)
+    b = (w[:, None] * n * (n[:, 0] * x + n[:, 1] * y)[:, None]).sum(axis=0)
+    if abs(np.linalg.det(a)) < 1e-9 * np.trace(a)**2:
+        return None
+    return np.linalg.solve(a, b)
+
+
+def reconstruct_cores(array, positions):
+    """
+    Reconstruct each event's shower core in the plane of tilted_positions(): a shower's image points
+    from its source position along the line from the telescope to the core, so the core is where the
+    lines through the telescopes along their image axes (phi) cross: the point closest to all of them, each
+    weighted by (size * (1 - width/length))^2.
+
+    Parameters:
+        array: images passing cuts, see heap.events.apply_cuts()
+        positions: tilted_positions() of array
+
+    Returns:
+        DataFrame with Event, core_x, core_y [m], one row per reconstructed event (2+ images)
+    """
+    array = array.assign(tel_x=positions[:, 0], tel_y=positions[:, 1], angle=np.radians(array.phi.to_numpy()))
+    rows = []
+    for e, event in array.groupby("Event", sort=True):
+        if len(event) < 2:
+            continue
+        w = (event["size"] * (1 - event.width / event.length))**2
+        core = _least_squares_point(event.tel_x.to_numpy(), event.tel_y.to_numpy(), event.angle.to_numpy(), w.to_numpy())
+        if core is not None:
+            rows.append((e, *core))
+    return pd.DataFrame(rows, columns=["Event", "core_x", "core_y"])
+
+
+def core_distances(array, positions, cores):
+    """
+    Each image's telescope distance [m] from its event's reconstructed core, in the plane of
+    tilted_positions(): the reconstructed impact distance. NaN for events without a core.
+
+    Parameters:
+        array: images, see heap.events.apply_cuts()
+        positions: tilted_positions() of array
+        cores: reconstruct_cores()
+
+    Returns:
+        array of distances, one per row of array
+    """
+    core = cores.set_index("Event").reindex(array.Event)
+    return np.hypot(positions[:, 0] - core.core_x.to_numpy(dtype=float), positions[:, 1] - core.core_y.to_numpy(dtype=float))

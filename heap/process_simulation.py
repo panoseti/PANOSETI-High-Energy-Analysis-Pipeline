@@ -10,6 +10,7 @@ Also loads the processed outputs back into array events (load_events()) and plot
 Camera coordinates are sim_telarray's, fixed to the alt-az mount: +x towards higher altitude, +y towards
 lower azimuth (measured from the images' displacement towards the shower core), see camera_position().
 """
+import glob
 import json
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from heap.make_pedestals import calculate_pedestal_and_pedvar
 from heap.parameterize import CAMERA_CMAP, CAMERA_EXTENT, CAMERA_HALF_WIDTH, TAB10_COLORS, draw_params
 from heap.process_dataset import process_image
 from heap.read_simtel import read_events, read_run_header
+from heap.reconstruction import tilted_frame
 
 MIN_PEDESTAL_FRAMES = 100 # as build_calibrations() needs per chunk of data
 
@@ -271,6 +273,27 @@ def impact_distance(showers, pos):
     r = np.asarray(pos)[None, :] - np.stack([showers.core_x, showers.core_y, np.zeros(len(showers))], axis=-1)
     return np.linalg.norm(r - (r * axis).sum(axis=1)[:, None] * axis, axis=1)
 
+def tilted_core(showers, pointing_alt, pointing_az):
+    """
+    Where each shower's axis crosses the plane through the origin perpendicular to the pointing, in
+    heap.reconstruction.tilted_frame()'s coordinates [m]: the true core, for heap.reconstruction.reconstruct_cores()
+
+    Parameters:
+        showers: rows with alt, az [deg] and core_x, core_y [m], see read_simtel.read_events()
+        pointing_alt, pointing_az: [deg]
+
+    Returns:
+        (x, y) arrays [m]
+    """
+    alt, az = np.radians(showers.alt.to_numpy()), np.radians(showers.az.to_numpy())
+    axis = np.stack([np.cos(alt) * np.cos(az), -np.cos(alt) * np.sin(az), np.sin(alt)], axis=-1) # towards the primary
+    p_alt, p_az = np.radians(pointing_alt), np.radians(pointing_az)
+    pointing = np.array([np.cos(p_alt) * np.cos(p_az), -np.cos(p_alt) * np.sin(p_az), np.sin(p_alt)])
+    core = np.stack([showers.core_x, showers.core_y, np.zeros(len(showers))], axis=-1)
+    crossing = core - ((core @ pointing) / (axis @ pointing))[:, None] * axis
+    e_x, e_y = tilted_frame(pointing_alt, pointing_az)
+    return crossing @ e_x, crossing @ e_y
+
 def load_events(out_dir, name: str, headers, telescopes: list = None):
     """
     Read process_simulation()'s outputs back as array events, in the layout of
@@ -313,6 +336,34 @@ def load_events(out_dir, name: str, headers, telescopes: list = None):
     images = pd.concat(frames, ignore_index=True)
     images["Date"] = name
     return images, showers
+
+def processed_path(cfg):
+    """
+    Where process_simulation() writes a production, <processed_dir>/<name>/<tag>/, from its simulation
+    config (as simulation_tools/run_simulation.py's load_config() returns it)
+    """
+    name = cfg["production"]["name"]
+    if cfg["paths"]["processed_dir"] is None:
+        raise ValueError(f"set paths.processed_dir in {name}'s config: where its processed sims are")
+    return Path(cfg["paths"]["processed_dir"]) / name / cfg["sim_telarray"]["tag"]
+
+def load_production(cfg, telescopes: list = None):
+    """
+    A processed production, from its simulation config: run_table() of its .simtel(.zst) files and
+    load_events() of what process_simulation() wrote to processed_path()
+
+    Parameters:
+        cfg: the simulation config, as simulation_tools/run_simulation.py's load_config() returns it
+        telescopes: passed through to load_events()
+
+    Returns:
+        runs (run_table()), images, showers (load_events())
+    """
+    name, tag = cfg["production"]["name"], cfg["sim_telarray"]["tag"]
+    files = sorted(glob.glob(str(Path(cfg["paths"]["output_dir"]) / "simtel" / tag / f"{name}_run*.simtel.zst")))
+    runs = run_table(files)
+    images, showers = load_events(processed_path(cfg), name, runs, telescopes)
+    return runs, images, showers
 
 def simulated_counts(headers, energy_bins):
     """
@@ -507,7 +558,8 @@ def plot_event(event, direction, shower, out_dir, name: str, colors: dict = None
     ellipse on one camera plane, all with the reconstructed and true directions.
 
     Parameters:
-        event: one event's images, see heap.events.apply_cuts()
+        event: one event's images, see heap.events.apply_cuts(), with impact_reco from
+            heap.reconstruction.core_distances()
         direction: that event's row from heap.reconstruction.reconstruct_directions()
         shower: that event's row of load_events()'s showers
         out_dir, name: as passed to process_simulation(), for the cleaned images
@@ -528,7 +580,7 @@ def plot_event(event, direction, shower, out_dir, name: str, colors: dict = None
         ev.draw_hillas(ax, tel, "white")
         ev.draw_positions(ax, direction, "white", source_xy, "true")
         ax.set(xlim=[-half, half], ylim=[-half, half], xlabel="X (degrees)", ylabel="Y (degrees)")
-        ax.set_title(f"{tel.Telescope}, impact {tel.impact:.0f} m, size {tel['size']:.0f}", fontsize=9)
+        ax.set_title(f"{tel.Telescope}, reconstructed impact {tel.impact_reco:.0f} m, size {tel['size']:.0f}", fontsize=9)
 
     ax = axs[0, -1]
     for i, (_, tel) in enumerate(event.iterrows()):

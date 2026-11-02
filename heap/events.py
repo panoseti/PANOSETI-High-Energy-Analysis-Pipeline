@@ -22,7 +22,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import AltAz, SkyCoord
+from astropy.time import Time
 from matplotlib.colors import to_rgba
 from matplotlib.patches import Ellipse
 
@@ -493,6 +494,35 @@ def apply_cut(array, column, mode, threshold):
         array = array.merge(cut_stats[['cut']], on='Telescope')
         array = array[array[column] < array.cut]
         return array.drop(columns=['cut'])
+def sky_frame(array, pointings, location):
+    """
+    Unit vectors of the plane perpendicular to each event's pointing, along the data's camera axes
+    after the postflip rotation (+x east, +y south), in CORSIKA's frame (x north, y west, z up), for
+    heap.reconstruction.tilted_positions(). The cameras are fixed to the sky, so these turn through a
+    run; each event has its own, from the time of its first image.
+
+    Parameters:
+        array: images, with Event, Run and Timestamp, see apply_cuts()
+        pointings: {Run: SkyCoord} each run's pointing, see run_pointings()
+        location: the site's EarthLocation
+
+    Returns:
+        (e_x, e_y): arrays of shape (n images, 3), one row per row of array
+    """
+    events = array.groupby("Event", sort=False)[["Run", "Timestamp"]].first()
+    pointing = SkyCoord([pointings[run] for run in events.Run]).transform_to(
+        AltAz(obstime=Time(events.Timestamp.to_numpy(), format="unix"), location=location)
+    )
+    alt, az = pointing.alt.rad, pointing.az.rad
+    towards = np.stack([np.cos(alt) * np.cos(az), -np.cos(alt) * np.sin(az), np.sin(alt)], axis=-1)
+    lat = location.lat.rad
+    east = np.cross(np.array([np.cos(lat), 0., np.sin(lat)]), towards) # celestial pole x pointing
+    east /= np.linalg.norm(east, axis=1)[:, None]
+    south = np.cross(east, towards)
+    rows = events.index.get_indexer(array.Event)
+    return east[rows], south[rows]
+
+
     elif mode == "value":
         return array[array[column] < threshold]
     else:
@@ -591,7 +621,8 @@ def plot_event(
     reconstructed direction and the source position.
 
     Parameters:
-        event: one event's images, see apply_cuts()
+        event: one event's images, see apply_cuts(), with impact_reco from
+            heap.reconstruction.core_distances()
         direction: that event's row from heap.reconstruction.reconstruct_directions()
         output_dir: processed data dir (holding <date>/), see process_night()
         source: source name, for params_path() and the legend
@@ -622,7 +653,7 @@ def plot_event(
         draw_hillas(ax, tel, "white")
         draw_positions(ax, direction, "white", source_xy, source)
         ax.set(xlim=[-half, half], ylim=[-half, half], xlabel="X (degrees)", ylabel="Y (degrees)")
-        ax.set_title(f"{tel.Telescope} ({tel.FlipSide})", fontsize=9)
+        ax.set_title(f"{tel.Telescope} ({tel.FlipSide}), reconstructed impact {tel.impact_reco:.0f} m", fontsize=9)
 
     ax = axs[0, -1]
     for i, (_, tel) in enumerate(event.iterrows()):
