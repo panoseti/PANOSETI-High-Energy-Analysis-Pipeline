@@ -3,7 +3,6 @@
 Runs process_image() over every event in a dataset, keeping every cleaned image
 and collecting Hillas parameters into a table.
 """
-import json
 import re
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -13,6 +12,7 @@ import astropy.units as u
 import numpy as np
 import pandas as pd
 import pypff
+import yaml
 from astropy.coordinates import SkyCoord
 
 from heap.coincidences import load_telescope_tv
@@ -125,16 +125,25 @@ def _closest_alt_run(source, reference_epoch, groups):
     return best
 
 
+MAX_GAIN_AGE = 15 # days; farthest night a gain map can be reused from
+
+
+def _days_apart(date, other_date):
+    """Days between two YYYYMMDD nights."""
+    return abs((datetime.strptime(date, "%Y%m%d") - datetime.strptime(other_date, "%Y%m%d")).days)
+
+
 def _find_other_night_gain(telescope_out_dir):
     """Looks for the closest other night's (earlier or later) already-computed gain map for this
-    telescope (any source), to reuse when this night has no usable pair of star fields at all.
+    telescope (any source), at most MAX_GAIN_AGE days away, to reuse when this night has no usable
+    pair of star fields at all.
     Of two equally close nights, the earlier one is used.
 
     telescope_out_dir is <output_root>/<date>/<telescope>/ (what process_dataset() calls
     out_dir); sibling nights are <output_root>/<other_date>/<telescope>/*/calibrations.npz.
     Only gain maps made from that night's own data ("own" or "alt") are used: "flat" ones and
     ones reused from yet another night are skipped, so the date returned is where the map was made.
-    Later nights are only found if they were processed first.
+    Later nights are only found if they were processed first; see gain_update_available().
 
     Returns (gain_map (32, 32) float32, date string), or (None, None) if nothing usable is found.
     """
@@ -145,13 +154,11 @@ def _find_other_night_gain(telescope_out_dir):
     if not output_root.is_dir():
         return None, None
 
-    def days_from_current(date):
-        return abs((datetime.strptime(date, "%Y%m%d") - datetime.strptime(current_date, "%Y%m%d")).days)
-
     candidate_dates = sorted(
         (p.name for p in output_root.iterdir()
-         if p.is_dir() and re.fullmatch(r"\d{8}", p.name) and p.name != current_date and (p / telescope_name).is_dir()),
-        key=lambda date: (days_from_current(date), date),
+         if p.is_dir() and re.fullmatch(r"\d{8}", p.name) and p.name != current_date and (p / telescope_name).is_dir()
+         and _days_apart(p.name, current_date) <= MAX_GAIN_AGE),
+        key=lambda date: (_days_apart(date, current_date), date),
     )
 
     for date in candidate_dates:
@@ -163,6 +170,31 @@ def _find_other_night_gain(telescope_out_dir):
             return calib["gain"].astype(np.float32), date
 
     return None, None
+
+
+def gain_update_available(telescope_out_dir):
+    """
+    Whether any source's gain map in this telescope's night would change if reprocessed: it reused
+    another night's map (or is flat) and _find_other_night_gain() now finds one closer in time, e.g. a
+    later night processed since, or the map it reused is over MAX_GAIN_AGE days away. Maps made from
+    the night's own data are never replaced.
+
+    Parameters:
+        telescope_out_dir: <output_root>/<date>/<telescope>/, see _find_other_night_gain()
+    """
+    telescope_out_dir = Path(telescope_out_dir)
+    date = telescope_out_dir.parent.name
+    _, closest = _find_other_night_gain(telescope_out_dir)
+    for calib_path in telescope_out_dir.glob("*/calibrations.npz"):
+        calib = np.load(calib_path)
+        gain_source = calib["gain_source"].item() if "gain_source" in calib else "own"
+        if gain_source == "flat" and closest is not None:
+            return True
+        if gain_source.startswith("other_night:"):
+            reused = _days_apart(gain_source.split(":")[1], date)
+            if reused > MAX_GAIN_AGE or (closest is not None and _days_apart(closest, date) < reused):
+                return True
+    return False
 
 
 def resolve_gain_map(
@@ -190,7 +222,7 @@ def resolve_gain_map(
          doesn't matter to gain_from_pedvars, it just needs two different pointings to compare.
       3. another night: if this source is the only one in the whole night (no other source to
          pair with), reuse the closest other night's (earlier or later) already-computed gain map
-         for this telescope (see _find_other_night_gain()).
+         for this telescope, at most MAX_GAIN_AGE days away (see _find_other_night_gain()).
       4. flat ones: if none of the above apply (e.g. the first night this telescope is processed).
 
     Returns:
@@ -232,7 +264,7 @@ def resolve_gain_map(
     if other_gain is not None:
         return other_gain, f"other_night:{other_date}", f"Reused from night {other_date} (no usable frame pair this night)"
 
-    return np.ones((32, 32), dtype=np.float32), "flat", "Flat gain (1.0) — no usable frame pair this night or another processed night"
+    return np.ones((32, 32), dtype=np.float32), "flat", f"Flat gain (1.0) — no usable frame pair this night or another processed night within {MAX_GAIN_AGE} days"
 
 
 def build_calibrations(
@@ -389,6 +421,7 @@ def discover_runs(raw_dir):
     return sorted((unwrap_duplicate_dir(p) for p in base.iterdir() if p.is_dir()), key=lambda p: p.name)
 
 
+SOURCE_RUN_MAP = Path(__file__).resolve().parent.parent / "configs" / "analysis" / "source_run_map.yaml" # see load_fallback_map()
 MOUNT_NAMES = {"Heli": "PTI"} # telescopes whose mount log and hk.pff mount table use another name
 MAX_TRACKING_DELAY = 600 # s; latest after a run's start its first tracking mount entry may be
 MOUNT_LOG_LINE = re.compile(
@@ -529,10 +562,11 @@ def load_fallback_map(path):
     Load a user-maintained fallback map for identify_source()/identify_flip_side(), for runs
     whose mount data is missing.
 
-    Expects a JSON file: {run_dir_name: {"source": source_name, "flip_side": "preflip" | "postflip"}}
+    Expects a YAML file: {run_dir_name: {"source": source_name, "flip_side": "preflip" | "postflip"}}, e.g.
+    configs/analysis/source_run_map.yaml, which holds every night's runs: run folder names are unique across nights.
     """
     with open(path) as f:
-        return json.load(f)
+        return yaml.safe_load(f)
 
 
 def group_runs_by_source(raw_dir, telescope, fallback_map=None):

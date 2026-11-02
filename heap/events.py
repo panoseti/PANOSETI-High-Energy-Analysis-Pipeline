@@ -30,7 +30,7 @@ from matplotlib.patches import Ellipse
 from heap import coincidences as coinc
 from heap.parameterize import CAMERA_CMAP, CAMERA_HALF_WIDTH, TAB10_COLORS, plot_hillas_histograms
 from heap.significance import make_wcs
-from heap.process_dataset import _mount_pointing, _run_start_epoch, discover_runs, group_runs_by_source, load_fallback_map, process_dataset, slugify
+from heap.process_dataset import SOURCE_RUN_MAP, _mount_pointing, _run_start_epoch, gain_update_available, discover_runs, group_runs_by_source, load_fallback_map, process_dataset, slugify
 
 
 
@@ -70,7 +70,6 @@ def process_night(
         reprocess: rerun telescopes that already have output for this night
     """
     raw_dir = Path(raw_dir)
-    fallback_map_path = raw_dir / "source_run_map.json"
     runs = discover_runs(raw_dir)
 
     for module, info in telescopes.items():
@@ -97,7 +96,7 @@ def process_night(
         try:
             process_dataset(
                 raw_dir, out_dir, module_pattern, name,
-                fallback_map_path=fallback_map_path if fallback_map_path.exists() else None,
+                fallback_map_path=SOURCE_RUN_MAP,
                 rate_cut=info.get("rate_cut", 3),
                 image_threshold=image_threshold, border_threshold=border_threshold,
                 keep_brightest_island=keep_brightest_island,
@@ -107,19 +106,35 @@ def process_night(
             print(f"{date}: processing {name} failed: {e}")
 
 
+def update_gain_maps(raw_data_dir, output_dir, dates: list, telescopes: dict, **settings):
+    """
+    Reprocess each night and telescope whose reused or flat gain map would change: a closer night's
+    map is available or the reused one is too old (see heap.process_dataset.gain_update_available()). Run after process_night() on every
+    night: nights are processed in order, so an early night can only reuse a later one's map after it.
+
+    Parameters:
+        raw_data_dir: holding the <date>/ folders
+        output_dir, telescopes: see process_night()
+        dates: nights to check, YYYYMMDD
+        settings: process_night()'s data_product and cleaning settings
+    """
+    for date in dates:
+        for module, info in telescopes.items():
+            if gain_update_available(Path(output_dir) / date / info["name"]):
+                print(f"{date} {info['name']}: gain map out of date, reprocessing")
+                process_night(Path(raw_data_dir) / date, output_dir, date, {module: info}, reprocess=True, **settings)
+
+
 def source_runs(raw_dir, telescope, source):
     """
     One night's runs of source, by flip side, from the mount logs (see
-    heap.process_dataset.group_runs_by_source()). Uses <raw_dir>/source_run_map.json as the
-    fallback map if present.
+    heap.process_dataset.group_runs_by_source()), with configs/analysis/source_run_map.yaml as the fallback map.
 
     Returns:
         {"preflip": [run_dir, ...], "postflip": [run_dir, ...]}
     """
     raw_dir = Path(raw_dir)
-    fallback_map_path = raw_dir / "source_run_map.json"
-    fallback_map = load_fallback_map(fallback_map_path) if fallback_map_path.exists() else None
-    return group_runs_by_source(raw_dir, telescope, fallback_map=fallback_map).get(source, {"preflip": [], "postflip": []})
+    return group_runs_by_source(raw_dir, telescope, fallback_map=load_fallback_map(SOURCE_RUN_MAP)).get(source, {"preflip": [], "postflip": []})
 
 
 def _latest_run(timestamps, runs_by_flip):
@@ -479,21 +494,6 @@ def build_array_events(
     return events, pointings
 
 
-def apply_cut(array, column, mode, threshold):
-    """
-    Keep images with column below the cut.
-
-    Parameters:
-        array: images, with Telescope and column
-        mode: "nsigma" (per-telescope mean + threshold*std) or "value" (threshold, same for all telescopes)
-        threshold: nsigma, or the cut value
-    """
-    if mode == "nsigma":
-        cut_stats = array.groupby('Telescope')[column].agg(['mean', 'std'])
-        cut_stats['cut'] = cut_stats['mean'] + threshold*cut_stats['std']
-        array = array.merge(cut_stats[['cut']], on='Telescope')
-        array = array[array[column] < array.cut]
-        return array.drop(columns=['cut'])
 def sky_frame(array, pointings, location):
     """
     Unit vectors of the plane perpendicular to each event's pointing, along the data's camera axes
@@ -523,6 +523,21 @@ def sky_frame(array, pointings, location):
     return east[rows], south[rows]
 
 
+def apply_cut(array, column, mode, threshold):
+    """
+    Keep images with column below the cut.
+
+    Parameters:
+        array: images, with Telescope and column
+        mode: "nsigma" (per-telescope mean + threshold*std) or "value" (threshold, same for all telescopes)
+        threshold: nsigma, or the cut value
+    """
+    if mode == "nsigma":
+        cut_stats = array.groupby('Telescope')[column].agg(['mean', 'std'])
+        cut_stats['cut'] = cut_stats['mean'] + threshold*cut_stats['std']
+        array = array.merge(cut_stats[['cut']], on='Telescope')
+        array = array[array[column] < array.cut]
+        return array.drop(columns=['cut'])
     elif mode == "value":
         return array[array[column] < threshold]
     else:
@@ -541,7 +556,7 @@ def apply_cuts(
 
     Parameters:
         df: events from build_events()/build_array_events()
-        min_tel: minimum number of telescopes in an event (applied before the N_pix cut)
+        min_tel: minimum number of telescopes in an event (applied last, to the images passing the other cuts)
         min_npix: minimum number of pixels in an image
         telescopes: restrict to these telescopes (default = all)
         cuts: optional {column: (mode, threshold)} image cuts, applied in order, see apply_cut(),
@@ -555,9 +570,6 @@ def apply_cuts(
     array = array.drop_duplicates(subset=array.drop(["Telescope", "Event", "ImageIndex"], axis=1))
     array = array[array["width"] > 0]
 
-    # cut by number of telescopes
-    array = array.groupby('Event', group_keys=False).filter(lambda x: len(x) > (min_tel-1))
-
     # cut by minimum number of pixels in image
     array = array[array.N_pix >= min_npix]
 
@@ -567,6 +579,9 @@ def apply_cuts(
 
     for column, (mode, threshold) in (cuts or {}).items():
         array = apply_cut(array, column, mode, threshold)
+
+    # cut by number of telescopes
+    array = array.groupby('Event', group_keys=False).filter(lambda x: len(x) > (min_tel-1))
 
     return array
 

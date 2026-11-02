@@ -14,7 +14,7 @@ import pandas as pd
 
 from heap.events import params_path
 from heap.parameterize import CAMERA_CMAP, CAMERA_EXTENT, CAMERA_HALF_WIDTH, TAB10_COLORS, draw_params
-from heap.process_dataset import _mount_pointing, _run_start_epoch, discover_runs, identify_flip_side, identify_source, load_fallback_map
+from heap.process_dataset import SOURCE_RUN_MAP, _mount_pointing, _run_start_epoch, discover_runs, identify_flip_side, identify_source, load_fallback_map
 
 
 def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
@@ -22,8 +22,7 @@ def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
     One night's runs as heap.process_dataset.process_dataset() sees them: each telescope's source,
     flip side and mount pointing at the run's start (heap.process_dataset._mount_at_run_start()),
     and its data product files. Uses
-    <raw_dir>/source_run_map.json as the fallback map if present (see
-    heap.process_dataset.load_fallback_map()).
+    configs/analysis/source_run_map.yaml as the fallback map (see heap.process_dataset.load_fallback_map()).
 
     Parameters:
         raw_dir: this night's raw data dir
@@ -35,8 +34,7 @@ def run_table(raw_dir, telescopes: dict, data_product: str = "dp_ph1024"):
         FlipSide, RA, Dec (deg, median while tracking), Files, MB. Source/FlipSide are the
         error message if they couldn't be identified.
     """
-    fallback_map_path = Path(raw_dir) / "source_run_map.json"
-    fallback_map = load_fallback_map(fallback_map_path) if fallback_map_path.exists() else None
+    fallback_map = load_fallback_map(SOURCE_RUN_MAP)
     rows = []
     for run_dir in discover_runs(raw_dir):
         for module, info in telescopes.items():

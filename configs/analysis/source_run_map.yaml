@@ -1,0 +1,86 @@
+# Each run's source and flip side, for runs the mount data can't identify: heap.process_dataset.identify_source()
+# and identify_flip_side() use an entry only when the run's mount log and hk.pff have no usable value.
+# Add a run by its folder name; folder names include the start time, so this file holds every night.
+#   flip_side: preflip or postflip
+
+obs_Palomar.start_2026-01-13T03:29:58Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: preflip
+obs_Palomar.start_2026-01-13T09:13:53Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: preflip
+obs_Palomar.start_2026-01-14T02:52:30Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: preflip
+obs_Palomar.start_2026-01-14T06:00:03Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: postflip
+obs_Palomar.start_2026-01-14T09:07:03Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: preflip
+obs_Palomar.start_2026-01-14T11:22:52Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: postflip
+obs_Palomar.start_2026-01-15T02:26:39Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: preflip
+obs_Palomar.start_2026-01-15T05:54:39Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: postflip
+obs_Palomar.start_2026-01-15T09:05:48Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: preflip
+obs_Palomar.start_2026-01-15T11:24:39Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: postflip
+obs_Palomar.start_2026-01-16T04:25:20Z.runtype_obs-test.pffd:
+  source: IceSat-2
+  flip_side: preflip
+obs_Palomar.start_2026-01-16T04:51:22Z.runtype_obs-test.pffd:
+  source: Capella
+  flip_side: preflip
+obs_Palomar.start_2026-01-16T05:01:17Z.runtype_obs-test.pffd:
+  source: Capella
+  flip_side: preflip
+obs_Palomar.start_2026-01-16T05:17:34Z.runtype_obs-test.pffd:
+  source: Elnath
+  flip_side: preflip
+obs_Palomar.start_2026-01-16T05:28:56Z.runtype_obs-test.pffd:
+  source: Hassaleh
+  flip_side: postflip
+obs_Palomar.start_2026-01-16T05:43:26Z.runtype_obs-test.pffd:
+  source: Haedus
+  flip_side: postflip
+obs_Palomar.start_2026-01-16T05:53:57Z.runtype_obs-test.pffd:
+  source: tet Aur
+  flip_side: preflip
+obs_Palomar.start_2026-01-16T06:11:28Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: postflip
+obs_Palomar.start_2026-01-16T09:06:20Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: preflip
+obs_Palomar.start_2026-01-16T11:19:25Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: postflip
+obs_Palomar.start_2026-01-17T03:36:41Z.runtype_obs-test.pffd:
+  source: darks
+  flip_side: preflip
+obs_Palomar.start_2026-01-17T06:11:13Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: postflip
+obs_Palomar.start_2026-01-17T09:04:44Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: preflip
+obs_Palomar.start_2026-01-17T11:14:17Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: postflip
+obs_Palomar.start_2026-01-18T06:47:35Z.runtype_obs-test.pffd:
+  source: Crab
+  flip_side: postflip
+obs_Palomar.start_2026-01-18T08:44:52Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: preflip
+obs_Palomar.start_2026-01-18T11:12:22Z.runtype_obs-test.pffd:
+  source: Mrk 421
+  flip_side: postflip
