@@ -1,0 +1,19 @@
+# This machine's paths, and the configs the notebooks load. Copy to configs/local.yaml (not tracked
+# by git) and edit:
+#   cp configs/local.example.yaml configs/local.yaml
+# Paths may start with ~; relative paths are resolved against the project root.
+
+# Holds one <YYYYMMDD>/ folder of runs per night.
+raw_data_dir: ~/data
+# Where processing writes: each analysis config's output goes to <processed_dir>/<its file name>/, e.g. crab/.
+processed_dir: ~/data/processed
+
+# The analysis config the analysis_tools notebooks and data_mc.ipynb load.
+analysis: configs/analysis/crab.yaml
+
+# Simulation configs (see configs/simulation.example.yaml) the simulation notebooks load, by name:
+# explore_sims.ipynb and process_sims.ipynb load gamma; gamma_hadron.ipynb and data_mc.ipynb load gamma and proton.
+# Each can be a production's own config or the copy it was submitted with, <output_dir>/slurm/<job>.yaml.
+simulations:
+  gamma: configs/simulation/gamma_pointlike.yaml
+  proton: configs/simulation/proton_diffuse.yaml

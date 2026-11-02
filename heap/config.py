@@ -1,7 +1,9 @@
 """config
 
-Loads an analysis config (e.g. configs/crab.yaml, for analysis_tools/pff_analysis.ipynb) and
-converts its values into the forms heap.events/heap.significance take.
+Loads an analysis config (e.g. configs/analysis/crab.yaml, for analysis_tools/pff_analysis.ipynb) and
+converts its values into the forms heap.events/heap.significance take, and this machine's
+configs/local.yaml (see configs/local.example.yaml): where the data and simulations are, and which
+analysis and simulation configs the notebooks load.
 """
 from pathlib import Path
 
@@ -12,7 +14,6 @@ from astropy.coordinates import SkyCoord
 from heap.significance import OFF_REGION_METHODS
 
 SECTIONS = {
-    "paths": {"raw_data_dir", "output_dir"},
     "source": {"name", "dates", "pointing_overrides"},
     "telescopes": None, # module -> {name, rate_cut}
     "pipeline": {"data_product", "image_threshold", "border_threshold", "keep_brightest_island"},
@@ -24,6 +25,8 @@ POSITION_CUT_COLUMNS = {"distance", "alpha", "miss"}
 FLIP_SIDES = {"preflip", "postflip"}
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+LOCAL_CONFIG = PROJECT_ROOT / "configs" / "local.yaml"
+LOCAL_KEYS = {"analysis", "raw_data_dir", "processed_dir", "simulations"}
 
 def _check_keys(section, config, required):
     missing = required - set(config)
@@ -59,17 +62,52 @@ def _resolve(path):
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def load_analysis_config(path):
+def load_local_config():
+    """
+    This machine's configs/local.yaml (see configs/local.example.yaml): where the data and simulations
+    are, and which configs the notebooks load.
+
+    Returns:
+        {"analysis": path, "raw_data_dir": path, "processed_dir": path, "simulations": {name: path}}
+    """
+    if not LOCAL_CONFIG.exists():
+        raise FileNotFoundError(f"no {LOCAL_CONFIG}: copy configs/local.example.yaml there and set this machine's paths")
+    with open(LOCAL_CONFIG) as f:
+        local = yaml.safe_load(f) or {}
+    _check_keys(str(LOCAL_CONFIG), local, LOCAL_KEYS)
+    return local
+
+
+def local_analysis():
+    """The analysis config configs/local.yaml names, as a Path."""
+    return _resolve(load_local_config()["analysis"])
+
+
+def local_simulation(name):
+    """
+    The simulation config that configs/local.yaml's simulations section names name, e.g. "gamma".
+
+    Returns:
+        Path (relative paths resolved against the project root)
+    """
+    simulations = load_local_config()["simulations"] or {}
+    if name not in simulations:
+        raise ValueError(f"no simulations.{name} in {LOCAL_CONFIG}: add it, see configs/local.example.yaml")
+    return _resolve(simulations[name])
+
+
+def load_analysis_config(path=None):
     """
     Load and check an analysis config.
 
     Parameters:
-        path: config YAML, see configs/crab.yaml
+        path: config YAML, e.g. configs/analysis/crab.yaml; None = configs/local.yaml's analysis
 
     Returns:
         the config's sections as nested dicts, with
-            paths.*: Path (relative paths resolved against the project root; output_dir
-                defaults to <raw_data_dir>/processed)
+            paths.raw_data_dir: configs/local.yaml's raw_data_dir, as a Path
+            paths.output_dir: <processed_dir>/<the config's file name, without .yaml>, from
+                configs/local.yaml's processed_dir
             source.dates: list of "YYYYMMDD" strings, or None
             source.pointing_overrides: {run folder name: SkyCoord}
             events.reference: list of telescope names, in order of preference, see
@@ -80,7 +118,7 @@ def load_analysis_config(path):
             cuts.image_cuts, cuts.position_cuts: {column: (mode, threshold)}, see
                 heap.events.apply_cuts() and heap.significance.OnOffCounter
     """
-    path = Path(path)
+    path = Path(path) if path is not None else local_analysis()
     with open(path) as f:
         config = yaml.safe_load(f)
 
@@ -89,9 +127,11 @@ def load_analysis_config(path):
         if keys is not None:
             _check_keys(section, config[section], keys)
 
-    paths = config["paths"]
-    paths["raw_data_dir"] = _resolve(paths["raw_data_dir"])
-    paths["output_dir"] = _resolve(paths["output_dir"]) if paths["output_dir"] is not None else paths["raw_data_dir"] / "processed"
+    local = load_local_config()
+    config["paths"] = {
+        "raw_data_dir": _resolve(local["raw_data_dir"]),
+        "output_dir": _resolve(local["processed_dir"]) / path.stem,
+    }
 
     source = config["source"]
     source["dates"] = [str(d) for d in source["dates"]] if source["dates"] is not None else None
