@@ -1,13 +1,8 @@
 # Config for analysis_tools/pff_analysis.ipynb: one source over one or more nights of pff data.
-# Loaded by heap.config.load_analysis_config(). Paths are resolved relative to the project root if not absolute.
-
-paths:
-  # Holds one <YYYYMMDD>/ folder of runs per night.
-  raw_data_dir: /home/nkorzoun/research/PANOSETI/data
-  # Cleaned images, Hillas parameters, and calibrations, per night.
-  # Nights already here are not reprocessed (unless the notebook's REPROCESS), so give configs with
-  # different telescopes/pipeline settings their own output_dir.
-  output_dir: /home/nkorzoun/research/PANOSETI/data/processed
+# Loaded by heap.config.load_analysis_config(). Where the data are on this machine is set in configs/local.yaml.
+# Processing writes the cleaned images, Hillas parameters, and calibrations, per night, to
+# <processed_dir>/<this file's name>/, e.g. <processed_dir>/crab/. Nights already there are not reprocessed
+# (unless the notebook's REPROCESS), so copy this file under a new name for other telescopes/pipeline settings.
 
 source:
   # Mount target name, else heap.sources catalog name; its catalog position is the on region center.
@@ -22,21 +17,33 @@ source:
   #     obs_Palomar.start_2026-09-18T10:53:14Z.runtype_ph.pffd: [83.6324, 21.5174]
   pointing_overrides: {}
 
+# Palomar Observatory. The data's cameras are fixed to the sky, so the shower cores need which way the
+# sky's east is on the ground at each event's time (heap.events.sky_frame()).
+site:
+  latitude: 33.356 # deg
+  longitude: -116.863 # deg, positive east
+  height: 1650 # m
+
 telescopes:
-  # module number -> telescope name and rate_cut (spike_cut's trigger-rate threshold, as a
-  # multiple of each file's median trigger rate).
+  # module number -> telescope name, rate_cut (spike_cut's trigger-rate threshold, as a multiple of
+  # each file's median trigger rate) and position ([x north, y west, z up] in m, in the frame of the
+  # TELESCOPE lines of configs/corsika.example.inp).
   module_250:
     name: Heli
     rate_cut: 3
+    position: [197.11, -112.35, 39.70]
   module_252:
     name: Fern
     rate_cut: 3
+    position: [290.32, 17.98, 34.66]
   module_253:
     name: Winter
     rate_cut: 3
+    position: [133.60, 107.70, 49.17]
   module_254:
     name: Gattini
     rate_cut: 3
+    position: [-233.40, -290.03, 42.82]
 
 pipeline:
   # Data product tag in .pff filenames.

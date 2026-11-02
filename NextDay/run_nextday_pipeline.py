@@ -6,7 +6,7 @@ A night's raw data is split into runs (separate acquisition sessions, e.g. eithe
 meridian flip or a DAQ restart), each its own subfolder named after its start time. Reads
 raw .pff files from <raw_data_dir>/<date>/<run_id>/ and writes plots + manifest.json +
 index.html to <out_data_dir>/<date>/, with each run's plots under <run_id>/ (raw_data_dir and
-output_dir come from a config file, see configs/nextday.yaml).
+output_dir come from a config file, see configs/nextday/nextday.yaml).
 
 For every run: loads + cleans each telescope's data (spike_cut.png per telescope under
 <run_id>/module_<n>/), corrects other telescopes' timestamps against a reference telescope
@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "nextday.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "nextday" / "nextday.yaml"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from heap import coincidences as coinc
@@ -329,7 +329,7 @@ def process_telescope_datasets(telescope_map, raw_dir, date_out_dir, colors, ima
     colors: {telescope_name: color}, used for each telescope's pedvar histogram (see
         telescope_color_map()).
     image_threshold, border_threshold: threshold_clean()'s per-pixel cut in units of pedvar (see
-        heap.image_cleaning.threshold_clean), from configs/nextday.yaml's pipeline section.
+        heap.image_cleaning.threshold_clean), from configs/nextday/nextday.yaml's pipeline section.
     event_preview_min_pixels: minimum surviving (post-cleaning) pixels for an event to be
         included in the returned telescope_events (N_pix >= event_preview_min_pixels).
 

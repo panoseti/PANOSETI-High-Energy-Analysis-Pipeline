@@ -12,9 +12,9 @@ paths:
   # PANOSETI sim_telarray config. Its directory is added to sim_telarray's include path, so
   # the .dat files next to it are found.
   sim_telarray_config: ~/research/PANOSETI/PANOSETI_sim_telarray_config/panoseti_simtelarray_example.cfg
-  # CORSIKA input card template, see configs/corsika_template.inp. RUNNR, SEED and
+  # CORSIKA input card template, see configs/corsika.example.inp. RUNNR, SEED and
   # TELFIL are set per run; other keywords can be overridden in corsika: below.
-  corsika_template: configs/corsika_template.inp
+  corsika_template: configs/corsika.example.inp
   # Where everything is written (input cards, CORSIKA files, sim_telarray files, logs,
   # SLURM scripts), see the layout in simulation_tools/run_simulation.py.
   output_dir: sim_output/gamma_pointlike
@@ -24,7 +24,7 @@ paths:
   # Scratch space for each run while it runs, moved to output_dir when done. null = $TMPDIR
   # if set (usually node-local on SLURM), otherwise <output_dir>/work.
   work_dir: null
-  # Where simulation_tools/process_sims.ipynb writes the processed production (cleaned images,
+  # Where simulation_tools/notebooks/process_sims.ipynb writes the processed production (cleaned images,
   # Hillas parameters, calibrations), as <processed_dir>/<name>/<tag>/. Keep it out of output_dir,
   # which may be shared. No default: the notebooks raise while it's null.
   processed_dir: null
@@ -77,6 +77,17 @@ sim_telarray:
     # Pedestal frames (NSB and noise only) per run, for heap.process_simulation's pedestals and
     # pedvars, which need at least 100 per telescope over the production.
     pedestal_events: 10
+
+# Image processing of the production (simulation_tools/notebooks/process_sims.ipynb), as an analysis config's
+# pipeline section does for the data (see configs/analysis/crab.yaml). No default: process_sims.ipynb raises
+# while it's missing.
+pipeline:
+  # threshold_clean()'s per-pixel cuts, in units of pedvar (see heap.image_cleaning.threshold_clean).
+  image_threshold: 4.0
+  border_threshold: 2.0
+  # Keep only each image's brightest island (8-connected group of surviving pixels), so separate
+  # islands don't distort the Hillas parameters (see heap.image_cleaning.threshold_clean).
+  keep_brightest_island: true
 
 slurm:
   partition: null
