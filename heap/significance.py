@@ -351,7 +351,6 @@ class OnOffCounter:
         return pd.concat(parts, ignore_index=True)
 
 
-# "borrowed" from Eventdisplay VStatistics.h
 def significance(Non,Noff,alpha):
     """Li & Ma significance, Equation 17."""
 

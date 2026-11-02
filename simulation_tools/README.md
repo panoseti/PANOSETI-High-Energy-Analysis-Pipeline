@@ -1,25 +1,27 @@
 # simulation_tools
 
-CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI sim_telarray config](https://github.com/orelgueta/PANOSETI_sim_telarray_config). `run_simulation.py` runs a production as SLURM job arrays (one task per CORSIKA run), or one run at a time locally. Everything is set in one YAML config, see [`configs/simulation.yaml`](../configs/simulation.yaml).
+CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI sim_telarray config](https://github.com/orelgueta/PANOSETI_sim_telarray_config). `run_simulation.py` runs a production as SLURM job arrays (one task per CORSIKA run), or one run at a time locally. Everything is set in one YAML config, see [`configs/simulation.example.yaml`](../configs/simulation.example.yaml).
 
 * `run_simulation.py` - the pipeline
 * `trace_photons.py` - traces CORSIKA's photons through the lens to the camera on their way to sim_telarray, see Optics
 * `optical_model.py`, `resources/optical_model_data_pack.json` - the PANOSETI optical model it uses
-* `process_sims.ipynb` - processes a production into cleaned images and Hillas parameters, with diagnostics (the simulated `analysis_tools/process_pff.ipynb`)
-* `explore_sims.ipynb` - cuts, reconstruction and MC truth of a processed production (the simulated `analysis_tools/explore_events.ipynb`)
-* [`configs/corsika_template.inp`](../configs/corsika_template.inp) - the CORSIKA input card every run's card is made from
+* `notebooks/process_sims.ipynb` - processes a production into cleaned images and Hillas parameters, with diagnostics (the simulated `analysis_tools/process_pff.ipynb`)
+* `notebooks/explore_sims.ipynb` - cuts, reconstruction and MC truth of a processed production (the simulated `analysis_tools/explore_events.ipynb`)
+* `notebooks/gamma_hadron.ipynb` - a processed gamma production against a processed proton production: Hillas parameters, mean scaled width and length, and how well cuts and a BDT separate them
+* `notebooks/data_mc.ipynb` - processed data against processed productions, with the same cuts
+* [`configs/corsika.example.inp`](../configs/corsika.example.inp) - the CORSIKA input card every run's card is made from
 
 ## Requirements
 * [CORSIKA 7](https://www.iap.kit.edu/corsika/index.php), verified for 78010, compiled with IACT, CHERENKOV, VOLUMEDET, VIEWCONE, SLANT, ATMEXT, QGSJET-III and UrQMD
 * [sim_telarray](https://www.mpi-hd.mpg.de/hfm/~bernlohr/sim_telarray/), verified for release 2025.51.0
 * [PANOSETI_sim_telarray_config](https://github.com/orelgueta/PANOSETI_sim_telarray_config), with `bypass_optics = 1` (see Optics)
 * `zstd` on the `PATH`: CORSIKA and sim_telarray write their `.zst` files through it
-* Python with `numpy`, `scipy`, `zstandard` and `pyyaml` (installing `heap` brings them)
+* Python with `numpy`, `scipy`, `zstandard` and `pyyaml` (installing `heap` brings them); `gamma_hadron.ipynb` also needs `scikit-learn`
 
 ## Quick start
 Copy the config and set the paths to your CORSIKA, sim_telarray and PANOSETI config installs:
 ```
-cp configs/simulation.yaml my_simulation.yaml
+cp configs/simulation.example.yaml my_simulation.yaml
 ```
 Try one run locally first; for a quick test, set e.g. `corsika: {NSHOW: 2}` in the config (2 showers in the run; `--run 1` is the run number, not a shower count):
 ```
@@ -150,6 +152,14 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `parameters` | config parameter overrides (`-C`), e.g. `discriminator_threshold: 5.5`; lists are joined with commas. The default config sets `pedestal_events: 10`, the pedestal frames per run that `heap.process_simulation` needs (see Reading the outputs). Not `bypass_optics`, which belongs in the PANOSETI config |
 | `optics` | the lens, traced by `trace_photons.py` (see Optics): `thick_lens` (`true`: the lens's grooves traced one by one; `false`: thin lens with the ideal aspheric profile) and `focal_offset` [cm] (camera plane at the focal length, 60.78 cm at 546 nm, + `focal_offset`) |
 
+### pipeline
+Image processing of the production in `process_sims.ipynb`, with the same keys as an analysis config's `pipeline` section (see `configs/analysis/crab.yaml`), so the simulations can be cleaned the same way as the data they're compared to; `data_mc.ipynb` warns when they weren't. No default: `process_sims.ipynb` raises while it's missing.
+
+| key | |
+|---|---|
+| `image_threshold`, `border_threshold` | `heap.image_cleaning.threshold_clean()`'s per-pixel cuts, in units of pedvar |
+| `keep_brightest_island` | keep only each image's brightest island of surviving pixels |
+
 ### slurm
 | key | |
 |---|---|
@@ -162,7 +172,7 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `setup` | shell lines run before the pipeline in each job, e.g. `module load ...` or activating a conda environment |
 
 ## CORSIKA template
-[`configs/corsika_template.inp`](../configs/corsika_template.inp) is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, 10 gammas per run (`NSHOW 10`) from a 3-100 TeV power law with index -2.7 (`ERANGE 3E3 1E5`, `ESLOPE -2.7`), each used 5 times (`CSCAT 5 500.E2 0.`), and primary directions from a viewing cone around 20 deg zenith angle (`THETAP 20. 20.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
+[`configs/corsika.example.inp`](../configs/corsika.example.inp) is a complete CORSIKA card: the 7-telescope layout at `OBSLEV 1650.E2`, 10 gammas per run (`NSHOW 10`) from a 3-100 TeV power law with index -2.7 (`ERANGE 3E3 1E5`, `ESLOPE -2.7`), each used 5 times (`CSCAT 5 500.E2 0.`), and primary directions from a viewing cone around 20 deg zenith angle (`THETAP 20. 20.`, `PHIP 0. 0.`, `VIEWCONE 0. 0.`). Edit it for changes every production shares, and use the config's `corsika` section for per-production ones. For each run the pipeline sets `RUNNR`, the `SEED` lines (as many as the template has) and `TELFIL`; `<output_dir>/inputs/` holds each run's final card.
 
 ### Array layout
 ![PANOSETI array layout](array_layout.png)
@@ -230,7 +240,7 @@ results, showers = process_simulation(files, "/path/to/processed/gamma_pointlike
 * The Hillas parameters have `Run` and `EventID` in place of the data's `Timestamp`: images of the same event share them, and they are the key into the showers (energy, direction, core, Xmax, ...). Match on them, not on timestamps: a simulated event's times are when sim_telarray processed it.
 
 ### Notebooks
-Both notebooks read the production from a simulation config (`CONFIG`: this one, or the copy a production was submitted with, `<output_dir>/slurm/<job>.yaml`) and run from `simulation_tools/`. Run `process_sims.ipynb` first: it writes `<processed_dir>/<name>/<tag>/` (reused if it's already there with the same settings, see above), which `explore_sims.ipynb` reads. The functions they call are in `heap.process_simulation`:
+Both notebooks read the production from a simulation config (`CONFIG`, by default `configs/local.yaml`'s `gamma`, see [This machine's paths](../README.md#this-machines-paths): a production's config, or the copy it was submitted with, `<output_dir>/slurm/<job>.yaml`) and run from `simulation_tools/`. Run `process_sims.ipynb` first: it writes `<processed_dir>/<name>/<tag>/` (reused if it's already there with the same settings, see above), which `explore_sims.ipynb` reads. The functions they call are in `heap.process_simulation`:
 * `load_events()` reads the processed outputs back as array events, matched by `Run` and `EventID`, in the layout of `heap.events.build_array_events()`, so `heap.events.apply_cuts()` and `heap.reconstruction` work on them unchanged. Each image gets `impact`, its telescope's distance from the shower axis, and each shower `true_x`, `true_y`, the primary's direction in the camera relative to its run's pointing.
 * Camera coordinates are sim_telarray's, fixed to the alt-az mount: +x towards higher altitude, +y towards lower azimuth (`camera_position()`). This is measured from the images, which are displaced towards the shower core, not taken from sim_telarray's documentation.
 * `plot_energies()` plots the effective area in each energy bin as
@@ -240,6 +250,13 @@ Both notebooks read the production from a simulation config (`CONFIG`: this one,
   * `A_sim` = pi x `core_range[1]`^2, the circle on the ground that the shower cores were scattered over.
   * `N_selected` = the events in the bin that triggered (or passed the cuts).
   * `N_simulated` = all events simulated in the bin, triggered or not. The `.simtel.zst` files only hold triggered events, so it's calculated rather than counted: each run simulated `n_showers x n_use` events from a power law with `spectral_index` over `energy_range` (all from `read_run_header()`), summed over every run.
+
+`gamma_hadron.ipynb` and `data_mc.ipynb` compare samples: two productions (`GAMMA_CONFIG`, `PROTON_CONFIG`), or the data's analysis config (`CONFIG`, as in `analysis_tools/explore_events.ipynb`) and one simulation config per production (`SIM_CONFIGS`). The productions default to `configs/local.yaml`'s `gamma` and `proton`. Each production is read with `heap.process_simulation.load_production()`; the plotting, the mean scaled width and length and the cut efficiencies are functions in the notebooks themselves.
+* Each shower is weighted from the production's simulated power law to `SPECTRAL_INDEX` (None = as simulated). Every histogram, profile and efficiency of a production is weighted.
+* Only parameters that don't depend on the camera's orientation are compared, since the data's cameras are fixed to the sky and the simulation's to the alt-az mount.
+* The lookup tables hold the gammas' mean and spread of width and length per bin of size and distance (or of size and reconstructed impact, `impact_reco`); an event's mean scaled width (`mscw`) is the mean over its images of (width - mean) / spread, the same for length (`mscl`).
+* The cut scans give the fraction of each sample a cut keeps and the quality factor Q = (gammas kept) / sqrt(protons kept), among the events with a value of the cut's column.
+* `data_mc.ipynb` stands a simulated telescope in for each data telescope (`SIM_TELESCOPES`, by the order of the `TELESCOPE` lines) and checks that every sample was cleaned with the same settings.
 
 ### Readers
 `heap.read_simtel` is the reader underneath: `read_events()` returns the same (N, 32, 32) arrays as the pff and root readers, indexed [row, col] with columns along the camera's x, with sim_telarray's artificial `fadc_pedestal` offset removed and NSB and noise left in. Each telescope's pedestal frames are kept separate from its shower images (`pedestal_frames`), and `read_events(files, true_images=True)` also gives each image's true photoelectrons per pixel.
