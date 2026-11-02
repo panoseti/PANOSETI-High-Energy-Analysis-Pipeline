@@ -15,10 +15,13 @@ when sim_telarray processed it.
 import json
 from pathlib import Path
 
+import eventio
 import numpy as np
 from eventio import SimTelFile
+from eventio.histograms import Histograms
 
 SKY_PEDESTAL = 1 # calibration_type of sim_telarray's pedestal_events (lid open, with NSB)
+SIMULATED_SHOWERS_HISTOGRAM = 6 # sim_telarray's "Events, without weights (Ra3d, log10(E))": every event, triggered or not
 
 def _as_list(simtel_files):
     """One path, or a list of paths -> list of paths"""
@@ -105,6 +108,32 @@ def read_events(simtel_files, true_images=False):
     }
     showers = {key: np.array(values) for key, values in showers.items()}
     return telescopes, showers
+
+def read_simulated_showers(hdata_files):
+    """
+    Every simulated event, triggered or not, by core distance and energy, summed over runs, from
+    sim_telarray's histogram files. The .simtel.zst files only hold triggered events.
+
+    Parameters:
+        hdata_files: one or more .hdata.zst paths
+
+    Returns:
+        (counts, core_edges, log10_energy_edges): counts of shape (n core bins, n energy bins), and the
+        bin edges: the distance [m] from the array center in the plane perpendicular to the shower,
+        and log10 of the energy [TeV]
+    """
+    counts = 0
+    for hdata_file in _as_list(hdata_files):
+        with eventio.EventIOFile(str(hdata_file)) as f:
+            for block in f:
+                if isinstance(block, Histograms):
+                    for histogram in block.parse():
+                        if histogram["id"] == SIMULATED_SHOWERS_HISTOGRAM:
+                            simulated = histogram
+                            counts = counts + np.asarray(histogram["data"], dtype=float).T
+    core_edges = np.linspace(simulated["lower_x"], simulated["upper_x"], simulated["n_bins_x"] + 1)
+    log10_energy_edges = np.linspace(simulated["lower_y"], simulated["upper_y"], simulated["n_bins_y"] + 1)
+    return counts, core_edges, log10_energy_edges
 
 def read_tel_data(simtel_file, telescope_id):
     """

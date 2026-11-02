@@ -249,7 +249,7 @@ Both notebooks read the production from a simulation config (`CONFIG`, by defaul
   ```
   * `A_sim` = pi x `core_range[1]`^2, the circle on the ground that the shower cores were scattered over.
   * `N_selected` = the events in the bin that triggered (or passed the cuts).
-  * `N_simulated` = all events simulated in the bin, triggered or not. The `.simtel.zst` files only hold triggered events, so it's calculated rather than counted: each run simulated `n_showers x n_use` events from a power law with `spectral_index` over `energy_range` (all from `read_run_header()`), summed over every run.
+  * `N_simulated` = all events simulated in the bin, triggered or not. The `.simtel.zst` files only hold triggered events, so it's counted from sim_telarray's histogram of every simulated event in the `.hdata.zst` files (`simulated_counts()`), summed over every run. Its energy bins are 0.05 in log10, so `energy_bins` must lie on those edges.
 
 `gamma_hadron.ipynb` and `data_mc.ipynb` compare samples: two productions (`GAMMA_CONFIG`, `PROTON_CONFIG`), or the data's analysis config (`CONFIG`, as in `analysis_tools/explore_events.ipynb`) and one simulation config per production (`SIM_CONFIGS`). The productions default to `configs/local.yaml`'s `gamma` and `proton`. Each production is read with `heap.process_simulation.load_production()`; the plotting, the mean scaled width and length and the cut efficiencies are functions in the notebooks themselves.
 * Each shower is weighted from the production's simulated power law to `SPECTRAL_INDEX` (None = as simulated). Every histogram, profile and efficiency of a production is weighted.
@@ -260,6 +260,7 @@ Both notebooks read the production from a simulation config (`CONFIG`, by defaul
 
 ### Readers
 `heap.read_simtel` is the reader underneath: `read_events()` returns the same (N, 32, 32) arrays as the pff and root readers, indexed [row, col] with columns along the camera's x, with sim_telarray's artificial `fadc_pedestal` offset removed and NSB and noise left in. Each telescope's pedestal frames are kept separate from its shower images (`pedestal_frames`), and `read_events(files, true_images=True)` also gives each image's true photoelectrons per pixel.
+* `read_simulated_showers()` gives every simulated event, triggered or not, by core distance and energy, from the `.hdata.zst` histogram files; `heap.process_simulation.plot_core_fractions()` uses it to check that the core radius is large enough. The distance is in the plane perpendicular to the shower.
 * `read_run_header()` gives the pointing, telescope positions and what was simulated (`n_showers x n_use` events, energy range, spectral index, core range, viewcone), e.g. for effective areas. The pointing comes from `<name>.pointing.json` next to the file, else from the file's header; a file pointing at the zenith without one raises.
 
 ## Failures and reruns

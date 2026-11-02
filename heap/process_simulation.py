@@ -22,7 +22,7 @@ from heap import events as ev
 from heap.make_pedestals import calculate_pedestal_and_pedvar
 from heap.parameterize import CAMERA_CMAP, CAMERA_EXTENT, CAMERA_HALF_WIDTH, TAB10_COLORS, draw_params
 from heap.process_dataset import process_image
-from heap.read_simtel import read_events, read_run_header
+from heap.read_simtel import read_events, read_run_header, read_simulated_showers
 from heap.reconstruction import tilted_frame
 
 MIN_PEDESTAL_FRAMES = 100 # as build_calibrations() needs per chunk of data
@@ -365,17 +365,35 @@ def load_production(cfg, telescopes: list = None):
     images, showers = load_events(processed_path(cfg), name, runs, telescopes)
     return runs, images, showers
 
+SIMTEL_REFERENCE_POSITION = [0., 0., 7.5] # m, sim_telarray's default REFERENCE_POSITION: where its histograms measure core distance from
+
+def simulated_showers(headers):
+    """
+    read_simtel.read_simulated_showers() of every run, from the .hdata(.zst) file next to its .simtel(.zst) file
+
+    Parameters:
+        headers: run_table()
+    """
+    return read_simulated_showers([path.with_name(path.name.replace(".simtel", ".hdata")) for path in headers.File])
+
+def _bin_index(fine_edges, bins, name):
+    """Which of bins each bin between fine_edges falls in (-1 or len(bins) - 1 if outside); raises if bins aren't on fine_edges."""
+    if not np.isclose(fine_edges[None, :], bins[:, None], atol=1e-6).any(axis=1).all():
+        raise ValueError(f"{name} bins {bins} are not on the simulated histogram's edges, every {fine_edges[1] - fine_edges[0]:g}")
+    return np.digitize((fine_edges[1:] + fine_edges[:-1]) / 2, bins) - 1
+
 def simulated_counts(headers, energy_bins):
     """
-    Events simulated per energy bin over every run: n_showers * n_use per run, on the power law of
-    energy_range and spectral_index (see read_simtel.read_run_header())
+    Events simulated per energy bin over every run, counted by sim_telarray (simulated_showers())
+
+    Parameters:
+        headers: run_table()
+        energy_bins: bin edges [TeV], on the histogram's bin edges (every 0.05 in log10)
     """
-    header = headers.iloc[0]
-    e_min, e_max = header.energy_range
-    index = header.spectral_index # dN/dE ~ E^index
-    clipped = np.clip(energy_bins, e_min, e_max) # none simulated outside energy_range
-    frac = (clipped[1:]**(index + 1) - clipped[:-1]**(index + 1)) / (e_max**(index + 1) - e_min**(index + 1))
-    return (headers.n_showers * headers.n_use).sum() * frac
+    counts, _, log10_energy_edges = simulated_showers(headers)
+    index = _bin_index(log10_energy_edges, np.log10(energy_bins), "energy")
+    inside = (index >= 0) & (index < len(energy_bins) - 1)
+    return np.bincount(index[inside], counts.sum(axis=0)[inside], len(energy_bins) - 1)
 
 def plot_energies(headers, samples: dict, energy_bins):
     """
@@ -407,6 +425,50 @@ def plot_energies(headers, samples: dict, energy_bins):
     axs[1].set(xscale="log", yscale="log", xlabel="energy (TeV)", ylabel="effective area (m$^2$)", title="Effective area")
     for ax in axs:
         ax.legend()
+    return fig
+
+def plot_core_fractions(headers, samples: dict, energy_bins, n_core_bins: int = 10):
+    """
+    Each sample's fraction of the simulated events (simulated_showers()) against the distance of the
+    shower axis from SIMTEL_REFERENCE_POSITION (impact_distance()), one line per energy bin, to see if the
+    production's core radius is large enough: a fraction still above 0 in the last bin means showers
+    beyond it would have been kept too.
+
+    Parameters:
+        headers: run_table()
+        samples: {label: showers}, e.g. {"triggered": ..., "after cuts": ...}, rows of load_events()'s showers
+        energy_bins: bin edges [TeV], on the histogram's bin edges (every 0.05 in log10), one line per bin with simulated events
+        n_core_bins: number of distance bins out to the core radius, on the histogram's bin edges (every 5 m)
+
+    Returns:
+        the Figure
+    """
+    radius = headers.iloc[0].core_range[1]
+    counts, core_edges, log10_energy_edges = simulated_showers(headers)
+    core_bins = np.linspace(0, radius, n_core_bins + 1)
+    centers = (core_bins[1:] + core_bins[:-1]) / 2
+    # distances reach slightly past radius (cores are scattered around the observation level, not the reference position): keep them in the last bin
+    core_index = _bin_index(core_edges, core_bins, "distance").clip(None, n_core_bins - 1)
+    energy_index = _bin_index(log10_energy_edges, np.log10(energy_bins), "energy")
+    n_simulated = np.zeros((n_core_bins, len(energy_bins) - 1))
+    inside = (energy_index >= 0) & (energy_index < len(energy_bins) - 1)
+    np.add.at(n_simulated, (core_index[:, None].repeat(inside.sum(), axis=1), energy_index[inside][None, :].repeat(len(core_index), axis=0)), counts[:, inside])
+
+    fig, axs = plt.subplots(1, len(samples), figsize=(5.5*len(samples), 4.5), sharey=True, squeeze=False)
+    for ax, (label, sample) in zip(axs[0], samples.items()):
+        distance = np.clip(impact_distance(sample, SIMTEL_REFERENCE_POSITION), None, radius)
+        for j, (low, high) in enumerate(zip(energy_bins[:-1], energy_bins[1:])):
+            if n_simulated[:, j].sum() == 0:
+                continue
+            in_bin = (sample.energy >= low) & (sample.energy < high)
+            kept, _ = np.histogram(distance[in_bin], core_bins)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                fraction = kept / n_simulated[:, j]
+                error = np.sqrt(fraction.clip(0, 1) * (1 - fraction.clip(0, 1)) / n_simulated[:, j])
+            ax.errorbar(centers, fraction, yerr=error, fmt="o-", ms=3, label=f"{low:.3g}-{high:.3g} TeV")
+        ax.set(xlabel="distance of shower axis from array center (m)", title=label)
+        ax.legend(fontsize=8)
+    axs[0, 0].set(ylabel="fraction of simulated events", ylim=(0, None))
     return fig
 
 def plot_cores(headers, samples: dict, colors: dict = None):
