@@ -24,4 +24,8 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["heap"]
+packages = ["heap", "simulation_tools"]
+include-package-data = false # only package-data below, not every tracked file
+
+[tool.setuptools.package-data]
+simulation_tools = ["resources/*"]
