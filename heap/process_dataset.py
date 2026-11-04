@@ -334,7 +334,7 @@ def build_calibrations(
     gap_indices = np.where(time_diffs > max_gap)[0]
 
     segment_starts = [0] + (gap_indices + 1).tolist()
-    segment_ends = gap_indices.tolist() + [len(sorted_times)]
+    segment_ends = (gap_indices + 1).tolist() + [len(sorted_times)] # exclusive: a segment's last frame is at its gap index
 
     print(f"  Found {len(segment_starts)} continuous observing segments")
 
