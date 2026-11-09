@@ -150,7 +150,7 @@ Lists are joined with spaces; keywords missing from the template are added befor
 | `tag` | output subdirectory under `simtel/` and `logs/` |
 | `defines` | preprocessor macros (`-D`), e.g. `PANOSETI_TRIGGER_PIXELS: 1` |
 | `parameters` | config parameter overrides (`-C`), e.g. `discriminator_threshold: 5.5`; lists are joined with commas. The default config sets `pedestal_events: 10`, the pedestal frames per run that `heap.process_simulation` needs (see Reading the outputs). Not `bypass_optics`, which belongs in the PANOSETI config |
-| `optics` | the lens, traced by `trace_photons.py` (see Optics): `thick_lens` (`true`: the lens's grooves traced one by one; `false`: thin lens with the ideal aspheric profile) and `focal_offset` [cm] (camera plane at the focal length, 60.78 cm at 546 nm, + `focal_offset`) |
+| `optics` | the lens, traced by `trace_photons.py` (see Optics): `thick_lens` (`true`: the lens's grooves traced one by one; `false`: thin lens with the ideal aspheric profile) and `focal_offset` [cm] (camera plane at the focal length, 60.78 cm at 546 nm, + `focal_offset`; the focus scan's best focus, the default since 2026-11-09, is `-0.6`, 6 mm closer to the lens) |
 
 ### pipeline
 Image processing of the production in `process_sims.ipynb`, with the same keys as an analysis config's `pipeline` section (see `configs/analysis/crab.yaml`), so the simulations can be cleaned the same way as the data they're compared to; `data_mc.ipynb` warns when they weren't. No default: `process_sims.ipynb` raises while it's missing.

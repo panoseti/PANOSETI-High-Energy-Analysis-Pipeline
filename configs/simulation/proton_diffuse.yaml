@@ -61,7 +61,7 @@ sim_telarray:
   wobble_direction: 0.0
   # Output subdirectory under simtel/ and logs/, so reruns with other settings don't
   # overwrite earlier ones.
-  tag: v1
+  tag: v2 # 10 MHz NSB, discriminator_amplitude 16/9 (sim_telarray config 27f3b75), best focus
   # The lens: CORSIKA's photons go through simulation_tools/trace_photons.py, which traces them
   # through the PANOSETI optical model (simulation_tools/optical_model.py) to the camera, before
   # sim_telarray, whose own optics are skipped (bypass_optics = 1 in its config).
@@ -69,7 +69,7 @@ sim_telarray:
     # true: trace the lens's grooves (thick lens); false: thin lens with the ideal aspheric profile.
     thick_lens: false
     # [cm] camera plane at the lens's focal length (60.78 cm at 546 nm) + focal_offset.
-    focal_offset: 0.0
+    focal_offset: -0.6 # the focus scan's best focus (~/simulations/focus)
   # Preprocessor macros (-D), e.g. PANOSETI_TRIGGER_PIXELS: 1
   defines: {}
   # Config parameter overrides (-C), e.g. discriminator_threshold: 5.5
