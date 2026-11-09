@@ -423,7 +423,8 @@ def load_camera_frames(
 ):
     """
     load_camera_frame() for every telescope with processed data for source on date, keeping only
-    runs with a pointing (run_pointings()).
+    runs with a pointing (run_pointings()). Telescopes without it (e.g. one that sat the night out)
+    are skipped with a printout, as in process_night(), before their mount data is looked at.
 
     Parameters:
         output_dir: processed data dir (holding <date>/), see process_night()
@@ -437,12 +438,14 @@ def load_camera_frames(
     Returns:
         {telescope: DataFrame from load_camera_frame()}, {run folder name: SkyCoord} each run's pointing
     """
+    missing = [name for name in telescopes if not params_path(output_dir, date, name, source).exists()]
+    if missing:
+        print(f"{date}: no processed {source} data for {', '.join(missing)}, skipping")
+    telescopes = [name for name in telescopes if name not in missing]
     pointings = run_pointings(raw_dir, source, telescopes, pointing_overrides)
     frames = {}
     for name in telescopes:
         path = params_path(output_dir, date, name, source)
-        if not path.exists():
-            continue
         corrections = {
             side: offset for (d, tel, side), offset in (pointing_corrections or {}).items()
             if d == date and tel == name
