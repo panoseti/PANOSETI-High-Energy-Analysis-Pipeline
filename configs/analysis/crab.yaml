@@ -8,7 +8,7 @@ source:
   # Mount target name, else heap.sources catalog name; its catalog position is the on region center.
   name: Crab
   # Nights to analyze, e.g. [20260917, 20260918]; null = every night in raw_data_dir.
-  dates: [20260917, 20260918, 20260922]
+  dates: [20261015, 20261016, 20261018]
   # Each run's pointing is the mount positions at its start (heap.events.run_pointings()). Give it here
   # for runs that didn't start with an alignment or have no mount data, by run folder name,
   # as "hh mm ss +dd mm ss" or [RA, Dec] in degrees, e.g.
