@@ -290,7 +290,7 @@ def load_camera_frame(
     return df
 
 
-TIMING_BIN_WIDTH = 120 # s, coincidences.correct_time()'s default bin_width
+TIMING_BIN_WIDTH = 60 # s, bins for choosing each stretch's timing reference (_timing_segments()) and correcting its timing offsets (coincidences.correct_time())
 
 
 def _timing_segments(images: dict, order: list, bin_width: float = TIMING_BIN_WIDTH):
@@ -321,16 +321,17 @@ def _timing_segments(images: dict, order: list, bin_width: float = TIMING_BIN_WI
     return segments
 
 
-def _match_segment(telescopes: dict, reference: str, window: float, plotting: bool, label: str = ""):
+def _match_segment(telescopes: dict, reference: str, window: float, plotting: bool, label: str = "", timing_bin_width: float = TIMING_BIN_WIDTH):
     """build_events() for one stretch of time, with reference as its timing reference; label is
-    appended to correct_time's plot_name, e.g. the run and time range."""
+    appended to correct_time's plot_name, e.g. the run and time range. timing_bin_width is
+    correct_time's bin_width."""
     ref_timestamps = telescopes[reference].Timestamp.to_numpy()
     for name, df in list(telescopes.items()):
         if name == reference:
             continue
         df = df.copy()
         try:
-            df["Timestamp"] = coinc.correct_time(df.Timestamp.to_numpy(), ref_timestamps, plot_name=f"{reference}-{name}{label}", base_dir=None, plotting=plotting, coinc_window=window)
+            df["Timestamp"] = coinc.correct_time(df.Timestamp.to_numpy(), ref_timestamps, plot_name=f"{reference}-{name}{label}", base_dir=None, bin_width=timing_bin_width, plotting=plotting, coinc_window=window)
         except ValueError:
             print(f"{name}: no coincidences with {reference} in this stretch, not matched into events here")
             del telescopes[name]
@@ -359,11 +360,11 @@ def _match_segment(telescopes: dict, reference: str, window: float, plotting: bo
     return pd.concat(parts).sort_values(["Event", "Telescope"], ignore_index=True)
 
 
-def build_events(telescopes: dict, reference: list, window: float = 0.001, plotting: bool = False):
+def build_events(telescopes: dict, reference: list, window: float = 0.001, plotting: bool = False, timing_bin_width: float = TIMING_BIN_WIDTH):
     """
     Match one night's images across telescopes into events, run by run.
 
-    Each run is split into TIMING_BIN_WIDTH bins, and each bin's timing reference is the first
+    Each run is split into timing_bin_width bins, and each bin's timing reference is the first
     telescope in reference with images in that bin, else the first other telescope that has some
     (in the order of telescopes). So a run keeps its events when the preferred timing reference
     has data for only part of it. In each stretch of bins with the same timing reference, the other
@@ -377,6 +378,7 @@ def build_events(telescopes: dict, reference: list, window: float = 0.001, plott
         reference: list of timing reference telescopes, in order of preference
         window: coincidence window (s)
         plotting: show correct_time's before/after plots
+        timing_bin_width: bin width (s) for choosing timing references and correcting timing offsets
 
     Returns:
         DataFrame of every image in an event (telescopes' columns plus Event, numbered from 0),
@@ -391,7 +393,7 @@ def build_events(telescopes: dict, reference: list, window: float = 0.001, plott
         run_images = {name: df[df.Run == run].reset_index(drop=True) for name, df in telescopes.items() if (df.Run == run).any()}
         if len(run_images) < 2:
             continue
-        for segment_reference, start, end, images in _timing_segments(run_images, order):
+        for segment_reference, start, end, images in _timing_segments(run_images, order, timing_bin_width):
             if len(images) < 2:
                 continue
             span = f"{pd.to_datetime(start, unit='s'):%H:%M:%S}-{pd.to_datetime(end, unit='s'):%H:%M:%S} UTC"
@@ -400,7 +402,7 @@ def build_events(telescopes: dict, reference: list, window: float = 0.001, plott
             counts = ", ".join(f"{name} {len(df)}" for name, df in images.items())
             print(f"{run}, {span}: timing reference {segment_reference}{why}; {counts} images")
             label = f", run {pd.to_datetime(_run_start_epoch(Path(run)), unit='s'):%H:%M:%S}, {span}"
-            events = _match_segment(images, segment_reference, window, plotting, label)
+            events = _match_segment(images, segment_reference, window, plotting, label, timing_bin_width)
             print() # blank line between stretches
             if events is None or not len(events):
                 continue
@@ -473,6 +475,7 @@ def build_array_events(
         pointing_corrections: dict = None,
         pointing_overrides: dict = None,
         plotting: bool = False,
+        timing_bin_width: float = TIMING_BIN_WIDTH,
 ):
     """
     load_camera_frames() then build_events(). Adds a Date column holding date; x_c/y_c are relative
@@ -480,7 +483,7 @@ def build_array_events(
 
     Parameters:
         output_dir, raw_dir, rotate_postflip, rel_tel_efficiency, pointing_corrections, pointing_overrides: see load_camera_frames()
-        window, reference, plotting: see build_events()
+        window, reference, plotting, timing_bin_width: see build_events()
 
     Returns:
         events (see build_events()), {run folder name: SkyCoord} each run's pointing (see run_pointings())
@@ -490,7 +493,7 @@ def build_array_events(
         rel_tel_efficiency=rel_tel_efficiency, pointing_corrections=pointing_corrections,
         pointing_overrides=pointing_overrides,
     )
-    events = build_events(frames, reference, window=window, plotting=plotting)
+    events = build_events(frames, reference, window=window, plotting=plotting, timing_bin_width=timing_bin_width)
     if events is not None:
         events.insert(1, "Date", date)
         events.insert(2, "Run", events.pop("Run")) # every image of an event is in the same run, see build_events()

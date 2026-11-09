@@ -102,7 +102,7 @@ def time_offset(timestamps1, timestamps2, window=0.02, plotting=False):
 
     return time_coinc1, time_coinc2, dt
 
-def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bin_width=120, plotting=False, coinc_window=0.001):
+def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bin_width=60, plotting=False, coinc_window=0.001):
     """
     Determines time dependant timing offset between two telescopes my matching events within a large window
     Corrects timestamp1 with the determined offset function and returns corrected timestamp 1
@@ -143,12 +143,12 @@ def correct_time(timestamps1, timestamps2,  plot_name, base_dir, window=0.02, bi
         x_pd_corr=pd.to_datetime(x_corr[:-1], unit='s', utc=True).tz_convert('America/Los_Angeles')
         fig,ax=plt.subplots(2,1,sharex=True)
         ax[0].scatter(time_coinc_pd1,dt,marker=".")
-        ax[0].step(x_pd,dt_median,label="dt median, RMS="+str(round(rms,5))+"s",color="red")
+        ax[0].step(x_pd,dt_median,where="post",label="dt median, RMS="+str(round(rms,5))+"s",color="red")
         ax[0].set_ylabel("time offset [s]")
         ax[0].grid()
         ax[0].set_title("Before Correction")
         ax[1].scatter(time_coinc_pd1_corr,dt_corr,marker=".")
-        ax[1].step(x_pd_corr,dt_median_corr,label="dt median, RMS="+str(round(rms_corr,5))+"s",color="red")
+        ax[1].step(x_pd_corr,dt_median_corr,where="post",label="dt median, RMS="+str(round(rms_corr,5))+"s",color="red")
         ax[1].set_xlabel("Time (America/Los_Angeles)")
         ax[1].set_ylabel("time offset [s]")
         ax[1].set_title("After Correction")
@@ -303,7 +303,7 @@ def coinc_rate(coinc_timestamps,plot_name,base_dir,bin_width=240,plotting=False)
     time_rate_pd=pd.to_datetime(time_rate, unit='s', utc=True).tz_convert('America/Los_Angeles')
     if plotting:
         plt.figure()
-        plt.step(time_rate_pd,rate)
+        plt.step(time_rate_pd,rate,where="mid")
         plt.grid()
         plt.xlabel("time")
         plt.ylabel("Coincidence Rate [Hz]")
