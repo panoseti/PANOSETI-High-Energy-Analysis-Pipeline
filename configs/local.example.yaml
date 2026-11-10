@@ -12,8 +12,10 @@ processed_dir: ~/data/processed
 analysis: configs/analysis/crab.yaml
 
 # Simulation configs (see configs/simulation.example.yaml) the simulation notebooks load, by name:
-# explore_sims.ipynb and process_sims.ipynb load gamma; gamma_hadron.ipynb and data_mc.ipynb load gamma and proton.
+# explore_sims.ipynb and process_sims.ipynb load gamma; gamma_hadron.ipynb and data_mc.ipynb load gamma and proton;
+# proton_helium.ipynb loads proton and helium.
 # Each can be a production's own config or the copy it was submitted with, <output_dir>/slurm/<job>.yaml.
 simulations:
   gamma: configs/simulation/gamma_pointlike.yaml
   proton: configs/simulation/proton_diffuse.yaml
+  helium: configs/simulation/helium_diffuse.yaml

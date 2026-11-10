@@ -25,7 +25,7 @@ cp configs/local.example.yaml configs/local.yaml
 * `raw_data_dir`: holds one `<YYYYMMDD>/` folder of runs per night.
 * `processed_dir`: where processing writes. Each analysis config writes to `<processed_dir>/<its file name>/`, e.g. `<processed_dir>/crab/` for `configs/analysis/crab.yaml`.
 * `analysis`: the analysis config the `analysis_tools/` notebooks and `simulation_tools/notebooks/data_mc.ipynb` load (`heap.config.local_analysis()`), e.g. `configs/analysis/crab.yaml`.
-* `simulations`: the simulation configs the simulation notebooks load, by name (`heap.config.local_simulation()`), e.g. `gamma: configs/simulation/gamma_pointlike.yaml`: `gamma` for `process_sims.ipynb` and `explore_sims.ipynb`, `gamma` and `proton` for `gamma_hadron.ipynb` and `data_mc.ipynb`.
+* `simulations`: the simulation configs the simulation notebooks load, by name (`heap.config.local_simulation()`), e.g. `gamma: configs/simulation/gamma_pointlike.yaml`: `gamma` for `process_sims.ipynb` and `explore_sims.ipynb`, `gamma` and `proton` for `gamma_hadron.ipynb` and `data_mc.ipynb`, `proton` and `helium` for `proton_helium.ipynb`.
 
 To run a notebook on another analysis config or production for a while, set its `CONFIG` (or `GAMMA_CONFIG`, `SIM_CONFIGS`, ...) to that file's path instead.
 

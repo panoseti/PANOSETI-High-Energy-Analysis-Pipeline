@@ -8,6 +8,7 @@ CORSIKA -> sim_telarray simulations of the PANOSETI array, using the [PANOSETI s
 * `notebooks/process_sims.ipynb` - processes a production into cleaned images and Hillas parameters, with diagnostics (the simulated `analysis_tools/process_pff.ipynb`)
 * `notebooks/explore_sims.ipynb` - cuts, reconstruction and MC truth of a processed production (the simulated `analysis_tools/explore_events.ipynb`)
 * `notebooks/gamma_hadron.ipynb` - a processed gamma production against a processed proton production: Hillas parameters, mean scaled width and length, and how well cuts and a BDT separate them
+* `notebooks/proton_helium.ipynb` - a processed proton production against a processed helium production: Hillas parameters, reconstructed directions and shower cores
 * `notebooks/data_mc.ipynb` - processed data against processed productions, with the same cuts
 * [`configs/corsika.example.inp`](../configs/corsika.example.inp) - the CORSIKA input card every run's card is made from
 
@@ -251,7 +252,7 @@ Both notebooks read the production from a simulation config (`CONFIG`, by defaul
   * `N_selected` = the events in the bin that triggered (or passed the cuts).
   * `N_simulated` = all events simulated in the bin, triggered or not. The `.simtel.zst` files only hold triggered events, so it's counted from sim_telarray's histogram of every simulated event in the `.hdata.zst` files (`simulated_counts()`), summed over every run. Its energy bins are 0.05 in log10, so `energy_bins` must lie on those edges.
 
-`gamma_hadron.ipynb` and `data_mc.ipynb` compare samples: two productions (`GAMMA_CONFIG`, `PROTON_CONFIG`), or the data's analysis config (`CONFIG`, as in `analysis_tools/explore_events.ipynb`) and one simulation config per production (`SIM_CONFIGS`). The productions default to `configs/local.yaml`'s `gamma` and `proton`. Each production is read with `heap.process_simulation.load_production()`; the plotting, the mean scaled width and length and the cut efficiencies are functions in the notebooks themselves.
+`gamma_hadron.ipynb`, `proton_helium.ipynb` and `data_mc.ipynb` compare samples: two productions (`GAMMA_CONFIG`, `PROTON_CONFIG`, or `PROTON_CONFIG`, `HELIUM_CONFIG`), or the data's analysis config (`CONFIG`, as in `analysis_tools/explore_events.ipynb`) and one simulation config per production (`SIM_CONFIGS`). The productions default to `configs/local.yaml`'s `gamma`, `proton`, and `helium`. Each production is read with `heap.process_simulation.load_production()`; the plotting, the mean scaled width and length and the cut efficiencies are functions in the notebooks themselves.
 * Each shower is weighted from the production's simulated power law to `SPECTRAL_INDEX` (None = as simulated). Every histogram, profile and efficiency of a production is weighted.
 * Only parameters that don't depend on the camera's orientation are compared, since the data's cameras are fixed to the sky and the simulation's to the alt-az mount.
 * The lookup tables hold the gammas' median and sigma (84% - 16% range) of width and length per bin of size and reconstructed impact (`impact_reco`), interpolated between bins; an event's mean scaled width (`MSCW`) is the mean over its images of (width - median) / sigma, weighted by (median / sigma)^2, the same for length (`MSCL`).
