@@ -1,0 +1,15 @@
+# This file fixes bad data: processing rotates the listed SiPMs by 180 deg in the raw data of that telescope, first
+# to last night (inclusive). Only for quabos that ran the wrong firmware; listing good data would break it.
+# See analysis_tools/fix_rotated_sipm.ipynb.
+#
+# telescope:
+#   - first: "YYYYMMDD"
+#     last: "YYYYMMDD"
+#     sipm: [[row, col], ...]  # 8x8 SiPMs in the 4x4 grid of them in the (32, 32) [row, col] image
+
+Winter:
+  # quabo 2 (192.168.3.246); first and last are the first and last processed nights showing it: the
+  # January nights before and the October nights after look right
+  - first: "20260917"
+    last: "20260922"
+    sipm: [[2, 3], [3, 2]]

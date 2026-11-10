@@ -20,6 +20,7 @@ from heap.image_cleaning import threshold_clean
 from heap.make_gain_map import gain_from_pedvars
 from heap.make_pedestals import calculate_pedestal_and_pedvar
 from heap.parameterize import calc_params
+from heap.rotated_sipm import rotate_sipm
 from heap.sources import ALIASES, match_source
 
 
@@ -209,6 +210,7 @@ def resolve_gain_map(
         rate_cut: float,
         nsig: float = 5.0,
         fit_gaussian: bool = True,
+        rotated_sipm: list = None,
 ):
     """
     Determines a source's per-pixel relative gain map, trying progressively weaker fallbacks:
@@ -250,7 +252,7 @@ def resolve_gain_map(
         alt = _closest_alt_run(source, own_timestamps.mean(), groups)
         if alt is not None:
             alt_run, alt_source, alt_flip_side = alt
-            alt_data, _ = _load_runs([alt_run], module_pattern, rate_cut)
+            alt_data, _ = _load_runs([alt_run], module_pattern, rate_cut, rotated_sipm)
             if len(alt_data) > 0:
                 _, alt_pedvar = calculate_pedestal_and_pedvar(alt_data, nsig=nsig, fit_gaussian=fit_gaussian)
                 gain_map = gain_from_pedvars(own_pedvar, alt_pedvar).astype(np.float32)
@@ -590,10 +592,11 @@ def group_runs_by_source(raw_dir, telescope, fallback_map=None):
     return groups
 
 
-def _load_runs(run_dirs, module_pattern, rate_cut):
+def _load_runs(run_dirs, module_pattern, rate_cut, rotated_sipm=None):
     """Load + clean one telescope's data across a list of run folders (see
     coincidences.load_telescope_tv for the per-run read_pff -> cut_pkt_loss_old ->
-    spike_cut pipeline)."""
+    spike_cut pipeline), with the SiPMs in rotated_sipm rotated back (see
+    heap.rotated_sipm.rotate_sipm())."""
 
     if not run_dirs:
         return np.empty((0, 1024)), np.empty((0,))
@@ -604,7 +607,10 @@ def _load_runs(run_dirs, module_pattern, rate_cut):
         all_data.append(data)
         all_timestamps.append(timestamps)
 
-    return np.concatenate(all_data, axis=0), np.concatenate(all_timestamps, axis=0)
+    data = np.concatenate(all_data, axis=0)
+    if rotated_sipm:
+        data = rotate_sipm(data, rotated_sipm)
+    return data, np.concatenate(all_timestamps, axis=0)
 
 
 def process_dataset(
@@ -623,6 +629,7 @@ def process_dataset(
         image_threshold: float = 4.0,
         border_threshold: float = 2.0,
         keep_brightest_island: bool = False,
+        rotated_sipm: list = None,
 ):
     """
     Run the full pipeline for one telescope's data in a night's raw_dir.
@@ -648,6 +655,8 @@ def process_dataset(
         rate_cut: spike_cut's trigger-rate threshold (multiple of the median rate), see coincidences.load_telescope_tv
         time_window, max_gap, nsig, fit_gaussian: passed through to build_calibrations()
         x, y, image_threshold, border_threshold, keep_brightest_island: passed through to process_image()
+        rotated_sipm: [[row, col], ...] SiPMs read out rotated by 180 deg, rotated back in every
+            frame before anything else (see heap.rotated_sipm); None = none
 
     Returns:
         {source_name: (cleaned_images, params_df, raw_images, data_preflip, timestamps_preflip,
@@ -673,8 +682,8 @@ def process_dataset(
         source_slug = slugify(source, sep="_")
         source_dir = out_dir / source_slug
 
-        data_preflip, timestamps_preflip = _load_runs(runs_by_flip["preflip"], module_pattern, rate_cut)
-        data_postflip, timestamps_postflip = _load_runs(runs_by_flip["postflip"], module_pattern, rate_cut)
+        data_preflip, timestamps_preflip = _load_runs(runs_by_flip["preflip"], module_pattern, rate_cut, rotated_sipm)
+        data_postflip, timestamps_postflip = _load_runs(runs_by_flip["postflip"], module_pattern, rate_cut, rotated_sipm)
         if len(data_preflip) + len(data_postflip) == 0:
             print(f"  Skipping {source}: no usable {telescope} frames (all cut for packet loss/spikes)")
             continue
@@ -682,7 +691,7 @@ def process_dataset(
         gain_map, gain_source, gain_caption = resolve_gain_map(
             source, data_preflip, timestamps_preflip, data_postflip, timestamps_postflip,
             groups, module_pattern, out_dir, rate_cut,
-            nsig=nsig, fit_gaussian=fit_gaussian,
+            nsig=nsig, fit_gaussian=fit_gaussian, rotated_sipm=rotated_sipm,
         )
         print(f"  Gain map for {source}: {gain_caption}")
 

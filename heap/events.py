@@ -30,6 +30,7 @@ from matplotlib.patches import Ellipse
 from heap import coincidences as coinc
 from heap.parameterize import CAMERA_CMAP, CAMERA_HALF_WIDTH, TAB10_COLORS, plot_hillas_histograms
 from heap.significance import make_wcs
+from heap.rotated_sipm import rotated_sipm_for
 from heap.process_dataset import SOURCE_RUN_MAP, _mount_pointing, _run_start_epoch, gain_update_available, discover_runs, group_runs_by_source, load_fallback_map, process_dataset, slugify
 
 
@@ -56,7 +57,8 @@ def process_night(
     <output_dir>/<date>/<telescope>/<source_slug>/ for every source that night. Keeping every night
     under the same output_dir lets process_dataset() fall back to another night's gain map.
 
-    Each telescope's settings (data_product, rate_cut, and the cleaning settings) are recorded in
+    Each telescope's settings (data_product, rate_cut, the cleaning settings, and any SiPMs
+    rotated back that night, see heap.rotated_sipm.rotated_sipm_for()) are recorded in
     <output_dir>/<date>/<telescope>/processing.json; existing output made with other (or
     unrecorded) settings raises instead of being reused, unless reprocess.
 
@@ -80,6 +82,9 @@ def process_night(
             "image_threshold": image_threshold, "border_threshold": border_threshold,
             "keep_brightest_island": keep_brightest_island,
         }
+        rotated_sipm = rotated_sipm_for(name, date)
+        if rotated_sipm:
+            settings["rotated_sipm"] = rotated_sipm
         settings_path = out_dir / "processing.json"
         if not reprocess and any(out_dir.glob("*/calibrations.npz")):
             previous = json.loads(settings_path.read_text()) if settings_path.exists() else None
@@ -100,6 +105,7 @@ def process_night(
                 rate_cut=info.get("rate_cut", 3),
                 image_threshold=image_threshold, border_threshold=border_threshold,
                 keep_brightest_island=keep_brightest_island,
+                rotated_sipm=rotated_sipm,
             )
             settings_path.write_text(json.dumps(settings, indent=2))
         except Exception as e:

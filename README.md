@@ -36,8 +36,9 @@ To run a notebook on another analysis config or production for a while, set its 
     * `simulation/` - the simulation configs of each production, with their CORSIKA cards.
     * `nextday/` - the next-day pipeline's config.
     * `analysis/source_run_map.yaml` - each run's source and flip side, by run folder name, for runs the mount data can't identify (`heap.process_dataset.load_fallback_map()`). Kept by hand and shared by every analysis.
+    * `analysis/rotated_sipm.yaml` - fixes bad data: the telescopes, nights and SiPMs read out rotated by 180 deg, which processing rotates back (see pff analysis). Kept by hand and shared by every analysis.
 * `NextDay/` - the next-day quick-look pipeline.
-* `analysis_tools/` - pff processing and analysis notebooks (see pff analysis) and `pcap_to_root_analysis.ipynb`.
+* `analysis_tools/` - pff processing and analysis notebooks (see pff analysis), `fix_rotated_sipm.ipynb` and `pcap_to_root_analysis.ipynb`.
 * `example_notebooks/` - step-by-step examples of individual `heap` modules (pre-cleaning, pedestals, gain, image cleaning, coincidences, meridian flip correction).
 * `test_data/` - the data the example notebooks and `pcap_to_root_analysis.ipynb` run on.
 * `simulation_tools/` - the CORSIKA -> sim_telarray simulation pipeline (see simulation_tools below).
@@ -77,6 +78,8 @@ Processing writes, per night, telescope and source:
 Nights already in `output_dir` are not reprocessed, and processing them with different settings raises an error, so to process with other telescopes or cleaning settings, copy the config under a new name: its output goes to a new folder. Events, directions and significances are not written.
 
 Each run's pointing, shared by every telescope, is the mount positions at its start, read from each telescope's mount log (`<night>/<telescope>/mount/`, else hk.pff), since every run starts right after Ekos aligns the telescopes; later positions drift as they follow the guide corrections (`heap.events.run_pointings()`). Give runs that didn't start with an alignment (e.g. a DAQ restart), or have no mount data, a pointing in the config's `source.pointing_overrides`; runs with neither are left out (with a printout). When the mount has no usable target name, a run's source comes from `configs/analysis/source_run_map.yaml` if listed there (add runs by folder name), else by matching the pointing against the catalog in `heap/sources.py`, so add new sources there. The timing reference (`events.reference`) is only used for timing: in each 120 s of each run, the first telescope in that list with data.
+
+When a quabo runs the wrong firmware, two of its four 8x8 SiPMs are read out rotated by 180 deg, so their pixels land in the wrong places and showers break up at their edges. `configs/analysis/rotated_sipm.yaml` fixes that data: for each telescope and night range it lists, processing (`heap.events.process_night()`) rotates those SiPMs back in the raw frames before the pedestals, gain maps and cleaning (`heap.rotated_sipm`), and records them in `processing.json`: a night processed before its entry was added (or changed) raises an error until it's reprocessed, instead of its old output being reused. Nights not listed, or all nights if the file is missing, are processed as read out. `analysis_tools/fix_rotated_sipm.ipynb` draws a telescope's quabos and SiPMs to name the rotated ones, reprocesses every night whose output doesn't match the file (also to undo a fix made by mistake), and shows the images and image centroids before and after. The next-day pipeline does not apply it.
 
 To analyze a new source, copy `configs/analysis/crab.yaml`, set `source.name`, and point `configs/local.yaml`'s `analysis` at it.
 
