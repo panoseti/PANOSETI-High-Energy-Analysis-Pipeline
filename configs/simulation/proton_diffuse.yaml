@@ -17,7 +17,7 @@ paths:
   corsika_template: configs/simulation/proton_diffuse.inp
   # Where everything is written (input cards, CORSIKA files, sim_telarray files, logs,
   # SLURM scripts), see the layout in simulation_tools/run_simulation.py.
-  output_dir: ~/simulations/sim_output/proton_diffuse
+  output_dir: ~/panoseti/simulations/sim_output/proton_diffuse
   # CORSIKA files for the simtel stage (sim_telarray only), as a glob. null = this
   # production's own <output_dir>/corsika/*.corsika.zst.
   corsika_input: null
@@ -27,7 +27,7 @@ paths:
   # Where simulation_tools/notebooks/process_sims.ipynb writes the processed production (cleaned images,
   # Hillas parameters, calibrations), as <processed_dir>/<name>/<tag>/. Keep it out of output_dir,
   # which may be shared. No default: the notebooks raise while it's null.
-  processed_dir: ~/simulations/processed
+  processed_dir: ~/panoseti/simulations/processed
 
 production:
   # Prefix of every file name: <name>_run<RUNNR, 6 digits>.
@@ -69,7 +69,7 @@ sim_telarray:
     # true: trace the lens's grooves (thick lens); false: thin lens with the ideal aspheric profile.
     thick_lens: false
     # [cm] camera plane at the lens's focal length (60.78 cm at 546 nm) + focal_offset.
-    focal_offset: -0.6 # the focus scan's best focus (~/simulations/focus)
+    focal_offset: -0.6 # the focus scan's best focus (~/panoseti/simulations/focus)
   # Preprocessor macros (-D), e.g. PANOSETI_TRIGGER_PIXELS: 1
   defines: {}
   # Config parameter overrides (-C), e.g. discriminator_threshold: 5.5
