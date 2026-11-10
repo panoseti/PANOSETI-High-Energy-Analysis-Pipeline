@@ -8,6 +8,12 @@ from . import coincidences
 from . import make_pedestals
 from . import make_gain_map
 from . import process_dataset
+from . import events
+from . import reconstruction
+from . import significance
+from . import config
+from . import diagnostics
+from . import toy_events
 
 __all__ = [
     "read_pcap",
@@ -18,5 +24,11 @@ __all__ = [
     "coincidences" ,
     "make_pedestals",
     "make_gain_map",
-    "process_dataset"
+    "process_dataset",
+    "events",
+    "reconstruction",
+    "significance",
+    "config",
+    "diagnostics",
+    "toy_events"
 ]

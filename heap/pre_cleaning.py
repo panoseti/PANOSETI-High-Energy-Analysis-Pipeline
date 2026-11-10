@@ -133,11 +133,12 @@ def cut_pkt_loss_low_th(data,metadata):
     return(data_cut,timestamps_cut)
 
 
-def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False):
+def spike_cut(data,timestamps,bin_width=30,rate_cut=3,plotting=False):
     '''
     Removes spikes in trigger rate caused e.g. by planes passing through the filed of view
     bin_width: time width in s to determine the trigger rate, a plane takes ~ 10s so should be higher than that
-    rate_cut: threshold at which to cut off spikes, excepted trigger rate without mood ~ 0.5-1 Hz
+    rate_cut: threshold at which to cut off spikes, as a multiple of the median trigger rate (over the
+        bins with any triggers, so the median isn't pulled up by the spikes or down by gaps)
     plotting: plots trigger rate over time before and after cut if True
     '''
     if np.issubdtype(timestamps.dtype, np.datetime64):
@@ -145,7 +146,8 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False):
     bins = np.arange(timestamps.min(), timestamps.max() + bin_width, bin_width)
     counts, _ = np.histogram(timestamps, bins=bins)
     rate = counts / bin_width  # Hz
-    bad_bins = rate > rate_cut
+    rate_threshold = rate_cut * np.median(rate[counts > 0])
+    bad_bins = rate > rate_threshold
     bin_indices = np.digitize(timestamps, bins) - 1
     #masking bins which exceed the set cut threshold
     mask = ~bad_bins[bin_indices]
@@ -158,6 +160,8 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False):
         rate_filtered = counts / bin_width
         fig,ax=plt.subplots(2,1,sharex=True)
         ax[0].step(time,rate)
+        ax[0].axhline(rate_threshold, color="red", ls="--", lw=1, label=f"cut: {rate_cut} x median = {rate_threshold:.2f} Hz")
+        ax[0].legend()
         ax[0].set_ylabel("Trigger Rate [Hz]")
         ax[0].set_title("Before Cut")
         ax[1].step(time,rate_filtered)
@@ -167,7 +171,7 @@ def spike_cut(data,timestamps,bin_width=30,rate_cut=2,plotting=False):
         fig.tight_layout()
         plt.show()
     timestamps_pd=pd.to_datetime(timestamps, unit='s', utc=True).tz_convert('America/Los_Angeles')
-    print("Rate spikes at: ",time[rate>2])
+    print("Rate spikes at: ",time[bad_bins])
     print("Number of spike cut out events: ",len(data)-len(data_filtered)," (",round((len(data)-len(data_filtered))/len(data)*100,2),"%)")
     return(data_filtered,timestamps_filtered)
 
